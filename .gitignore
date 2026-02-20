@@ -1,0 +1,90 @@
+# ==========================================
+# Python & Django .gitignore (Ubuntu + VS Code)
+# ==========================================
+
+# 1. Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 2. Django Specifics
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+static_root/
+
+# 3. Environment Variables & Secrets
+# NEVER commit these files to version control
+.env
+.venv
+.secrets
+secrets.json
+*.runtimeconfig.json
+
+# 4. VS Code Specifics (Ubuntu/Linux)
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.history/
+
+# 5. Linux System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+# Thumbnails
+._*
+# Files that might appear in Ubuntu
+.directory
+.Trash-*
+lost+found/
+
+# 6. Text Editors & Temp Files
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+.idea/
+.project
+.pydevproject
+.settings/
+
+# 7. Testing & Coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
