@@ -4,7 +4,7 @@ from django.contrib.auth.models import AbstractUser, PermissionsMixin
 from core.models import BaseModel
 from .managers import UserManager
 
-class User(AbstractUser, PermissionsMixin, BaseModel):
+class User(AbstractUser, BaseModel):
     branch = models.ForeignKey("business.Branch", on_delete=models.SET_NULL, null=True, related_name="users")
     first_name = models.CharField(max_length=255)
     middle_name = models.CharField(max_length=255, blank=True, null=True)
@@ -29,11 +29,11 @@ class User(AbstractUser, PermissionsMixin, BaseModel):
     REQUIRED_FIELDS = ["first_name", "last_name"]
 
     def __str__(self):
-        return f"{self.user.email} - {self.role}"
+        return f"{self.email} - {self.role}"
 
 class DriverLicense(BaseModel):
     user = models.OneToOneField(
-        User,
+        'accounts.User',
         on_delete=models.CASCADE,
         related_name="driver_license",
     )
