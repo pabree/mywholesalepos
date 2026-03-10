@@ -18,5 +18,8 @@ class AuditLog(BaseModel):
     old_data = models.JSONField(encoder=DjangoJSONEncoder, null=True, blank=True)
     new_data = models.JSONField(encoder=DjangoJSONEncoder, null=True, blank=True)
     
+    class Meta:
+        db_table = 'audit_log'
+        
     def __str__(self):
         return f"{self.table_name} - {self.action}"

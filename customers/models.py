@@ -8,3 +8,5 @@ class Customers(BaseModel):
     objects = ActiveManager()
     all_objects = AllObjectsManager
 
+    class Meta:
+            db_table = 'customers'
