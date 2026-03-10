@@ -29,10 +29,15 @@ def log_pre_save(sender, instance, **kwargs):
 
 @receiver(post_save)
 def log_post_save(sender, instance, created, **kwargs):
+    # return  #  temporary line added before runnning migrations and commented after
+    
     if sender.__name__ == "AuditLog":
         return
 
     if not hasattr(instance, "_meta"):
+        return
+    
+    if kwargs.get('raw', False):
         return
 
     user = get_current_user()

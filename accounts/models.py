@@ -4,7 +4,27 @@ from django.contrib.auth.models import AbstractUser, PermissionsMixin
 from core.models import BaseModel
 from .managers import UserManager
 
-class User(AbstractUser, BaseModel):
+class User(AbstractUser):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    correlation_id = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='created_users_set'
+    )
+    updated_by = models.ForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='updated_users_set'
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
     branch = models.ForeignKey("business.Branch", on_delete=models.SET_NULL, null=True, related_name="users")
     first_name = models.CharField(max_length=255)
     middle_name = models.CharField(max_length=255, blank=True, null=True)
