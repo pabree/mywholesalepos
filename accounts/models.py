@@ -47,6 +47,9 @@ class User(AbstractUser):
     
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["first_name", "last_name"]
+    
+    class Meta:
+        db_table = 'users'
 
     def __str__(self):
         return f"{self.email} - {self.role}"
@@ -61,6 +64,9 @@ class DriverLicense(BaseModel):
     license_number = models.CharField(max_length=100, unique=True)
     issued_date = models.DateField()
     expiry_date = models.DateField()
+    
+    class Meta:
+        db_table = 'driver_licenses'
 
     def __str__(self):
         return f"{self.user.email} - {self.license_number}"
