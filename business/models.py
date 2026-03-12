@@ -13,6 +13,7 @@ class Business(BaseModel):
     
     class Meta:
         db_table = 'businesses'
+        verbose_name_plural = "businesses"
 
     def __str__(self):
         return self.business_name
@@ -24,6 +25,7 @@ class Branch(BaseModel):
     
     class Meta:
         db_table = 'branches'
+        verbose_name_plural = "branches"
     
     def __str__(self):
         return f"{self.branch_name} ({self.business.business_name})"

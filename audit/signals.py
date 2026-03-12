@@ -2,6 +2,7 @@ import json
 from django.forms.models import model_to_dict
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
+from django.db import connection
 
 from core.middleware import get_current_user
 from audit.models import AuditLog
@@ -30,6 +31,10 @@ def log_pre_save(sender, instance, **kwargs):
 @receiver(post_save)
 def log_post_save(sender, instance, created, **kwargs):
     # return  #  temporary line added before runnning migrations and commented after
+    #skip logging during migrations
+
+    if "audit log" not in connection.introspection.table_names():
+        return
     
     if sender.__name__ == "AuditLog":
         return
