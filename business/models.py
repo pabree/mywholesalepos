@@ -29,3 +29,4 @@ class Branch(BaseModel):
     
     def __str__(self):
         return f"{self.branch_name} ({self.business.business_name})"
+
