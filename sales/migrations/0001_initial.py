@@ -11,12 +11,15 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
+        ('business', '0001_initial'),
+        ('customers', '0001_initial'),
+        ('inventory', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='Business',
+            name='Sale',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('correlation_id', models.UUIDField(default=uuid.uuid4, editable=False, unique=True)),
@@ -24,21 +27,25 @@ class Migration(migrations.Migration):
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('deleted_at', models.DateTimeField(blank=True, null=True)),
                 ('is_active', models.BooleanField(default=True)),
-                ('business_name', models.CharField(max_length=50)),
-                ('email', models.EmailField(max_length=128)),
-                ('phone', models.CharField(max_length=20)),
-                ('kra_pin', models.CharField(max_length=50)),
-                ('registration_date', models.DateTimeField(auto_now_add=True)),
+                ('total_amount', models.PositiveIntegerField()),
+                ('discount', models.DecimalField(decimal_places=2, max_digits=10)),
+                ('tax', models.DecimalField(decimal_places=2, max_digits=10)),
+                ('grand_total', models.DecimalField(decimal_places=2, max_digits=10)),
+                ('amount_paid', models.DecimalField(decimal_places=2, max_digits=10)),
+                ('balance', models.DecimalField(decimal_places=2, max_digits=10)),
+                ('status', models.CharField(choices=[('pending', 'Pending'), ('held', 'Held'), ('completed', 'Completed'), ('canceled', 'Canceled')], default='pending', max_length=20)),
+                ('sale_date', models.DateTimeField(auto_now_add=True)),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='business.branch')),
                 ('created_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='created_%(class)s_set', to=settings.AUTH_USER_MODEL)),
+                ('customer', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='customers.customer')),
                 ('updated_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='updated_%(class)s_set', to=settings.AUTH_USER_MODEL)),
             ],
             options={
-                'verbose_name_plural': 'businesses',
-                'db_table': 'businesses',
+                'abstract': False,
             },
         ),
         migrations.CreateModel(
-            name='Branch',
+            name='SaleItem',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('correlation_id', models.UUIDField(default=uuid.uuid4, editable=False, unique=True)),
@@ -46,15 +53,16 @@ class Migration(migrations.Migration):
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('deleted_at', models.DateTimeField(blank=True, null=True)),
                 ('is_active', models.BooleanField(default=True)),
-                ('branch_name', models.CharField(max_length=100)),
-                ('location', models.CharField(max_length=255)),
+                ('quantity', models.PositiveIntegerField()),
+                ('unit_price', models.DecimalField(decimal_places=2, max_digits=10)),
+                ('total_price', models.DecimalField(decimal_places=2, max_digits=10)),
                 ('created_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='created_%(class)s_set', to=settings.AUTH_USER_MODEL)),
+                ('product', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='inventory.product')),
+                ('sale', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='sales.sale')),
                 ('updated_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='updated_%(class)s_set', to=settings.AUTH_USER_MODEL)),
-                ('business', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='branches', to='business.business')),
             ],
             options={
-                'verbose_name_plural': 'branches',
-                'db_table': 'branches',
+                'abstract': False,
             },
         ),
     ]

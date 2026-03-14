@@ -2,7 +2,7 @@ from core.models import BaseModel
 from core.managers import ActiveManager, AllObjectsManager
 from django.db import models
 
-class Customers(BaseModel):
+class Customer(BaseModel):
     name = models.CharField(max_length=255)
     
     objects = ActiveManager()

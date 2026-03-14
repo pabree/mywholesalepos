@@ -30,7 +30,7 @@ class Product(BaseModel):
     
 class Inventory(BaseModel):
     branch = models.ForeignKey(
-        "business.branch",
+        "business.Branch",
         on_delete=models.CASCADE
     )
 
@@ -44,33 +44,61 @@ class Inventory(BaseModel):
 
     class Meta:
         verbose_name_plural = "Inventory"
+        unique_together = ("branch", "product")
 
     def __str__(self):
         return f"{self.product}, {self.branch}"
     
 class StockMovement(BaseModel):
+
     MOVEMENT_TYPES = [
         ("purchase", "Purchase"),
         ("sale", "Sale"),
-        ("adjustent", "Adjustment"),
-        ("transfer", "Transfer"),
+        ("adjustment", "Adjustment"),
+        ("return", "Return"),
     ]
 
-    product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    branch = models.ForeignKey("business.Branch", on_delete=models.CASCADE)
+    inventory = models.ForeignKey(
+        Inventory,
+        on_delete=models.CASCADE,
+        related_name="movements",
+        null=True,
+        blank=True
+    )
+
+    product = models.ForeignKey(
+        "inventory.Product",
+        on_delete=models.CASCADE
+    )
+
+    branch = models.ForeignKey(
+        "business.Branch",
+        on_delete=models.CASCADE
+    )
+
+    sale = models.ForeignKey(
+        "sales.Sale",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
 
     movement_type = models.CharField(
         max_length=20,
-        choices = MOVEMENT_TYPES
+        choices=MOVEMENT_TYPES
     )
 
-    quantity = models.IntegerField()
+    quantity_change = models.IntegerField()
 
-    reference = models.CharField(max_length = 100, blank=True)
+    previous_quantity = models.PositiveIntegerField()
+    new_quantity = models.PositiveIntegerField()
+
+    reference = models.CharField(max_length=100, blank=True)
+
+    notes = models.TextField(blank=True, null=True)
 
     class Meta:
-        verbose_name_plural = "StockMovement"
+        verbose_name_plural = "Stock Movements"
 
     def __str__(self):
         return f"{self.product} - {self.movement_type}"
-
