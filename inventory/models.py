@@ -17,7 +17,7 @@ class Product(BaseModel):
                                  on_delete=models.CASCADE,
                                  related_name="products")
     
-    sku = models.CharField(max_length=28, unique=True)
+    sku = models.CharField(max_length=28, unique=True, db_index=True)
 
     cost_price = models.DecimalField(max_digits=10, decimal_places=2)
     selling_price = models.DecimalField(max_digits=10, decimal_places=2)

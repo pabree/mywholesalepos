@@ -60,7 +60,8 @@ class Sale(BaseModel):
 
         self.status = "completed"
         self.save()
-    
+
+# each sale product
 class SaleItem(BaseModel):
     sale = models.ForeignKey("Sale", on_delete=models.CASCADE)
     product = models.ForeignKey("inventory.Product", on_delete = models.CASCADE)
