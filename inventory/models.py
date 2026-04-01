@@ -1,4 +1,6 @@
 from django.db import models
+from django.core.exceptions import ValidationError
+from django.db.models import Q
 from core.models import BaseModel
     
 class Category(BaseModel):
@@ -21,12 +23,65 @@ class Product(BaseModel):
 
     cost_price = models.DecimalField(max_digits=10, decimal_places=2)
     selling_price = models.DecimalField(max_digits=10, decimal_places=2)
+    retail_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    wholesale_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    wholesale_threshold = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         verbose_name_plural = "Products"
 
     def __str__(self):
         return self.name
+
+
+class ProductUnit(BaseModel):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="units",
+    )
+    unit_name = models.CharField(max_length=50)
+    unit_code = models.CharField(max_length=32)
+    conversion_to_base_unit = models.PositiveIntegerField()
+    is_base_unit = models.BooleanField(default=False)
+    retail_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    wholesale_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    wholesale_threshold = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Product Unit"
+        verbose_name_plural = "Product Units"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "unit_code"],
+                name="uniq_product_unit_code",
+            ),
+            models.UniqueConstraint(
+                fields=["product"],
+                condition=Q(is_base_unit=True),
+                name="uniq_product_base_unit",
+            ),
+            models.CheckConstraint(
+                condition=Q(conversion_to_base_unit__gt=0),
+                name="product_unit_conversion_positive",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.is_base_unit and self.conversion_to_base_unit != 1:
+            raise ValidationError({"conversion_to_base_unit": "Base unit must have conversion 1."})
+        if self.conversion_to_base_unit <= 0:
+            raise ValidationError({"conversion_to_base_unit": "Conversion must be positive."})
+        if self.is_base_unit and self.product_id:
+            existing = ProductUnit.objects.filter(product_id=self.product_id, is_base_unit=True)
+            if self.pk:
+                existing = existing.exclude(pk=self.pk)
+            if existing.exists():
+                raise ValidationError({"is_base_unit": "This product already has a base unit."})
+
+    def __str__(self):
+        return f"{self.product.name} ({self.unit_code})"
     
 class Inventory(BaseModel):
     branch = models.ForeignKey(

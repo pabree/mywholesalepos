@@ -19,13 +19,15 @@ class SoftDeleteMixin:
 
         self.is_active = False
         self.deleted_at = timezone.now()
+        self._skip_audit_log = True
         self.save()
+        del self._skip_audit_log
 
         AuditLog.objects.create(
             user=user if user and user.is_authenticated else None,
             action="deleted",
             table_name=self._meta.db_table,
-            record_id=self.pk,
+            record_id=str(self.pk),
             old_data=old_data,
             new_data=None,
         )
@@ -37,13 +39,15 @@ class SoftDeleteMixin:
         
         self.is_active = True
         self.deleted_at = None
+        self._skip_audit_log = True
         self.save()
+        del self._skip_audit_log
         
         AuditLog.objects.create(
         user=user if user and user.is_authenticated else None,
         action="restored",
         table_name=self._meta.db_table,
-        record_id=self.pk,
+        record_id=str(self.pk),
         old_data=old_data,
         new_data=model_to_dict(self), 
     )

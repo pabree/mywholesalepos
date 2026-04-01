@@ -24,7 +24,6 @@ class User(AbstractUser):
     )
     updated_at = models.DateTimeField(auto_now=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
     branch = models.ForeignKey("business.Branch", on_delete=models.SET_NULL, null=True, related_name="users")
     first_name = models.CharField(max_length=255)
     middle_name = models.CharField(max_length=255, blank=True, null=True)
@@ -36,8 +35,11 @@ class User(AbstractUser):
     
     ROLE_CHOICES = (
         ("cashier", "Cashier"),
+        ("salesperson", "Salesperson"),
         ("supervisor", "Supervisor"),
-        ("deliver_person", "Delivery_person")
+        ("admin", "Admin"),
+        ("deliver_person", "Delivery_person"),
+        ("customer", "Customer"),
     )
     role = models.CharField(max_length=50,choices=ROLE_CHOICES)
     
@@ -45,8 +47,8 @@ class User(AbstractUser):
     is_active = models.BooleanField(default=True)
     objects = UserManager()
     
-    USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["first_name", "last_name"]
+    USERNAME_FIELD = "username"
+    REQUIRED_FIELDS = ["email", "first_name", "last_name", "role"]
     
     class Meta:
         db_table = 'users'

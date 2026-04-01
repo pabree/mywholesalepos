@@ -1,0 +1,157 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0b2b2c">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WholesalePOS">
+    <title>Customer Orders - WholesalePOS</title>
+    <meta name="description" content="Customer ordering and order tracking for WholesalePOS.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="manifest" href="{% static 'customer-manifest.webmanifest' %}">
+    <link rel="icon" sizes="192x192" href="{% static 'customer-icon-192.png' %}">
+    <link rel="icon" sizes="512x512" href="{% static 'customer-icon-512.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'customer-icon-192.png' %}">
+    <link rel="stylesheet" href="{% static 'customer.css' %}">
+</head>
+<body>
+    <div class="install-banner hidden" id="install-banner">
+        <div>
+            <div class="install-title" id="install-title">Install WholesalePOS</div>
+            <div class="muted small" id="install-subtitle">Add to your home screen for faster ordering.</div>
+        </div>
+        <div class="install-actions">
+            <button class="btn ghost" id="install-dismiss">Not now</button>
+            <button class="btn primary" id="install-btn">Install</button>
+        </div>
+    </div>
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark">*</span>
+            <div>
+                <div class="brand-title">WholesalePOS</div>
+                <div class="brand-subtitle">Customer Orders</div>
+            </div>
+        </div>
+        <div class="topbar-actions">
+            <div class="branch-pill" id="branch-pill">Branch: -</div>
+            <button class="btn ghost" id="logout-btn">Log out</button>
+        </div>
+    </header>
+
+    <main class="app">
+        <section class="screen" id="screen-login" data-screen>
+            <div class="card auth-card">
+                <h1>Welcome back</h1>
+                <p class="muted">Sign in to browse the catalog and manage your orders.</p>
+                <div class="account-info hidden" id="account-info">
+                    <div class="detail-card">
+                        <div>Signed in as <strong id="account-name">Customer</strong></div>
+                        <div class="muted small" id="account-role">Role: customer</div>
+                    </div>
+                    <button class="btn ghost" id="switch-account">Use different account</button>
+                </div>
+                <label class="field">
+                    <span>Username</span>
+                    <input type="text" id="login-username" autocomplete="username" placeholder="your username">
+                </label>
+                <label class="field">
+                    <span>Password</span>
+                    <input type="password" id="login-password" autocomplete="current-password" placeholder="********">
+                </label>
+                <button class="btn primary" id="login-btn">Sign in</button>
+                <div class="status" id="login-status">Not signed in</div>
+            </div>
+        </section>
+
+        <section class="screen" id="screen-catalog" data-screen>
+            <div class="toolbar">
+                <div class="toolbar-group">
+                    <label class="field compact">
+                        <span>Branch</span>
+                        <select id="branch-select"></select>
+                    </label>
+                </div>
+                <div class="toolbar-group">
+                    <div class="search">
+                        <input type="search" id="catalog-search" placeholder="Search products">
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel" id="catalog-panel">
+                <div class="loading" id="catalog-loading">Loading catalog...</div>
+                <div class="grid" id="catalog-grid"></div>
+                <div class="empty" id="catalog-empty">No products found.</div>
+            </div>
+        </section>
+
+        <section class="screen" id="screen-cart" data-screen>
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Your Cart</h2>
+                    <button class="btn ghost" id="clear-cart">Clear</button>
+                </div>
+                <div id="cart-items" class="list"></div>
+                <div id="cart-empty" class="empty">Your cart is empty.</div>
+            </div>
+
+            <div class="panel summary">
+                <div class="summary-row">
+                    <span>Estimated total</span>
+                    <strong id="cart-total">KSh 0.00</strong>
+                </div>
+                <label class="credit-request">
+                    <input type="checkbox" id="credit-request">
+                    <span>Request credit approval</span>
+                </label>
+                <div class="muted small">Final totals are confirmed by the backend at checkout.</div>
+                <button class="btn primary" id="place-order">Place Order</button>
+                <div class="status" id="cart-status"></div>
+            </div>
+        </section>
+
+        <section class="screen" id="screen-orders" data-screen>
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>My Orders</h2>
+                    <button class="btn ghost" id="refresh-orders">Refresh</button>
+                </div>
+                <div id="balance-card" class="balance hidden"></div>
+                <div id="orders-loading" class="loading hidden">Loading orders...</div>
+                <div id="orders-error" class="empty hidden"></div>
+                <div id="orders-list" class="list"></div>
+                <div id="orders-empty" class="empty">You have no orders yet.</div>
+            </div>
+        </section>
+
+        <section class="screen" id="screen-order-detail" data-screen>
+            <div class="panel">
+                <div class="panel-header">
+                    <button class="btn ghost" id="back-to-orders">Back</button>
+                    <h2>Order Detail</h2>
+                </div>
+                <div id="order-detail" class="detail"></div>
+                <div id="order-detail-empty" class="empty">Select an order to view details.</div>
+            </div>
+        </section>
+    </main>
+
+    <nav class="bottom-nav">
+        <button class="nav-btn" data-nav="catalog">Catalog</button>
+        <button class="nav-btn" data-nav="cart">Cart <span id="cart-count" class="badge">0</span></button>
+        <button class="nav-btn" data-nav="orders">Orders</button>
+        <button class="nav-btn" data-nav="account">Account</button>
+    </nav>
+
+    <div id="toast-container"></div>
+
+    <script src="{% static 'customer.js' %}"></script>
+</body>
+</html>

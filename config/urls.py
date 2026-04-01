@@ -15,10 +15,43 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.http import FileResponse, Http404
 from django.urls import path, include
+from django.views.generic import TemplateView
+from django.conf import settings
+from pathlib import Path
+from accounts.views import CustomAuthToken, CurrentUserView, AssignableUsersView
+from sales.ledger_views import FinanceExportView
+
+
+def customer_service_worker(request):
+    sw_path = Path(settings.BASE_DIR) / "frontend" / "customer-sw.js"
+    if not sw_path.exists():
+        raise Http404("Service worker not found")
+    return FileResponse(open(sw_path, "rb"), content_type="application/javascript")
+
+
+def staff_service_worker(request):
+    sw_path = Path(settings.BASE_DIR) / "frontend" / "staff-sw.js"
+    if not sw_path.exists():
+        raise Http404("Service worker not found")
+    return FileResponse(open(sw_path, "rb"), content_type="application/javascript")
 
 urlpatterns = [
+    path("", TemplateView.as_view(template_name="index.html"), name="home"),
+    path("customer/", TemplateView.as_view(template_name="customer.html"), name="customer-app"),
+    path("sw.js", staff_service_worker, name="staff-sw"),
+    path("customer/sw.js", customer_service_worker, name="customer-sw"),
     path('admin/', admin.site.urls),
+    path("api/auth/token/", CustomAuthToken.as_view(), name="api-token"),
+    path("api/auth/me/", CurrentUserView.as_view(), name="api-me"),
+    path("api/accounts/assignable/", AssignableUsersView.as_view(), name="api-assignable-users"),
+    path("api/ledger/", include("sales.ledger_urls")),
+    path("api/finance/export/", FinanceExportView.as_view(), name="finance-export"),
+    path("api/expenses/", include("expenses.urls")),
     path("api/sales/", include("sales.urls")),
+    path("api/customer/", include("sales.customer_urls")),
     path("api/inventory/", include("inventory.urls")),
+    path("api/customers/", include("customers.urls")),
+    path("api/business/", include("business.urls")),
 ]

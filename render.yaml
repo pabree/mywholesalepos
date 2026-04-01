@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: wholesale-pos
+    env: python
+    plan: starter
+    buildCommand: "bash build.sh"
+    startCommand: "gunicorn config.wsgi:application --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_HOSTS
+        value: "wholesale-pos.onrender.com"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://wholesale-pos.onrender.com"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://wholesale-pos.onrender.com"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: wholesale-pos-db
+          property: connectionString
+    autoDeploy: true
+
+databases:
+  - name: wholesale-pos-db
+    plan: starter

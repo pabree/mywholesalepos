@@ -1,0 +1,496 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>RetailPOS — Point of Sale</title>
+    <meta name="description" content="Retail Point of Sale System for managing sales, inventory, and receipts.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="manifest" href="{% static 'staff-manifest.webmanifest' %}">
+    <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
+    <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-03-31.3">
+</head>
+<body>
+    <!-- Top Bar -->
+    <header id="topbar">
+        <div class="topbar-left">
+            <div class="logo">
+                <span class="logo-icon">◆</span>
+                <span class="logo-text">Retail<span class="accent">POS</span></span>
+            </div>
+        </div>
+        <div class="topbar-center">
+            <div class="selector-group">
+                <div class="selector">
+                    <label for="branch-select">Branch</label>
+                    <select id="branch-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <div class="selector">
+                    <label for="customer-select">Customer</label>
+                    <select id="customer-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <div class="selector">
+                    <label for="sale-type-select">Sale Type</label>
+                    <select id="sale-type-select">
+                        <option value="retail">Retail</option>
+                        <option value="wholesale">Wholesale</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <button id="auth-btn" class="btn-ghost" title="Login">Login</button>
+            <button id="logout-btn" class="btn-ghost" title="Log out">Log Out</button>
+            <button id="credit-btn" class="btn-ghost" title="Credit Center">Credit</button>
+            <button id="customer-orders-btn" type="button" class="btn-ghost" title="Customer Orders">Customer Orders</button>
+            <button id="ledger-btn" type="button" class="btn-ghost" title="Financial Overview">Finance</button>
+            <button id="install-pos-btn" type="button" class="btn-ghost install-btn hidden" title="Install POS">Install App</button>
+            <div class="clock" id="clock"></div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="app">
+        <!-- LEFT: Products Panel -->
+        <section id="products-panel">
+            <div class="panel-header">
+                <h1>Products</h1>
+                <div class="search-wrapper">
+                    <span class="search-icon">⌕</span>
+                    <input type="text" id="product-search" placeholder="Search by name or SKU..." autocomplete="off">
+                </div>
+            </div>
+            <div class="category-filters" id="category-filters">
+                <button class="cat-btn active" data-category="all">All</button>
+            </div>
+            <div id="products-grid" class="products-grid">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading products...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT: Cart Panel -->
+        <section id="cart-panel">
+            <div class="panel-header">
+                <h2>Current Sale</h2>
+                <button id="clear-cart-btn" class="btn-ghost" title="Clear cart">✕ Clear</button>
+            </div>
+
+            <div id="cart-items" class="cart-items">
+                <div class="empty-cart">
+                    <span class="empty-icon">🛒</span>
+                    <p>No items yet</p>
+                    <p class="hint">Click a product to add it</p>
+                </div>
+            </div>
+
+            <div class="cart-summary">
+                <div class="summary-row">
+                    <span>Subtotal</span>
+                    <span id="subtotal">0.00</span>
+                </div>
+                <div class="summary-row">
+                    <span>Tax (16%)</span>
+                    <span id="tax-amount">0.00</span>
+                </div>
+                <div class="summary-row">
+                    <label for="discount-input">Discount</label>
+                    <input type="number" id="discount-input" value="0" min="0" step="0.01" class="summary-input">
+                </div>
+                <div class="summary-row grand-total">
+                    <span>Grand Total</span>
+                    <span id="grand-total">0.00</span>
+                </div>
+                <div class="summary-row">
+                    <label for="amount-paid-input" id="amount-paid-label">Amount Paid</label>
+                    <input type="number" id="amount-paid-input" value="0" min="0" step="0.01" class="summary-input">
+                </div>
+                <div class="summary-row change-row" id="change-row">
+                    <span>Change</span>
+                    <span id="change-amount">0.00</span>
+                </div>
+                <div class="summary-row credit-toggle-row">
+                    <label class="credit-toggle">
+                        <input type="checkbox" id="credit-toggle">
+                        <span>Credit Sale (Wholesale)</span>
+                    </label>
+                    <span class="credit-hint" id="credit-hint">Requires assigned delivery/salesperson</span>
+                </div>
+                <div id="credit-fields" class="credit-fields hidden">
+                    <div class="summary-row">
+                        <label for="assigned-to-select">Assigned To</label>
+                        <select id="assigned-to-select" class="summary-select">
+                            <option value="">Select delivery/salesperson</option>
+                        </select>
+                    </div>
+                    <div class="summary-row">
+                        <label for="due-date-input">Due Date</label>
+                        <input type="date" id="due-date-input" class="summary-input">
+                    </div>
+                    <div class="credit-note" id="due-date-note">Defaults to 3 days after completion</div>
+                    <div class="summary-row">
+                        <span>Payment Status</span>
+                        <span id="payment-status">—</span>
+                    </div>
+                    <div class="summary-row">
+                        <span>Balance Due</span>
+                        <span id="balance-due">0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cart-actions">
+                <button id="hold-sale-btn" class="btn-secondary" disabled>
+                    ⏸ Hold Sale
+                </button>
+                <button id="checkout-btn" class="btn-checkout" disabled>
+                    <span class="btn-icon">💳</span>
+                    Complete Sale
+                </button>
+            </div>
+
+            <div class="held-sales">
+                <div class="held-header">
+                    <h3>Held Sales</h3>
+                    <button id="refresh-held-btn" class="btn-ghost">Refresh</button>
+                </div>
+                <div id="held-sales-list" class="held-list">
+                    <div class="held-empty">No held sales</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Receipt Modal -->
+    <div id="receipt-modal" class="modal-overlay hidden">
+        <div class="modal-content receipt-modal">
+            <div class="receipt" id="receipt-content">
+                <!-- Populated by JS -->
+            </div>
+            <div class="modal-actions">
+                <button id="print-receipt-btn" class="btn-primary">🖨️ Print</button>
+                <button id="new-sale-btn" class="btn-secondary">+ New Sale</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="modal-overlay hidden">
+        <div class="modal-content auth-modal">
+            <div class="modal-header">
+                <h3>Login</h3>
+                <button id="auth-close-btn" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="auth-section">
+                    <label for="auth-username">Username</label>
+                    <input id="auth-username" type="text" class="modal-input" placeholder="username">
+                </div>
+                <div class="auth-section">
+                    <label for="auth-password">Password</label>
+                    <input id="auth-password" type="password" class="modal-input" placeholder="••••••••">
+                </div>
+                <button id="auth-login-btn" class="btn-primary full-width">Login</button>
+                <div id="auth-status" class="auth-status">No token saved</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Credit Center Modal -->
+    <div id="credit-modal" class="modal-overlay hidden">
+        <div class="modal-content credit-modal">
+            <div class="modal-header">
+                <h3>Credit Center</h3>
+                <button id="credit-close-btn" class="btn-ghost">✕</button>
+            </div>
+            <div class="credit-tabs">
+                <button class="credit-tab active" data-tab="payments">Record Payment</button>
+                <button class="credit-tab" data-tab="customer">Customer Credit</button>
+                <button class="credit-tab" data-tab="assigned">Delivery Accountability</button>
+            </div>
+            <div class="credit-body">
+                <section id="credit-payments-panel" class="credit-panel">
+                    <div class="credit-panel-grid">
+                        <div class="credit-panel-left">
+                            <div class="credit-section">
+                                <div class="credit-section-header">
+                                    <h4>Open Credit Sales</h4>
+                                    <button id="refresh-credit-sales" class="btn-ghost">Refresh</button>
+                                </div>
+                                <input id="credit-search" class="summary-input credit-search" placeholder="Search by customer or sale id">
+                                <div id="credit-sales-list" class="credit-sales-list">
+                                    <div class="credit-empty">No open credit sales</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="credit-panel-right">
+                            <div class="credit-section">
+                                <h4>Selected Sale</h4>
+                                <div id="credit-sale-detail" class="credit-detail">
+                                    <div class="credit-empty">Select a sale to view details</div>
+                                </div>
+                            </div>
+                            <div class="credit-section">
+                                <h4>Record Payment</h4>
+                                <div class="credit-form">
+                                    <div class="summary-row">
+                                        <label for="payment-amount">Amount</label>
+                                        <input id="payment-amount" type="number" class="summary-input" min="0" step="0.01">
+                                    </div>
+                                    <div class="credit-inline">
+                                        <button id="pay-full-btn" class="btn-secondary">Pay Full Balance</button>
+                                        <div id="payment-error" class="credit-error"></div>
+                                    </div>
+                                    <div class="summary-row">
+                                        <label for="payment-method">Method</label>
+                                        <select id="payment-method" class="summary-select">
+                                            <option value="cash">Cash</option>
+                                            <option value="mobile_money">Mobile Money</option>
+                                            <option value="card">Card</option>
+                                            <option value="bank">Bank Transfer</option>
+                                        </select>
+                                    </div>
+                                    <div class="summary-row">
+                                        <label for="payment-reference">Reference</label>
+                                        <input id="payment-reference" type="text" class="summary-input">
+                                    </div>
+                                    <div class="summary-row">
+                                        <label for="payment-note">Note</label>
+                                        <input id="payment-note" type="text" class="summary-input">
+                                    </div>
+                                    <button id="submit-payment-btn" class="btn-primary full-width">Record Payment</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="credit-customer-panel" class="credit-panel hidden">
+                    <div class="credit-section">
+                        <div class="summary-row">
+                            <label for="credit-customer-select">Customer</label>
+                            <select id="credit-customer-select" class="summary-select"></select>
+                        </div>
+                        <div id="customer-summary" class="credit-summary"></div>
+                        <div class="credit-section-header">
+                            <h4>Open Credit Sales</h4>
+                        </div>
+                        <div id="customer-credit-list" class="credit-sales-list">
+                            <div class="credit-empty">Select a customer</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="credit-assigned-panel" class="credit-panel hidden">
+                    <div class="credit-section">
+                        <div class="summary-row">
+                            <label for="credit-assigned-select">Assigned User</label>
+                            <select id="credit-assigned-select" class="summary-select"></select>
+                        </div>
+                        <div id="assigned-summary" class="credit-summary"></div>
+                        <div class="credit-section-header">
+                            <h4>Assigned Open Credit Sales</h4>
+                        </div>
+                        <div id="assigned-credit-list" class="credit-sales-list">
+                            <div class="credit-empty">Select a delivery/salesperson</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer Orders Modal -->
+    <div id="customer-orders-modal" class="modal-overlay hidden">
+        <div class="modal-content orders-modal">
+            <div class="modal-header">
+                <h3>Customer Orders</h3>
+                <div class="modal-header-actions">
+                    <button id="refresh-customer-orders" class="btn-ghost">Refresh</button>
+                    <button id="customer-orders-close-btn" class="btn-ghost">✕</button>
+                </div>
+            </div>
+            <div class="orders-toolbar">
+                <div class="order-filters" id="customer-orders-filters">
+                    <button class="order-filter active" data-status="all">All</button>
+                    <button class="order-filter" data-status="pending">Pending</button>
+                    <button class="order-filter" data-status="pending_credit_approval">Pending Credit</button>
+                    <button class="order-filter" data-status="confirmed">Confirmed</button>
+                    <button class="order-filter" data-status="processing">Processing</button>
+                    <button class="order-filter" data-status="out_for_delivery">Out for Delivery</button>
+                    <button class="order-filter" data-status="delivered">Delivered</button>
+                    <button class="order-filter" data-status="cancelled">Cancelled</button>
+                </div>
+                <input id="customer-orders-search" class="modal-input orders-search" placeholder="Search by customer or order id">
+            </div>
+            <div class="orders-grid">
+                <div class="orders-list-panel">
+                    <div id="customer-orders-loading" class="orders-loading hidden">Loading customer orders...</div>
+                    <div id="customer-orders-error" class="orders-error hidden"></div>
+                    <div id="customer-orders-list" class="orders-list"></div>
+                    <div id="customer-orders-empty" class="orders-empty">No customer orders found.</div>
+                </div>
+                <div class="orders-detail-panel">
+                    <div id="customer-order-detail" class="orders-detail-empty">Select an order to view details.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ledger Modal -->
+    <div id="ledger-modal" class="modal-overlay hidden">
+        <div class="modal-content ledger-modal">
+            <div class="modal-header">
+                <h3>Financial Overview</h3>
+                <div class="modal-header-actions">
+                    <button id="ledger-refresh-btn" class="btn-ghost">Refresh</button>
+                    <button id="ledger-close-btn" class="btn-ghost">✕</button>
+                </div>
+            </div>
+            <div class="ledger-tabs">
+                <button class="ledger-tab active" data-ledger-tab="overview">Overview</button>
+                <button class="ledger-tab" data-ledger-tab="expenses">Expenses</button>
+            </div>
+            <div id="ledger-overview-panel">
+                <div class="ledger-toolbar">
+                    <div class="ledger-filters">
+                        <div class="ledger-filter">
+                            <label for="ledger-start">Start Date</label>
+                            <input id="ledger-start" type="date" class="summary-input">
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="ledger-end">End Date</label>
+                            <input id="ledger-end" type="date" class="summary-input">
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="ledger-type">Entry Type</label>
+                            <select id="ledger-type" class="summary-select">
+                                <option value="">All types</option>
+                                <option value="sale_payment">Sale payments</option>
+                                <option value="credit_payment">Credit payments</option>
+                            </select>
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="ledger-customer">Customer</label>
+                            <select id="ledger-customer" class="summary-select">
+                                <option value="">All customers</option>
+                            </select>
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="ledger-branch">Branch</label>
+                            <select id="ledger-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="ledger-actions">
+                        <label class="ledger-export-toggle">
+                            <input type="checkbox" id="finance-export-include">
+                            Include entries
+                        </label>
+                        <button id="finance-export-btn" class="btn-secondary">Export CSV</button>
+                    </div>
+                </div>
+                <div id="ledger-summary" class="ledger-summary"></div>
+                <div class="ledger-list-panel">
+                    <div id="ledger-loading" class="orders-loading hidden">Loading ledger...</div>
+                    <div id="ledger-error" class="orders-error hidden"></div>
+                    <div id="ledger-list" class="ledger-list"></div>
+                    <div id="ledger-empty" class="orders-empty">No ledger entries found.</div>
+                </div>
+            </div>
+            <div id="ledger-expenses-panel" class="hidden">
+                <div class="ledger-toolbar">
+                    <div class="ledger-filters">
+                        <div class="ledger-filter">
+                            <label for="expense-start">Start Date</label>
+                            <input id="expense-start" type="date" class="summary-input">
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="expense-end">End Date</label>
+                            <input id="expense-end" type="date" class="summary-input">
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="expense-category-filter">Category</label>
+                            <select id="expense-category-filter" class="summary-select">
+                                <option value="">All categories</option>
+                            </select>
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="expense-branch-filter">Branch</label>
+                            <select id="expense-branch-filter" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="ledger-actions">
+                        <button id="expenses-export-btn" class="btn-secondary">Export CSV</button>
+                    </div>
+                </div>
+                <div class="expense-form">
+                    <div class="expense-form-grid">
+                        <div class="expense-field">
+                            <label for="expense-date">Date</label>
+                            <input id="expense-date" type="date" class="summary-input">
+                        </div>
+                        <div class="expense-field">
+                            <label for="expense-amount">Amount</label>
+                            <input id="expense-amount" type="number" step="0.01" min="0" class="summary-input" placeholder="0.00">
+                        </div>
+                        <div class="expense-field">
+                            <label for="expense-category">Category</label>
+                            <select id="expense-category" class="summary-select">
+                                <option value="">Select category</option>
+                            </select>
+                        </div>
+                        <div class="expense-field">
+                            <label for="expense-branch">Branch</label>
+                            <select id="expense-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                        </div>
+                        <div class="expense-field">
+                            <label for="expense-reference">Reference</label>
+                            <input id="expense-reference" type="text" class="summary-input" placeholder="Receipt #">
+                        </div>
+                        <div class="expense-field wide">
+                            <label for="expense-description">Description</label>
+                            <input id="expense-description" type="text" class="summary-input" placeholder="Optional notes">
+                        </div>
+                    </div>
+                    <div class="expense-actions">
+                        <button id="expense-save-btn" class="btn-primary">Add Expense</button>
+                        <div id="expense-form-error" class="orders-error hidden"></div>
+                    </div>
+                </div>
+                <div class="ledger-list-panel">
+                    <div id="expense-loading" class="orders-loading hidden">Loading expenses...</div>
+                    <div id="expense-error" class="orders-error hidden"></div>
+                    <div id="expense-list" class="ledger-list"></div>
+                    <div id="expense-empty" class="orders-empty">No expenses found.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <script src="{% static 'app.js' %}?v=2026-03-31.3"></script>
+</body>
+</html>

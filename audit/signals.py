@@ -1,4 +1,3 @@
-import json
 from django.forms.models import model_to_dict
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
@@ -6,6 +5,18 @@ from django.db import connection
 
 from core.middleware import get_current_user
 from audit.models import AuditLog
+
+_AUDIT_TABLE_EXISTS = None
+
+
+def _audit_table_exists():
+    global _AUDIT_TABLE_EXISTS
+    if _AUDIT_TABLE_EXISTS is None:
+        try:
+            _AUDIT_TABLE_EXISTS = AuditLog._meta.db_table in connection.introspection.table_names()
+        except Exception:
+            _AUDIT_TABLE_EXISTS = False
+    return _AUDIT_TABLE_EXISTS
 
 def serialize_instance(instance):
     data = model_to_dict(instance)
@@ -31,9 +42,8 @@ def log_pre_save(sender, instance, **kwargs):
 @receiver(post_save)
 def log_post_save(sender, instance, created, **kwargs):
     # return  #  temporary line added before runnning migrations and commented after
-    #skip logging during migrations
-
-    if "audit log" not in connection.introspection.table_names():
+    # skip logging during migrations
+    if not _audit_table_exists():
         return
     
     if sender.__name__ == "AuditLog":
@@ -45,6 +55,9 @@ def log_post_save(sender, instance, created, **kwargs):
     if kwargs.get('raw', False):
         return
 
+    if getattr(instance, "_skip_audit_log", False):
+        return
+
     user = get_current_user()
 
     action = "created" if created else "updated"
@@ -53,7 +66,7 @@ def log_post_save(sender, instance, created, **kwargs):
         user=user if user and user.is_authenticated else None,
         action=action,
         table_name=sender._meta.db_table,
-        record_id=instance.pk,
+        record_id=str(instance.pk),
         old_data=getattr(instance, "_old_data", None),
         new_data=serialize_instance(instance),
     )

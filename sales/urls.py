@@ -1,7 +1,46 @@
 from django.urls import path
-from .views import CreateSaleView, sale_receipt
+from .views import (
+    SaleCreateView,
+    SaleDetailView,
+    SaleHoldView,
+    SaleResumeView,
+    SaleCancelView,
+    SaleCompleteView,
+    HeldSalesListView,
+    SaleReceiptView,
+    SalePaymentCreateView,
+    OverdueCreditSalesView,
+    OpenCreditSalesView,
+    CreditCustomerSummaryView,
+    CreditAssignedSummaryView,
+)
+from .order_views import (
+    CustomerOrderStatusUpdateView,
+    CustomerOrderStaffListView,
+    CustomerOrderStaffDetailView,
+    CustomerOrderAssignmentUpdateView,
+    CustomerOrderCreditApproveView,
+    CustomerOrderCreditRejectView,
+)
 
 urlpatterns = [
-    path("create-sale/", CreateSaleView.as_view(), name="create-sale"),
-    path("<uuid:sale_id>/receipt/", sale_receipt, name="sale_receipt")
+    path("", SaleCreateView.as_view(), name="sale-create"),
+    path("held/", HeldSalesListView.as_view(), name="held-sales-list"),
+    path("credit/overdue/", OverdueCreditSalesView.as_view(), name="credit-sales-overdue"),
+    path("credit/open/", OpenCreditSalesView.as_view(), name="credit-sales-open"),
+    path("credit/customer/<uuid:customer_id>/summary/", CreditCustomerSummaryView.as_view(), name="credit-customer-summary"),
+    path("credit/assigned/<uuid:user_id>/summary/", CreditAssignedSummaryView.as_view(), name="credit-assigned-summary"),
+    path("customer-orders/", CustomerOrderStaffListView.as_view(), name="customer-order-staff-list"),
+    path("customer-orders/<uuid:order_id>/", CustomerOrderStaffDetailView.as_view(), name="customer-order-staff-detail"),
+    path("customer-orders/<uuid:order_id>/status/", CustomerOrderStatusUpdateView.as_view(), name="customer-order-status"),
+    path("customer-orders/<uuid:order_id>/assigned-to/", CustomerOrderAssignmentUpdateView.as_view(), name="customer-order-assign"),
+    path("customer-orders/<uuid:order_id>/credit-approve/", CustomerOrderCreditApproveView.as_view(), name="customer-order-credit-approve"),
+    path("customer-orders/<uuid:order_id>/credit-reject/", CustomerOrderCreditRejectView.as_view(), name="customer-order-credit-reject"),
+    path("<uuid:sale_id>/", SaleDetailView.as_view(), name="sale-detail"),
+    path("<uuid:sale_id>/hold/", SaleHoldView.as_view(), name="sale-hold"),
+    path("<uuid:sale_id>/resume/", SaleResumeView.as_view(), name="sale-resume"),
+    path("<uuid:sale_id>/cancel/", SaleCancelView.as_view(), name="sale-cancel"),
+    path("<uuid:sale_id>/complete/", SaleCompleteView.as_view(), name="sale-complete"),
+    path("<uuid:sale_id>/payments/", SalePaymentCreateView.as_view(), name="sale-payment-create"),
+    path("<uuid:sale_id>/receipt/", SaleReceiptView.as_view(), name="sale-receipt"),
 ]

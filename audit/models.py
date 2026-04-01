@@ -14,7 +14,7 @@ class AuditLog(BaseModel):
     
     action = models.CharField(max_length=50)
     table_name= models.CharField(max_length=255, db_index=True)
-    record_id = models.UUIDField(db_index=True)
+    record_id = models.CharField(max_length=64, db_index=True)
     old_data = models.JSONField(encoder=DjangoJSONEncoder, null=True, blank=True)
     new_data = models.JSONField(encoder=DjangoJSONEncoder, null=True, blank=True)
     
