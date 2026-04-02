@@ -83,9 +83,10 @@ class ExpenseApiTests(TestCase):
             branch=self.branch,
         )
 
-        res = self.client.get("/api/expenses/?date_from=2026-03-31&category=rent")
+        res = self.client.get("/api/expenses/?date_from=2026-03-31&category=rent&limit=1")
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data["count"], 1)
+        self.assertEqual(len(res.data["results"]), 1)
 
         export = self.client.get("/api/expenses/export/?format=csv")
         self.assertEqual(export.status_code, 200)

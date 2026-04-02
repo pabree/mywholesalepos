@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Sum, Q
 from accounts.permissions import RolePermission
 from .models import Product
+from core.pagination import StandardLimitOffsetPagination
 
 
 class ProductBySkuView(APIView):
@@ -41,8 +42,14 @@ class ProductListView(APIView):
         else:
             products = products.annotate(stock=Sum("inventory__quantity"))
 
+        products = products.order_by("name", "sku")
+
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(products, request, view=self)
+        page = page if page is not None else products
+
         data = []
-        for product in products:
+        for product in page:
             total_stock = int(product.stock or 0)
 
             data.append({
@@ -71,4 +78,6 @@ class ProductListView(APIView):
                 "stock": total_stock,
             })
 
+        if page is not products:
+            return paginator.get_paginated_response(data)
         return Response(data)

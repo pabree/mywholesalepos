@@ -1,6 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
-from django.db.models import Sum, OuterRef, Subquery, DecimalField, F, Value
+from django.db.models import Sum, OuterRef, Subquery, DecimalField, F, Value, ExpressionWrapper
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -10,8 +10,10 @@ from rest_framework.permissions import IsAuthenticated
 from django.http import HttpResponse
 from accounts.permissions import RolePermission
 from expenses.models import Expense
-from .models import LedgerEntry, Sale
+from .models import LedgerEntry, Sale, SaleItem, SaleReturnItem
+from .services import money
 from .ledger_serializers import LedgerEntrySerializer
+from core.pagination import StandardLimitOffsetPagination
 
 
 def _parse_date_param(value, label):
@@ -49,6 +51,22 @@ def _apply_sales_date_range(qs, start_date, end_date):
     return qs
 
 
+def _apply_sale_item_date_range(qs, start_date, end_date):
+    if start_date:
+        qs = qs.filter(sale__completed_at__date__gte=start_date)
+    if end_date:
+        qs = qs.filter(sale__completed_at__date__lte=end_date)
+    return qs
+
+
+def _apply_return_date_range(qs, start_date, end_date):
+    if start_date:
+        qs = qs.filter(sale_return__created_at__date__gte=start_date)
+    if end_date:
+        qs = qs.filter(sale_return__created_at__date__lte=end_date)
+    return qs
+
+
 def _apply_expense_date_range(qs, start_date, end_date):
     if start_date:
         qs = qs.filter(date__gte=start_date)
@@ -77,6 +95,43 @@ def _build_finance_summary(*, start_date=None, end_date=None, branch_id=None):
         sales_week = sales_filtered.filter(completed_at__date__gte=week_start).aggregate(total=Sum("grand_total"))["total"] or zero
         sales_month = sales_filtered.filter(completed_at__date__gte=month_start).aggregate(total=Sum("grand_total"))["total"] or zero
 
+    sale_items_base = SaleItem.objects.filter(sale__status="completed")
+    if branch_id:
+        sale_items_base = sale_items_base.filter(sale__branch_id=branch_id)
+
+    cost_today = sale_items_base.filter(sale__completed_at__date=today).aggregate(total=Sum("total_cost_snapshot"))["total"] or zero
+    cost_month = sale_items_base.filter(sale__completed_at__date__gte=month_start).aggregate(total=Sum("total_cost_snapshot"))["total"] or zero
+
+    if start_date or end_date:
+        sale_items_filtered = _apply_sale_item_date_range(sale_items_base, start_date, end_date)
+        cost_today = sale_items_filtered.filter(sale__completed_at__date=today).aggregate(total=Sum("total_cost_snapshot"))["total"] or zero
+        cost_month = sale_items_filtered.filter(sale__completed_at__date__gte=month_start).aggregate(total=Sum("total_cost_snapshot"))["total"] or zero
+
+    return_items_base = SaleReturnItem.objects.select_related("sale_item", "sale_return", "sale_item__sale")
+    if branch_id:
+        return_items_base = return_items_base.filter(sale_item__sale__branch_id=branch_id)
+
+    return_cost_expr = ExpressionWrapper(
+        F("quantity_returned") * F("sale_item__cost_price_snapshot"),
+        output_field=DecimalField(max_digits=12, decimal_places=2),
+    )
+
+    returns_today_qs = return_items_base.filter(sale_return__created_at__date=today)
+    returns_refund_today = returns_today_qs.aggregate(total=Sum("refund_amount"))["total"] or zero
+    returns_cost_today = returns_today_qs.aggregate(total=Sum(return_cost_expr))["total"] or zero
+    returns_month_qs = return_items_base.filter(sale_return__created_at__date__gte=month_start)
+    returns_refund_month = returns_month_qs.aggregate(total=Sum("refund_amount"))["total"] or zero
+    returns_cost_month = returns_month_qs.aggregate(total=Sum(return_cost_expr))["total"] or zero
+
+    if start_date or end_date:
+        return_items_filtered = _apply_return_date_range(return_items_base, start_date, end_date)
+        returns_today_qs = return_items_filtered.filter(sale_return__created_at__date=today)
+        returns_refund_today = returns_today_qs.aggregate(total=Sum("refund_amount"))["total"] or zero
+        returns_cost_today = returns_today_qs.aggregate(total=Sum(return_cost_expr))["total"] or zero
+        returns_month_qs = return_items_filtered.filter(sale_return__created_at__date__gte=month_start)
+        returns_refund_month = returns_month_qs.aggregate(total=Sum("refund_amount"))["total"] or zero
+        returns_cost_month = returns_month_qs.aggregate(total=Sum(return_cost_expr))["total"] or zero
+
     inflow_qs = LedgerEntry.objects.filter(
         direction="in",
         entry_type__in=["sale_payment", "credit_payment"],
@@ -89,6 +144,12 @@ def _build_finance_summary(*, start_date=None, end_date=None, branch_id=None):
     credit_collected_total = inflow_qs.filter(entry_type="credit_payment").aggregate(total=Sum("amount"))["total"] or zero
     collected_month = inflow_qs.filter(created_at__date__gte=month_start).aggregate(total=Sum("amount"))["total"] or zero
     credit_recovered_month = inflow_qs.filter(entry_type="credit_payment", created_at__date__gte=month_start).aggregate(total=Sum("amount"))["total"] or zero
+
+    refunds_qs = LedgerEntry.objects.filter(direction="out", entry_type="refund")
+    if branch_id:
+        refunds_qs = refunds_qs.filter(sale__branch_id=branch_id)
+    refunds_qs = _apply_date_range(refunds_qs, start_date, end_date)
+    refunds_month = refunds_qs.filter(created_at__date__gte=month_start).aggregate(total=Sum("amount"))["total"] or zero
 
     credit_base = Sale.objects.filter(is_credit_sale=True, status="completed")
     if branch_id:
@@ -131,12 +192,25 @@ def _build_finance_summary(*, start_date=None, end_date=None, branch_id=None):
     expense_base = _apply_expense_date_range(expense_base, start_date, end_date)
     expenses_today = expense_base.filter(date=today).aggregate(total=Sum("amount"))["total"] or zero
     expenses_month = expense_base.filter(date__gte=month_start).aggregate(total=Sum("amount"))["total"] or zero
-    net_position = collected_month - expenses_month
+    net_position = collected_month - refunds_month - expenses_month
+
+    gross_profit_today = money(
+        (sales_today - cost_today) - (returns_refund_today - returns_cost_today)
+    )
+    gross_profit_month = money(
+        (sales_month - cost_month) - (returns_refund_month - returns_cost_month)
+    )
+    gross_margin_percent_month = zero
+    if sales_month and sales_month > 0:
+        gross_margin_percent_month = money((gross_profit_month / sales_month) * Decimal("100"))
 
     return {
         "sales_today": sales_today,
         "sales_week": sales_week,
         "sales_month": sales_month,
+        "gross_profit_today": gross_profit_today,
+        "gross_profit_month": gross_profit_month,
+        "gross_margin_percent_month": gross_margin_percent_month,
         "collected_today": collected_today,
         "credit_collected_total": credit_collected_total,
         "collected_month": collected_month,
@@ -144,6 +218,7 @@ def _build_finance_summary(*, start_date=None, end_date=None, branch_id=None):
         "overdue_credit": overdue_credit,
         "credit_issued_month": credit_issued_month_total,
         "credit_recovered_month": credit_recovered_month,
+        "refunds_month": refunds_month,
         "expenses_today": expenses_today,
         "expenses_month": expenses_month,
         "net_position": net_position,
@@ -185,7 +260,13 @@ class LedgerEntryListView(APIView):
             qs = qs.filter(direction=direction)
 
         qs = qs.order_by("-created_at")
-        return Response(LedgerEntrySerializer(qs, many=True).data)
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+        data = LedgerEntrySerializer(page, many=True).data
+        if page is not qs:
+            return paginator.get_paginated_response(data)
+        return Response(data)
 
 
 class LedgerSummaryView(APIView):

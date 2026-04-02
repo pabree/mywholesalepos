@@ -1,4 +1,4 @@
-const CACHE_NAME = "customer-app-v2";
+const CACHE_NAME = "customer-app-v4";
 const APP_SHELL = [
     "/customer/",
     "/static/customer.css",
@@ -53,8 +53,8 @@ self.addEventListener("fetch", (event) => {
             if (cached) return cached;
             return fetch(request)
                 .then((response) => {
-                    const copy = response.clone();
-                    if (url.origin === self.location.origin) {
+                    if (shouldCacheAsset(request, url, response)) {
+                        const copy = response.clone();
                         caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
                     }
                     return response;
@@ -63,3 +63,41 @@ self.addEventListener("fetch", (event) => {
         })
     );
 });
+
+function shouldCacheAsset(request, url, response) {
+    if (url.origin !== self.location.origin) return false;
+    if (!response || !response.ok) return false;
+
+    const destination = request.destination || "";
+    if (destination === "document") return false;
+
+    const assetKind = getAssetKind(request, url, destination);
+    if (!assetKind) return false;
+
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (!contentType) return false;
+    if (contentType.includes("text/html")) return false;
+
+    if (assetKind === "style") return contentType.includes("text/css");
+    if (assetKind === "script") return contentType.includes("javascript");
+    if (assetKind === "image") return contentType.includes("image/");
+    if (assetKind === "font") return contentType.includes("font/") || contentType.includes("application/font");
+
+    return false;
+}
+
+function getAssetKind(request, url, destination) {
+    if (destination === "style" || destination === "script" || destination === "image" || destination === "font") {
+        return destination;
+    }
+
+    const path = url.pathname.toLowerCase();
+    if (path.endsWith(".css")) return "style";
+    if (path.endsWith(".js")) return "script";
+    if (path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".webp") || path.endsWith(".svg")) {
+        return "image";
+    }
+    if (path.endsWith(".woff") || path.endsWith(".woff2") || path.endsWith(".ttf")) return "font";
+
+    return "";
+}

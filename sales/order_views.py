@@ -11,6 +11,7 @@ from accounts.models import User
 from django.utils import timezone
 from .models import CustomerOrder
 from .serializers import SaleSerializer
+from core.pagination import StandardLimitOffsetPagination
 from .customer_serializers import (
     CustomerOrderStatusSerializer,
     StaffCustomerOrderListSerializer,
@@ -47,7 +48,12 @@ class CustomerOrderStaffListView(APIView):
                 | Q(sale__id__icontains=query)
             )
 
-        serializer = StaffCustomerOrderListSerializer(qs, many=True)
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+        serializer = StaffCustomerOrderListSerializer(page, many=True)
+        if page is not qs:
+            return paginator.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
 

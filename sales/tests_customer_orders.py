@@ -95,8 +95,8 @@ class CustomerOrderApiTests(TestCase):
     def test_customer_catalog(self):
         res = self.client.get(f"/api/customer/catalog/?branch={self.branch.id}")
         self.assertEqual(res.status_code, 200)
-        self.assertTrue(len(res.data) >= 1)
-        unit = res.data[0]["units"][0]
+        self.assertTrue(len(res.data["results"]) >= 1)
+        unit = res.data["results"][0]["units"][0]
         self.assertEqual(unit["display_price"], "15.00")
         self.assertEqual(unit["price_type"], "wholesale")
 
@@ -165,7 +165,8 @@ class CustomerOrderApiTests(TestCase):
 
         res = self.client.get("/api/customer/orders/")
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data["count"], 1)
+        self.assertEqual(len(res.data["results"]), 1)
 
     def test_customer_can_cancel_pending_order(self):
         res = self.client.post("/api/customer/orders/", self._order_payload(), format="json")

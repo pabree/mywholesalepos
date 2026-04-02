@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-03-31.3">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-01.1">
 </head>
 <body>
     <!-- Top Bar -->
@@ -57,6 +57,7 @@
             <button id="credit-btn" class="btn-ghost" title="Credit Center">Credit</button>
             <button id="customer-orders-btn" type="button" class="btn-ghost" title="Customer Orders">Customer Orders</button>
             <button id="ledger-btn" type="button" class="btn-ghost" title="Financial Overview">Finance</button>
+            <button id="returns-btn" type="button" class="btn-ghost" title="Returns / Refunds">Returns</button>
             <button id="install-pos-btn" type="button" class="btn-ghost install-btn hidden" title="Install POS">Install App</button>
             <div class="clock" id="clock"></div>
         </div>
@@ -171,6 +172,11 @@
                 </div>
                 <div id="held-sales-list" class="held-list">
                     <div class="held-empty">No held sales</div>
+                </div>
+                <div class="pagination-controls">
+                    <button id="held-sales-prev" class="btn-ghost" disabled>Prev</button>
+                    <span id="held-sales-page" class="pagination-meta">Page 1 of 1</span>
+                    <button id="held-sales-next" class="btn-ghost" disabled>Next</button>
                 </div>
             </div>
         </section>
@@ -344,6 +350,11 @@
                     <div id="customer-orders-error" class="orders-error hidden"></div>
                     <div id="customer-orders-list" class="orders-list"></div>
                     <div id="customer-orders-empty" class="orders-empty">No customer orders found.</div>
+                    <div class="pagination-controls">
+                        <button id="customer-orders-prev" class="btn-ghost" disabled>Prev</button>
+                        <span id="customer-orders-page" class="pagination-meta">Page 1 of 1</span>
+                        <button id="customer-orders-next" class="btn-ghost" disabled>Next</button>
+                    </div>
                 </div>
                 <div class="orders-detail-panel">
                     <div id="customer-order-detail" class="orders-detail-empty">Select an order to view details.</div>
@@ -365,6 +376,7 @@
             <div class="ledger-tabs">
                 <button class="ledger-tab active" data-ledger-tab="overview">Overview</button>
                 <button class="ledger-tab" data-ledger-tab="expenses">Expenses</button>
+                <button class="ledger-tab" data-ledger-tab="performance">Performance</button>
             </div>
             <div id="ledger-overview-panel">
                 <div class="ledger-toolbar">
@@ -412,6 +424,11 @@
                     <div id="ledger-error" class="orders-error hidden"></div>
                     <div id="ledger-list" class="ledger-list"></div>
                     <div id="ledger-empty" class="orders-empty">No ledger entries found.</div>
+                    <div class="pagination-controls">
+                        <button id="ledger-prev" class="btn-ghost" disabled>Prev</button>
+                        <span id="ledger-page" class="pagination-meta">Page 1 of 1</span>
+                        <button id="ledger-next" class="btn-ghost" disabled>Next</button>
+                    </div>
                 </div>
             </div>
             <div id="ledger-expenses-panel" class="hidden">
@@ -483,14 +500,109 @@
                     <div id="expense-error" class="orders-error hidden"></div>
                     <div id="expense-list" class="ledger-list"></div>
                     <div id="expense-empty" class="orders-empty">No expenses found.</div>
+                    <div class="pagination-controls">
+                        <button id="expense-prev" class="btn-ghost" disabled>Prev</button>
+                        <span id="expense-page" class="pagination-meta">Page 1 of 1</span>
+                        <button id="expense-next" class="btn-ghost" disabled>Next</button>
+                    </div>
                 </div>
             </div>
+            <div id="ledger-performance-panel" class="hidden">
+                <div class="ledger-toolbar">
+                    <div class="ledger-filters">
+                        <div class="ledger-filter">
+                            <label for="performance-start">Start Date</label>
+                            <input id="performance-start" type="date" class="summary-input">
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="performance-end">End Date</label>
+                            <input id="performance-end" type="date" class="summary-input">
+                        </div>
+                        <div class="ledger-filter">
+                            <label for="performance-branch">Branch</label>
+                            <select id="performance-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                        </div>
+                        <div class="ledger-filter" id="performance-user-filter">
+                            <label for="performance-user">User</label>
+                            <select id="performance-user" class="summary-select">
+                                <option value="">All users</option>
+                            </select>
+                        </div>
+                        <div class="ledger-filter hidden" id="performance-route-filter">
+                            <label for="performance-route">Route</label>
+                            <select id="performance-route" class="summary-select">
+                                <option value="">All routes</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="ledger-actions">
+                        <button id="performance-export-btn" class="btn-secondary">Export CSV</button>
+                    </div>
+                </div>
+                <div class="perf-tabs">
+                    <button class="perf-tab active" data-perf-tab="cashiers">Cashiers</button>
+                    <button class="perf-tab" data-perf-tab="salespeople">Salespeople</button>
+                    <button class="perf-tab" data-perf-tab="delivery">Delivery</button>
+                    <button class="perf-tab" data-perf-tab="routes">Routes</button>
+                </div>
+                <div id="performance-loading" class="orders-loading hidden">Loading performance...</div>
+                <div id="performance-error" class="orders-error hidden"></div>
+                <div id="performance-cashiers-panel" class="perf-panel">
+                    <div id="performance-cashiers-summary" class="perf-summary"></div>
+                    <div id="performance-cashiers-list" class="perf-list"></div>
+                    <div id="performance-cashiers-empty" class="orders-empty hidden">No cashier data found.</div>
+                </div>
+                <div id="performance-salespeople-panel" class="perf-panel hidden">
+                    <div id="performance-salespeople-summary" class="perf-summary"></div>
+                    <div id="performance-salespeople-list" class="perf-list"></div>
+                    <div id="performance-salespeople-empty" class="orders-empty hidden">No salesperson data found.</div>
+                </div>
+                <div id="performance-delivery-panel" class="perf-panel hidden">
+                    <div id="performance-delivery-summary" class="perf-summary"></div>
+                    <div id="performance-delivery-list" class="perf-list"></div>
+                    <div id="performance-delivery-empty" class="orders-empty hidden">No delivery data found.</div>
+                </div>
+                <div id="performance-routes-panel" class="perf-panel hidden">
+                    <div id="performance-routes-summary" class="perf-summary"></div>
+                    <div id="performance-routes-list" class="perf-list"></div>
+                    <div id="performance-routes-empty" class="orders-empty hidden">No route data found.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Returns Modal -->
+    <div id="returns-modal" class="modal-overlay hidden">
+        <div class="modal-content returns-modal">
+            <div class="modal-header">
+                <h3>Return / Refund</h3>
+                <div class="modal-header-actions">
+                    <button id="returns-close-btn" class="btn-ghost">✕</button>
+                </div>
+            </div>
+            <div class="returns-toolbar">
+                <div class="returns-field">
+                    <label for="returns-sale-id">Sale ID</label>
+                    <input id="returns-sale-id" class="summary-input" placeholder="Paste sale ID">
+                </div>
+                <button id="returns-load-btn" class="btn-secondary">Load Sale</button>
+            </div>
+            <div id="returns-sale-meta" class="returns-meta hidden"></div>
+            <div id="returns-items" class="returns-items"></div>
+            <div class="returns-actions">
+                <button id="returns-calc-btn" class="btn-ghost">Calculate Refund</button>
+                <button id="returns-submit-btn" class="btn-primary">Confirm Return</button>
+                <div id="returns-total" class="returns-total">Refund Total: —</div>
+            </div>
+            <div id="returns-error" class="orders-error hidden"></div>
         </div>
     </div>
 
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-03-31.3"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-01.1"></script>
 </body>
 </html>

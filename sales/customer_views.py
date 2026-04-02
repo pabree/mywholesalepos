@@ -16,6 +16,7 @@ from .customer_serializers import (
     CustomerOrderCreateSerializer,
     CustomerOrderSerializer,
 )
+from core.pagination import StandardLimitOffsetPagination
 
 
 def _get_customer_or_denied(user):
@@ -65,9 +66,14 @@ class CustomerCatalogView(APIView):
         else:
             products = products.annotate(stock=Sum("inventory__quantity"))
 
+        products = products.order_by("name", "sku")
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(products, request, view=self)
+        page = page if page is not None else products
+
         sale_type = "wholesale"
         data = []
-        for product in products:
+        for product in page:
             total_stock = int(product.stock or 0)
             units = []
             for unit in product.units.filter(is_active=True):
@@ -114,6 +120,8 @@ class CustomerCatalogView(APIView):
                 }
             )
 
+        if page is not products:
+            return paginator.get_paginated_response(data)
         return Response(data)
 
 
@@ -129,11 +137,16 @@ class CustomerOrderListCreateView(APIView):
             .filter(sale__customer=customer)
             .order_by("-created_at")
         )
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(orders, request, view=self)
+        page = page if page is not None else orders
         serializer = CustomerOrderSerializer(
-            orders,
+            page,
             many=True,
             context={"can_view_balance": customer.can_view_balance},
         )
+        if page is not orders:
+            return paginator.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
     def post(self, request):

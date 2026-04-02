@@ -13,6 +13,7 @@ from .views import (
     OpenCreditSalesView,
     CreditCustomerSummaryView,
     CreditAssignedSummaryView,
+    SaleReturnListCreateView,
 )
 from .order_views import (
     CustomerOrderStatusUpdateView,
@@ -43,4 +44,5 @@ urlpatterns = [
     path("<uuid:sale_id>/complete/", SaleCompleteView.as_view(), name="sale-complete"),
     path("<uuid:sale_id>/payments/", SalePaymentCreateView.as_view(), name="sale-payment-create"),
     path("<uuid:sale_id>/receipt/", SaleReceiptView.as_view(), name="sale-receipt"),
+    path("<uuid:sale_id>/returns/", SaleReturnListCreateView.as_view(), name="sale-returns"),
 ]

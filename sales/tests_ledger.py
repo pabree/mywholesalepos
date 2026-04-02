@@ -263,9 +263,17 @@ class LedgerEntryTests(TestCase):
         expected_credit_issued = credit_sale.grand_total - Decimal("5.00")
         expected_expenses_month = Decimal("2.00")
         expected_net_position = expected_collected_today - expected_expenses_month
+        expected_gross_profit = (
+            (sale.grand_total - Decimal("20.00"))
+            + (credit_sale.grand_total - Decimal("20.00"))
+        )
+        expected_gross_margin = (expected_gross_profit / expected_sales_today * Decimal("100")).quantize(Decimal("0.01"))
         self.assertEqual(Decimal(str(summary.data["sales_today"])), expected_sales_today)
         self.assertEqual(Decimal(str(summary.data["sales_week"])), expected_sales_today)
         self.assertEqual(Decimal(str(summary.data["sales_month"])), expected_sales_today)
+        self.assertEqual(Decimal(str(summary.data["gross_profit_today"])), expected_gross_profit)
+        self.assertEqual(Decimal(str(summary.data["gross_profit_month"])), expected_gross_profit)
+        self.assertEqual(Decimal(str(summary.data["gross_margin_percent_month"])), expected_gross_margin)
         self.assertEqual(Decimal(str(summary.data["collected_today"])), expected_collected_today)
         self.assertEqual(Decimal(str(summary.data["collected_month"])), expected_collected_today)
         self.assertEqual(Decimal(str(summary.data["credit_collected_total"])), Decimal("8.00"))

@@ -25,9 +25,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get("SECRET_KEY", "unsafe-dev-secret")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes", "on")
-
+_debug_env = os.environ.get("DEBUG")
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if _debug_env is None:
+    DEBUG = not bool(RENDER_EXTERNAL_HOSTNAME)
+else:
+    DEBUG = _debug_env.lower() in ("1", "true", "yes", "on")
 
 _default_hosts = "127.0.0.1,localhost"
 ALLOWED_HOSTS = [

@@ -21,6 +21,7 @@ class ProductUnitInline(BaseTabularInline):
         "unit_code",
         "conversion_to_base_unit",
         "is_base_unit",
+        "cost_price",
         "retail_price",
         "wholesale_price",
         "wholesale_threshold",
@@ -49,7 +50,17 @@ class ProductAdmin(BaseModelAdmin):
 @admin.register(ProductUnit)
 class ProductUnitAdmin(BaseModelAdmin):
     form = ProductUnitForm
-    list_display = ("product", "unit_code", "conversion_to_base_unit", "is_base_unit", "retail_price", "wholesale_price", "wholesale_threshold", "is_active")
+    list_display = (
+        "product",
+        "unit_code",
+        "conversion_to_base_unit",
+        "is_base_unit",
+        "cost_price",
+        "retail_price",
+        "wholesale_price",
+        "wholesale_threshold",
+        "is_active",
+    )
     list_filter = ("is_base_unit", "is_active")
     search_fields = ("product__name", "unit_code", "unit_name")
 

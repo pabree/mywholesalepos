@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-03-31.3";
+const APP_BUILD = "2026-04-01.1";
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
 const customerOrdersLog = (...args) => {
@@ -43,8 +43,41 @@ let staffInstallPrompt = null;
 let ledgerEntries = [];
 let ledgerSummary = null;
 let ledgerFailed = false;
+let performanceData = {
+    cashiers: [],
+    salespeople: [],
+    delivery: [],
+    routes: [],
+};
+let performanceActiveTab = "cashiers";
+let performanceUserSelections = {
+    cashiers: "",
+    salespeople: "",
+    delivery: "",
+};
+let performanceUsersCache = new Map();
+let performanceRoutesCache = {
+    branch: null,
+    items: [],
+};
 let expensesList = [];
 let expensesFailed = false;
+let returnSale = null;
+let returnItems = [];
+let heldSalesOffset = 0;
+let customerOrdersOffset = 0;
+let ledgerOffset = 0;
+let expensesOffset = 0;
+let heldSalesPage = { count: 0, next: null, previous: null, results: [] };
+let customerOrdersPage = { count: 0, next: null, previous: null, results: [] };
+let ledgerPage = { count: 0, next: null, previous: null, results: [] };
+let expensesPage = { count: 0, next: null, previous: null, results: [] };
+
+const HELD_SALES_LIMIT = 20;
+const CUSTOMER_ORDERS_LIMIT = 20;
+const LEDGER_LIMIT = 20;
+const EXPENSES_LIMIT = 20;
+const BULK_FETCH_LIMIT = 100;
 
 const EXPENSE_CATEGORIES = [
     { value: "transport", label: "Transport" },
@@ -95,6 +128,7 @@ const els = {
     creditBtn:       document.getElementById("credit-btn"),
     customerOrdersBtn: document.getElementById("customer-orders-btn"),
     ledgerBtn:       document.getElementById("ledger-btn"),
+    returnsBtn:      document.getElementById("returns-btn"),
     installPosBtn:   document.getElementById("install-pos-btn"),
     authModal:       document.getElementById("auth-modal"),
     authCloseBtn:    document.getElementById("auth-close-btn"),
@@ -104,6 +138,9 @@ const els = {
     authStatus:      document.getElementById("auth-status"),
     heldSalesList:   document.getElementById("held-sales-list"),
     refreshHeldBtn:  document.getElementById("refresh-held-btn"),
+    heldSalesPrev:   document.getElementById("held-sales-prev"),
+    heldSalesNext:   document.getElementById("held-sales-next"),
+    heldSalesPage:   document.getElementById("held-sales-page"),
     creditModal:     document.getElementById("credit-modal"),
     creditCloseBtn:  document.getElementById("credit-close-btn"),
     creditTabs:      document.querySelectorAll(".credit-tab"),
@@ -137,6 +174,9 @@ const els = {
     customerOrdersError: document.getElementById("customer-orders-error"),
     customerOrdersEmpty: document.getElementById("customer-orders-empty"),
     customerOrderDetail: document.getElementById("customer-order-detail"),
+    customerOrdersPrev: document.getElementById("customer-orders-prev"),
+    customerOrdersNext: document.getElementById("customer-orders-next"),
+    customerOrdersPage: document.getElementById("customer-orders-page"),
     ledgerModal: document.getElementById("ledger-modal"),
     ledgerCloseBtn: document.getElementById("ledger-close-btn"),
     ledgerRefreshBtn: document.getElementById("ledger-refresh-btn"),
@@ -152,9 +192,40 @@ const els = {
     ledgerLoading: document.getElementById("ledger-loading"),
     ledgerError: document.getElementById("ledger-error"),
     ledgerEmpty: document.getElementById("ledger-empty"),
+    ledgerPrev: document.getElementById("ledger-prev"),
+    ledgerNext: document.getElementById("ledger-next"),
+    ledgerPage: document.getElementById("ledger-page"),
     ledgerTabs: document.querySelectorAll(".ledger-tab"),
     ledgerOverviewPanel: document.getElementById("ledger-overview-panel"),
     ledgerExpensesPanel: document.getElementById("ledger-expenses-panel"),
+    ledgerPerformancePanel: document.getElementById("ledger-performance-panel"),
+    performanceStart: document.getElementById("performance-start"),
+    performanceEnd: document.getElementById("performance-end"),
+    performanceBranch: document.getElementById("performance-branch"),
+    performanceUser: document.getElementById("performance-user"),
+    performanceUserFilter: document.getElementById("performance-user-filter"),
+    performanceRouteFilter: document.getElementById("performance-route-filter"),
+    performanceRoute: document.getElementById("performance-route"),
+    performanceExportBtn: document.getElementById("performance-export-btn"),
+    performanceTabs: document.querySelectorAll(".perf-tab"),
+    performanceLoading: document.getElementById("performance-loading"),
+    performanceError: document.getElementById("performance-error"),
+    performanceCashiersPanel: document.getElementById("performance-cashiers-panel"),
+    performanceSalesPanel: document.getElementById("performance-salespeople-panel"),
+    performanceDeliveryPanel: document.getElementById("performance-delivery-panel"),
+    performanceRoutesPanel: document.getElementById("performance-routes-panel"),
+    performanceCashiersList: document.getElementById("performance-cashiers-list"),
+    performanceSalesList: document.getElementById("performance-salespeople-list"),
+    performanceDeliveryList: document.getElementById("performance-delivery-list"),
+    performanceRoutesList: document.getElementById("performance-routes-list"),
+    performanceCashiersEmpty: document.getElementById("performance-cashiers-empty"),
+    performanceSalesEmpty: document.getElementById("performance-salespeople-empty"),
+    performanceDeliveryEmpty: document.getElementById("performance-delivery-empty"),
+    performanceRoutesEmpty: document.getElementById("performance-routes-empty"),
+    performanceCashiersSummary: document.getElementById("performance-cashiers-summary"),
+    performanceSalesSummary: document.getElementById("performance-salespeople-summary"),
+    performanceDeliverySummary: document.getElementById("performance-delivery-summary"),
+    performanceRoutesSummary: document.getElementById("performance-routes-summary"),
     expenseStart: document.getElementById("expense-start"),
     expenseEnd: document.getElementById("expense-end"),
     expenseCategoryFilter: document.getElementById("expense-category-filter"),
@@ -172,6 +243,19 @@ const els = {
     expenseError: document.getElementById("expense-error"),
     expenseList: document.getElementById("expense-list"),
     expenseEmpty: document.getElementById("expense-empty"),
+    expensePrev: document.getElementById("expense-prev"),
+    expenseNext: document.getElementById("expense-next"),
+    expensePage: document.getElementById("expense-page"),
+    returnsModal: document.getElementById("returns-modal"),
+    returnsCloseBtn: document.getElementById("returns-close-btn"),
+    returnsSaleId: document.getElementById("returns-sale-id"),
+    returnsLoadBtn: document.getElementById("returns-load-btn"),
+    returnsSaleMeta: document.getElementById("returns-sale-meta"),
+    returnsItems: document.getElementById("returns-items"),
+    returnsCalcBtn: document.getElementById("returns-calc-btn"),
+    returnsSubmitBtn: document.getElementById("returns-submit-btn"),
+    returnsTotal: document.getElementById("returns-total"),
+    returnsError: document.getElementById("returns-error"),
 };
 
 customerOrdersLog("[customer-orders] button element", { found: Boolean(els.customerOrdersBtn) });
@@ -276,15 +360,38 @@ document.addEventListener("DOMContentLoaded", () => {
     els.authBtn.addEventListener("click", openAuthModal);
     els.logoutBtn.addEventListener("click", logout);
     if (els.creditBtn) els.creditBtn.addEventListener("click", openCreditModal);
+    if (els.returnsBtn) els.returnsBtn.addEventListener("click", openReturnsModal);
     // customer orders button handled by global delegated listener
     if (els.creditCloseBtn) els.creditCloseBtn.addEventListener("click", closeCreditModal);
+    if (els.returnsCloseBtn) els.returnsCloseBtn.addEventListener("click", closeReturnsModal);
+    if (els.returnsLoadBtn) els.returnsLoadBtn.addEventListener("click", loadReturnableSale);
+    if (els.returnsCalcBtn) els.returnsCalcBtn.addEventListener("click", () => submitReturn(true));
+    if (els.returnsSubmitBtn) els.returnsSubmitBtn.addEventListener("click", () => submitReturn(false));
     if (els.ledgerCloseBtn) els.ledgerCloseBtn.addEventListener("click", closeLedgerModal);
-    if (els.ledgerRefreshBtn) els.ledgerRefreshBtn.addEventListener("click", loadLedger);
-    if (els.ledgerStart) els.ledgerStart.addEventListener("change", loadLedger);
-    if (els.ledgerEnd) els.ledgerEnd.addEventListener("change", loadLedger);
-    if (els.ledgerType) els.ledgerType.addEventListener("change", loadLedger);
-    if (els.ledgerCustomer) els.ledgerCustomer.addEventListener("change", loadLedger);
-    if (els.ledgerBranch) els.ledgerBranch.addEventListener("change", loadLedger);
+    if (els.ledgerRefreshBtn) els.ledgerRefreshBtn.addEventListener("click", () => {
+        ledgerOffset = 0;
+        loadLedger();
+    });
+    if (els.ledgerStart) els.ledgerStart.addEventListener("change", () => {
+        ledgerOffset = 0;
+        loadLedger();
+    });
+    if (els.ledgerEnd) els.ledgerEnd.addEventListener("change", () => {
+        ledgerOffset = 0;
+        loadLedger();
+    });
+    if (els.ledgerType) els.ledgerType.addEventListener("change", () => {
+        ledgerOffset = 0;
+        loadLedger();
+    });
+    if (els.ledgerCustomer) els.ledgerCustomer.addEventListener("change", () => {
+        ledgerOffset = 0;
+        loadLedger();
+    });
+    if (els.ledgerBranch) els.ledgerBranch.addEventListener("change", () => {
+        ledgerOffset = 0;
+        loadLedger();
+    });
     if (els.financeExportBtn) els.financeExportBtn.addEventListener("click", exportFinanceCsv);
     if (els.ledgerTabs) {
         els.ledgerTabs.forEach(tab => {
@@ -293,10 +400,44 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         });
     }
-    if (els.expenseStart) els.expenseStart.addEventListener("change", loadExpenses);
-    if (els.expenseEnd) els.expenseEnd.addEventListener("change", loadExpenses);
-    if (els.expenseCategoryFilter) els.expenseCategoryFilter.addEventListener("change", loadExpenses);
-    if (els.expenseBranchFilter) els.expenseBranchFilter.addEventListener("change", loadExpenses);
+    if (els.performanceStart) els.performanceStart.addEventListener("change", loadPerformance);
+    if (els.performanceEnd) els.performanceEnd.addEventListener("change", loadPerformance);
+    if (els.performanceBranch) els.performanceBranch.addEventListener("change", () => {
+        performanceUsersCache.clear();
+        performanceRoutesCache = { branch: null, items: [] };
+        loadPerformanceUsers();
+        loadRoutes();
+        loadPerformance();
+    });
+    if (els.performanceUser) els.performanceUser.addEventListener("change", () => {
+        performanceUserSelections[performanceActiveTab] = els.performanceUser.value || "";
+        loadPerformance();
+    });
+    if (els.performanceRoute) els.performanceRoute.addEventListener("change", loadPerformance);
+    if (els.performanceExportBtn) els.performanceExportBtn.addEventListener("click", exportPerformanceCsv);
+    if (els.performanceTabs) {
+        els.performanceTabs.forEach(tab => {
+            tab.addEventListener("click", () => {
+                setPerformanceTab(tab.dataset.perfTab);
+            });
+        });
+    }
+    if (els.expenseStart) els.expenseStart.addEventListener("change", () => {
+        expensesOffset = 0;
+        loadExpenses();
+    });
+    if (els.expenseEnd) els.expenseEnd.addEventListener("change", () => {
+        expensesOffset = 0;
+        loadExpenses();
+    });
+    if (els.expenseCategoryFilter) els.expenseCategoryFilter.addEventListener("change", () => {
+        expensesOffset = 0;
+        loadExpenses();
+    });
+    if (els.expenseBranchFilter) els.expenseBranchFilter.addEventListener("change", () => {
+        expensesOffset = 0;
+        loadExpenses();
+    });
     if (els.expenseSaveBtn) els.expenseSaveBtn.addEventListener("click", createExpense);
     if (els.expensesExportBtn) els.expensesExportBtn.addEventListener("click", exportExpensesCsv);
     if (els.customerOrdersCloseBtn) els.customerOrdersCloseBtn.addEventListener("click", closeCustomerOrdersModal);
@@ -304,11 +445,15 @@ document.addEventListener("DOMContentLoaded", () => {
         els.creditTabs.forEach(tab => tab.addEventListener("click", () => setCreditTab(tab.dataset.tab)));
     }
     if (els.refreshCreditSales) els.refreshCreditSales.addEventListener("click", loadCreditSales);
-    if (els.refreshCustomerOrders) els.refreshCustomerOrders.addEventListener("click", loadCustomerOrders);
+    if (els.refreshCustomerOrders) els.refreshCustomerOrders.addEventListener("click", () => {
+        customerOrdersOffset = 0;
+        loadCustomerOrders();
+    });
     if (els.creditSearch) els.creditSearch.addEventListener("input", renderCreditSales);
     if (els.customerOrdersSearch) {
         els.customerOrdersSearch.addEventListener("input", () => {
             customerOrdersQuery = els.customerOrdersSearch.value || "";
+            customerOrdersOffset = 0;
             loadCustomerOrders();
         });
     }
@@ -324,7 +469,66 @@ document.addEventListener("DOMContentLoaded", () => {
     if (els.creditAssignedSelect) els.creditAssignedSelect.addEventListener("change", loadAssignedCredit);
     els.authCloseBtn.addEventListener("click", closeAuthModal);
     els.authLoginBtn.addEventListener("click", loginForToken);
-    els.refreshHeldBtn.addEventListener("click", loadHeldSales);
+    els.refreshHeldBtn.addEventListener("click", () => {
+        heldSalesOffset = 0;
+        loadHeldSales();
+    });
+    if (els.heldSalesPrev) {
+        els.heldSalesPrev.addEventListener("click", () => {
+            if (heldSalesOffset <= 0) return;
+            heldSalesOffset = Math.max(0, heldSalesOffset - HELD_SALES_LIMIT);
+            loadHeldSales();
+        });
+    }
+    if (els.heldSalesNext) {
+        els.heldSalesNext.addEventListener("click", () => {
+            if (heldSalesOffset + HELD_SALES_LIMIT >= heldSalesPage.count) return;
+            heldSalesOffset += HELD_SALES_LIMIT;
+            loadHeldSales();
+        });
+    }
+    if (els.customerOrdersPrev) {
+        els.customerOrdersPrev.addEventListener("click", () => {
+            if (customerOrdersOffset <= 0) return;
+            customerOrdersOffset = Math.max(0, customerOrdersOffset - CUSTOMER_ORDERS_LIMIT);
+            loadCustomerOrders();
+        });
+    }
+    if (els.customerOrdersNext) {
+        els.customerOrdersNext.addEventListener("click", () => {
+            if (customerOrdersOffset + CUSTOMER_ORDERS_LIMIT >= customerOrdersPage.count) return;
+            customerOrdersOffset += CUSTOMER_ORDERS_LIMIT;
+            loadCustomerOrders();
+        });
+    }
+    if (els.ledgerPrev) {
+        els.ledgerPrev.addEventListener("click", () => {
+            if (ledgerOffset <= 0) return;
+            ledgerOffset = Math.max(0, ledgerOffset - LEDGER_LIMIT);
+            loadLedger();
+        });
+    }
+    if (els.ledgerNext) {
+        els.ledgerNext.addEventListener("click", () => {
+            if (ledgerOffset + LEDGER_LIMIT >= ledgerPage.count) return;
+            ledgerOffset += LEDGER_LIMIT;
+            loadLedger();
+        });
+    }
+    if (els.expensePrev) {
+        els.expensePrev.addEventListener("click", () => {
+            if (expensesOffset <= 0) return;
+            expensesOffset = Math.max(0, expensesOffset - EXPENSES_LIMIT);
+            loadExpenses();
+        });
+    }
+    if (els.expenseNext) {
+        els.expenseNext.addEventListener("click", () => {
+            if (expensesOffset + EXPENSES_LIMIT >= expensesPage.count) return;
+            expensesOffset += EXPENSES_LIMIT;
+            loadExpenses();
+        });
+    }
     updateAuthStatus();
     applyRoleUI();
     handleCreditToggle(true);
@@ -397,6 +601,95 @@ async function apiFetch(endpoint) {
     }
 }
 
+function normalizePaginated(data) {
+    if (!data) {
+        return { count: 0, next: null, previous: null, results: [] };
+    }
+    if (Array.isArray(data)) {
+        return { count: data.length, next: null, previous: null, results: data };
+    }
+    if (Array.isArray(data.results)) {
+        const count = Number.isFinite(data.count) ? data.count : data.results.length;
+        return {
+            count,
+            next: data.next || null,
+            previous: data.previous || null,
+            results: data.results,
+        };
+    }
+    return { count: 0, next: null, previous: null, results: [] };
+}
+
+function ensureArray(value, label = "list") {
+    if (Array.isArray(value)) return value;
+    if (value && Array.isArray(value.results)) return value.results;
+    if (value !== null && value !== undefined) {
+        console.warn(`[ensureArray] Unexpected ${label} shape`, value);
+    }
+    return [];
+}
+
+function withParams(endpoint, paramsObj) {
+    const [path, query = ""] = endpoint.split("?");
+    const params = new URLSearchParams(query);
+    Object.entries(paramsObj || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === "") return;
+        params.set(key, value);
+    });
+    const qs = params.toString();
+    return qs ? `${path}?${qs}` : path;
+}
+
+function normalizeApiEndpoint(urlOrEndpoint) {
+    if (!urlOrEndpoint) return "";
+    try {
+        const url = new URL(urlOrEndpoint, window.location.origin);
+        let path = `${url.pathname}${url.search}`;
+        if (path.startsWith(`${API_BASE}/`)) {
+            path = path.slice(API_BASE.length);
+        }
+        return path;
+    } catch (err) {
+        return urlOrEndpoint;
+    }
+}
+
+async function apiFetchAll(endpoint, { limit = BULK_FETCH_LIMIT } = {}) {
+    let results = [];
+    let nextEndpoint = withParams(endpoint, { limit, offset: 0 });
+    while (nextEndpoint) {
+        const data = await apiFetch(nextEndpoint);
+        if (!data) return [];
+        if (Array.isArray(data)) return data;
+        const page = normalizePaginated(data);
+        const pageResults = ensureArray(page, "paginated_results");
+        results = results.concat(pageResults);
+        if (page.next) {
+            nextEndpoint = normalizeApiEndpoint(page.next);
+            continue;
+        }
+        if (pageResults.length === 0 || results.length >= page.count) break;
+        nextEndpoint = withParams(endpoint, { limit, offset: results.length });
+    }
+    return ensureArray(results, "apiFetchAll_results");
+}
+
+function updatePager({ prevEl, nextEl, pageEl, offset, limit, pageData }) {
+    if (!prevEl && !nextEl && !pageEl) return;
+    const count = pageData?.count || 0;
+    const totalPages = count ? Math.ceil(count / limit) : 1;
+    const currentPage = count ? Math.floor(offset / limit) + 1 : 1;
+    if (pageEl) {
+        pageEl.textContent = `Page ${currentPage} of ${totalPages}`;
+    }
+    if (prevEl) {
+        prevEl.disabled = offset <= 0;
+    }
+    if (nextEl) {
+        nextEl.disabled = offset + limit >= count;
+    }
+}
+
 async function loadBranches() {
     branches = await apiFetch("/business/branches/") || [];
     els.branchSelect.innerHTML = branches.length
@@ -407,7 +700,7 @@ async function loadBranches() {
 }
 
 async function loadCustomers() {
-    customers = await apiFetch("/customers/") || [];
+    customers = ensureArray(await apiFetchAll("/customers/"), "customers");
     els.customerSelect.innerHTML = customers.length
         ? customers.map(c => `<option value="${c.id}">${c.name}</option>`).join("")
         : `<option value="">No customers found</option>`;
@@ -431,6 +724,11 @@ function renderExpenseBranchOptions() {
         const options = [`<option value="">All branches</option>`]
             .concat(branches.map(b => `<option value="${b.id}">${esc(b.name)}</option>`));
         els.expenseBranch.innerHTML = options.join("");
+    }
+    if (els.performanceBranch) {
+        const options = [`<option value="">All branches</option>`]
+            .concat(branches.map(b => `<option value="${b.id}">${esc(b.name)}</option>`));
+        els.performanceBranch.innerHTML = options.join("");
     }
 }
 
@@ -473,14 +771,16 @@ async function loadProducts() {
             <p>Loading products...</p>
         </div>`;
 
-    allProducts = await apiFetch("/inventory/products/") || [];
+    const products = await apiFetchAll("/inventory/products/");
+    allProducts = ensureArray(products, "allProducts");
     buildCategoryFilters();
     renderProducts();
 }
 
 // ——— Categories ———
 function buildCategoryFilters() {
-    const categories = [...new Set(allProducts.map(p => p.category).filter(Boolean))];
+    const products = ensureArray(allProducts, "allProducts");
+    const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
     activeCategory = "all";
     els.categoryFilters.innerHTML = `
         <button class="cat-btn active" data-category="all">All</button>
@@ -498,8 +798,9 @@ function buildCategoryFilters() {
 
 // ——— Render Products ———
 function renderProducts() {
+    const products = ensureArray(allProducts, "allProducts");
     const query = els.productSearch.value.toLowerCase().trim();
-    let filtered = allProducts;
+    let filtered = products;
 
     if (activeCategory !== "all") {
         filtered = filtered.filter(p => p.category === activeCategory);
@@ -532,7 +833,7 @@ function renderProducts() {
 
 // ——— Cart ———
 function addToCart(productId) {
-    const product = allProducts.find(p => p.id === productId);
+    const product = ensureArray(allProducts, "allProducts").find(p => p.id === productId);
     if (!product) return;
     const baseUnit = getBaseUnit(product);
     if (!baseUnit) {
@@ -1373,6 +1674,7 @@ function openCustomerOrdersModal() {
     if (!els.customerOrdersModal) return;
     els.customerOrdersModal.classList.remove("hidden");
     customerOrdersLog("[customer-orders] modal opened");
+    customerOrdersOffset = 0;
     loadCustomerOrders();
     ensureAssignableUsers();
 }
@@ -1390,6 +1692,7 @@ async function ensureAssignableUsers() {
 
 function setCustomerOrdersFilter(status) {
     customerOrdersFilter = status || "all";
+    customerOrdersOffset = 0;
     if (els.customerOrdersFilters) {
         els.customerOrdersFilters.querySelectorAll(".order-filter").forEach(btn => {
             btn.classList.toggle("active", btn.dataset.status === customerOrdersFilter);
@@ -1412,20 +1715,33 @@ async function loadCustomerOrders() {
     if (customerOrdersQuery) {
         params.set("q", customerOrdersQuery);
     }
+    params.set("limit", CUSTOMER_ORDERS_LIMIT);
+    params.set("offset", customerOrdersOffset);
 
     const endpoint = `/sales/customer-orders/${params.toString() ? `?${params}` : ""}`;
     customerOrdersLog("[customer-orders] fetch", endpoint);
     const data = await apiFetch(endpoint);
-    customerOrdersLog("[customer-orders] response", Array.isArray(data) ? data.length : data);
+    const page = normalizePaginated(data);
+    customerOrdersLog("[customer-orders] response", Array.isArray(page.results) ? page.results.length : page);
     if (!data) {
         customerOrdersFailed = true;
         customerOrders = [];
+        customerOrdersPage = { count: 0, next: null, previous: null, results: [] };
         els.customerOrdersError.textContent = "Unable to load customer orders. Please try again.";
         els.customerOrdersError.classList.remove("hidden");
     } else {
-        customerOrders = data;
+        customerOrders = page.results;
+        customerOrdersPage = page;
     }
     els.customerOrdersLoading.classList.add("hidden");
+    updatePager({
+        prevEl: els.customerOrdersPrev,
+        nextEl: els.customerOrdersNext,
+        pageEl: els.customerOrdersPage,
+        offset: customerOrdersOffset,
+        limit: CUSTOMER_ORDERS_LIMIT,
+        pageData: customerOrdersPage,
+    });
     renderCustomerOrders();
 }
 
@@ -1875,12 +2191,19 @@ function setLedgerTab(tab) {
     if (els.ledgerExpensesPanel) {
         els.ledgerExpensesPanel.classList.toggle("hidden", activeTab !== "expenses");
     }
+    if (els.ledgerPerformancePanel) {
+        els.ledgerPerformancePanel.classList.toggle("hidden", activeTab !== "performance");
+    }
     if (activeTab === "expenses") {
+        expensesOffset = 0;
         loadExpenses();
+    }
+    if (activeTab === "performance") {
+        setPerformanceTab(performanceActiveTab);
     }
 }
 
-function buildLedgerParams() {
+function buildLedgerParams({ includePagination = false } = {}) {
     const params = new URLSearchParams();
     const start = els.ledgerStart?.value;
     const end = els.ledgerEnd?.value;
@@ -1893,9 +2216,11 @@ function buildLedgerParams() {
     if (entryType) params.set("entry_type", entryType);
     if (customerId) params.set("customer", customerId);
     if (branchId) params.set("branch", branchId);
-
-    const qs = params.toString();
-    return qs ? `?${qs}` : "";
+    if (includePagination) {
+        params.set("limit", LEDGER_LIMIT);
+        params.set("offset", ledgerOffset);
+    }
+    return params;
 }
 
 function openLedgerModal() {
@@ -1917,6 +2242,7 @@ function openLedgerModal() {
     }
     setLedgerTab("overview");
     els.ledgerModal.classList.remove("hidden");
+    ledgerOffset = 0;
     loadLedger();
 }
 
@@ -1932,21 +2258,27 @@ async function loadLedger() {
     if (els.ledgerError) els.ledgerError.classList.add("hidden");
     if (els.ledgerEmpty) els.ledgerEmpty.classList.add("hidden");
 
-    const params = buildLedgerParams();
+    const params = buildLedgerParams({ includePagination: true });
+    const summaryParams = buildLedgerParams();
+    const qs = params.toString();
+    const summaryQs = summaryParams.toString();
     const [entries, summary] = await Promise.all([
-        apiFetch(`/ledger/${params}`),
-        apiFetch(`/ledger/summary/${params}`),
+        apiFetch(`/ledger/${qs ? `?${qs}` : ""}`),
+        apiFetch(`/ledger/summary/${summaryQs ? `?${summaryQs}` : ""}`),
     ]);
 
+    const page = normalizePaginated(entries);
     if (!entries) {
         ledgerFailed = true;
         ledgerEntries = [];
+        ledgerPage = { count: 0, next: null, previous: null, results: [] };
         if (els.ledgerError) {
             els.ledgerError.textContent = "Unable to load ledger entries. Please try again.";
             els.ledgerError.classList.remove("hidden");
         }
     } else {
-        ledgerEntries = entries;
+        ledgerEntries = page.results;
+        ledgerPage = page;
     }
 
     ledgerSummary = summary || null;
@@ -1954,10 +2286,464 @@ async function loadLedger() {
     if (els.ledgerLoading) els.ledgerLoading.classList.add("hidden");
     renderLedgerSummary();
     renderLedgerEntries();
+    updatePager({
+        prevEl: els.ledgerPrev,
+        nextEl: els.ledgerNext,
+        pageEl: els.ledgerPage,
+        offset: ledgerOffset,
+        limit: LEDGER_LIMIT,
+        pageData: ledgerPage,
+    });
+}
+
+function setPerformanceTab(tab) {
+    const activeTab = tab || "cashiers";
+    performanceActiveTab = activeTab;
+    if (els.performanceTabs) {
+        els.performanceTabs.forEach(btn => {
+            btn.classList.toggle("active", btn.dataset.perfTab === activeTab);
+        });
+    }
+    if (els.performanceCashiersPanel) {
+        els.performanceCashiersPanel.classList.toggle("hidden", activeTab !== "cashiers");
+    }
+    if (els.performanceSalesPanel) {
+        els.performanceSalesPanel.classList.toggle("hidden", activeTab !== "salespeople");
+    }
+    if (els.performanceDeliveryPanel) {
+        els.performanceDeliveryPanel.classList.toggle("hidden", activeTab !== "delivery");
+    }
+    if (els.performanceRoutesPanel) {
+        els.performanceRoutesPanel.classList.toggle("hidden", activeTab !== "routes");
+    }
+    if (els.performanceRouteFilter) {
+        els.performanceRouteFilter.classList.toggle("hidden", activeTab !== "routes");
+    }
+    if (els.performanceUserFilter) {
+        els.performanceUserFilter.classList.toggle("hidden", activeTab === "routes");
+    }
+    loadPerformanceUsers();
+    loadRoutes();
+    loadPerformance();
+}
+
+function buildPerformanceParams() {
+    const params = new URLSearchParams();
+    const start = els.performanceStart?.value;
+    const end = els.performanceEnd?.value;
+    const branchId = els.performanceBranch?.value;
+    const userId = els.performanceUser?.value;
+    const routeId = els.performanceRoute?.value;
+    if (start) params.set("date_from", start);
+    if (end) params.set("date_to", end);
+    if (branchId) params.set("branch", branchId);
+    if (performanceActiveTab !== "routes" && userId) params.set("user_id", userId);
+    if (performanceActiveTab === "routes" && routeId) params.set("route_id", routeId);
+    return params.toString();
+}
+
+async function loadPerformanceUsers() {
+    if (!els.performanceUser) return;
+    if (performanceActiveTab === "routes") {
+        return;
+    }
+    const roleMap = {
+        cashiers: "cashier",
+        salespeople: "salesperson",
+        delivery: "deliver_person",
+    };
+    const role = roleMap[performanceActiveTab];
+    if (!role) return;
+    const branchId = els.performanceBranch?.value || "";
+    const cacheKey = `${role}:${branchId}`;
+    if (performanceUsersCache.has(cacheKey)) {
+        renderPerformanceUserOptions(performanceUsersCache.get(cacheKey), role);
+        return;
+    }
+    const qs = new URLSearchParams();
+    qs.set("role", role);
+    if (branchId) qs.set("branch", branchId);
+    const data = await apiFetch(`/finance/performance/users/?${qs.toString()}`);
+    if (!data) return;
+    performanceUsersCache.set(cacheKey, data);
+    renderPerformanceUserOptions(data, role);
+}
+
+function renderPerformanceUserOptions(users, role) {
+    if (!els.performanceUser) return;
+    const options = [`<option value="">All users</option>`]
+        .concat((users || []).map(u => `<option value="${u.id}">${esc(u.full_name || u.username)}</option>`));
+    els.performanceUser.innerHTML = options.join("");
+    const selected = performanceUserSelections[performanceActiveTab] || "";
+    if (selected) {
+        els.performanceUser.value = selected;
+    }
+}
+
+async function loadRoutes() {
+    if (!els.performanceRoute || performanceActiveTab !== "routes") return;
+    const branchId = els.performanceBranch?.value || "";
+    if (performanceRoutesCache.branch === branchId && performanceRoutesCache.items.length) {
+        renderRouteOptions(performanceRoutesCache.items);
+        return;
+    }
+    const qs = new URLSearchParams();
+    if (branchId) qs.set("branch", branchId);
+    const data = await apiFetch(`/routes/${qs.toString() ? `?${qs.toString()}` : ""}`);
+    if (!data) return;
+    performanceRoutesCache = { branch: branchId, items: data };
+    renderRouteOptions(data);
+}
+
+function renderRouteOptions(routes) {
+    if (!els.performanceRoute) return;
+    const options = [`<option value="">All routes</option>`]
+        .concat((routes || []).map(r => `<option value="${r.id}">${esc(r.name)}</option>`));
+    els.performanceRoute.innerHTML = options.join("");
+}
+
+async function loadPerformance() {
+    if (!els.performanceLoading) return;
+    if (els.performanceError) els.performanceError.classList.add("hidden");
+    els.performanceLoading.classList.remove("hidden");
+
+    const params = buildPerformanceParams();
+    const endpointMap = {
+        cashiers: "/finance/performance/cashiers/",
+        salespeople: "/finance/performance/salespeople/",
+        delivery: "/finance/performance/delivery/",
+        routes: "/finance/performance/routes/",
+    };
+    const endpoint = endpointMap[performanceActiveTab] || endpointMap.cashiers;
+    const url = params ? `${endpoint}?${params}` : endpoint;
+
+    const data = await apiFetch(url);
+    if (!data || !data.results) {
+        if (els.performanceError) {
+            els.performanceError.textContent = "Unable to load performance report. Please try again.";
+            els.performanceError.classList.remove("hidden");
+        }
+        els.performanceLoading.classList.add("hidden");
+        return;
+    }
+    performanceData[performanceActiveTab] = data.results || [];
+    renderPerformance();
+    els.performanceLoading.classList.add("hidden");
+}
+
+function renderPerformance() {
+    if (performanceActiveTab === "cashiers") {
+        renderCashierPerformance();
+    } else if (performanceActiveTab === "salespeople") {
+        renderSalespersonPerformance();
+    } else if (performanceActiveTab === "delivery") {
+        renderDeliveryPerformance();
+    } else {
+        renderRoutePerformance();
+    }
+}
+
+function renderCashierPerformance() {
+    const data = performanceData.cashiers || [];
+    renderCashierSummary(data);
+    if (els.performanceCashiersList) {
+        if (!data.length) {
+            els.performanceCashiersList.innerHTML = "";
+            if (els.performanceCashiersEmpty) els.performanceCashiersEmpty.classList.remove("hidden");
+            return;
+        }
+        if (els.performanceCashiersEmpty) els.performanceCashiersEmpty.classList.add("hidden");
+        els.performanceCashiersList.innerHTML = `
+            <table class="perf-table">
+                <thead>
+                    <tr>
+                        <th>Cashier</th>
+                        <th>Sales Count</th>
+                        <th>Sales Total</th>
+                        <th>Collections</th>
+                        <th>Refund Count</th>
+                        <th>Refund Total</th>
+                        <th>Avg Sale</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.map(row => `
+                        <tr>
+                            <td>${esc(row.user_name || "—")}</td>
+                            <td>${row.sales_count_processed || 0}</td>
+                            <td>${fmtPrice(row.sales_total_processed || 0)}</td>
+                            <td>${fmtPrice(row.collections_processed || 0)}</td>
+                            <td>${row.refunds_processed_count || 0}</td>
+                            <td>${fmtPrice(row.refunds_total || 0)}</td>
+                            <td>${fmtPrice(row.average_sale_value || 0)}</td>
+                        </tr>
+                    `).join("")}
+                </tbody>
+            </table>
+        `;
+    }
+}
+
+function renderSalespersonPerformance() {
+    const data = performanceData.salespeople || [];
+    renderSalespersonSummary(data);
+    if (els.performanceSalesList) {
+        if (!data.length) {
+            els.performanceSalesList.innerHTML = "";
+            if (els.performanceSalesEmpty) els.performanceSalesEmpty.classList.remove("hidden");
+            return;
+        }
+        if (els.performanceSalesEmpty) els.performanceSalesEmpty.classList.add("hidden");
+        els.performanceSalesList.innerHTML = `
+            <table class="perf-table">
+                <thead>
+                    <tr>
+                        <th>Salesperson</th>
+                        <th>Sales Count</th>
+                        <th>Sales Total</th>
+                        <th>Gross Profit</th>
+                        <th>Margin %</th>
+                        <th>Credit Issued</th>
+                        <th>Credit Recovered</th>
+                        <th>Outstanding</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.map(row => `
+                        <tr>
+                            <td>${esc(row.user_name || "—")}</td>
+                            <td>${row.sales_count_assigned || 0}</td>
+                            <td>${fmtPrice(row.sales_total_assigned || 0)}</td>
+                            <td>${fmtPrice(row.gross_profit_generated || 0)}</td>
+                            <td>${fmtPercent(row.gross_margin_percent || 0)}</td>
+                            <td>${fmtPrice(row.credit_issued || 0)}</td>
+                            <td>${fmtPrice(row.credit_recovered || 0)}</td>
+                            <td>${fmtPrice(row.outstanding_credit || 0)}</td>
+                        </tr>
+                    `).join("")}
+                </tbody>
+            </table>
+        `;
+    }
+}
+
+function renderDeliveryPerformance() {
+    const data = performanceData.delivery || [];
+    renderDeliverySummary(data);
+    if (els.performanceDeliveryList) {
+        if (!data.length) {
+            els.performanceDeliveryList.innerHTML = "";
+            if (els.performanceDeliveryEmpty) els.performanceDeliveryEmpty.classList.remove("hidden");
+            return;
+        }
+        if (els.performanceDeliveryEmpty) els.performanceDeliveryEmpty.classList.add("hidden");
+        els.performanceDeliveryList.innerHTML = `
+            <table class="perf-table">
+                <thead>
+                    <tr>
+                        <th>Delivery Person</th>
+                        <th>Assigned Orders</th>
+                        <th>Delivered Orders</th>
+                        <th>Assigned Sales</th>
+                        <th>Collections</th>
+                        <th>Outstanding</th>
+                        <th>Overdue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.map(row => `
+                        <tr>
+                            <td>${esc(row.user_name || "—")}</td>
+                            <td>${row.assigned_orders_count || 0}</td>
+                            <td>${row.delivered_orders_count || 0}</td>
+                            <td>${fmtPrice(row.assigned_sales_total || 0)}</td>
+                            <td>${fmtPrice(row.collections_processed || 0)}</td>
+                            <td>${fmtPrice(row.outstanding_credit || 0)}</td>
+                            <td>${fmtPrice(row.overdue_credit || 0)}</td>
+                        </tr>
+                    `).join("")}
+                </tbody>
+            </table>
+        `;
+    }
+}
+
+function renderRoutePerformance() {
+    const data = performanceData.routes || [];
+    renderRouteSummary(data);
+    if (els.performanceRoutesList) {
+        if (!data.length) {
+            els.performanceRoutesList.innerHTML = "";
+            if (els.performanceRoutesEmpty) els.performanceRoutesEmpty.classList.remove("hidden");
+            return;
+        }
+        if (els.performanceRoutesEmpty) els.performanceRoutesEmpty.classList.add("hidden");
+        els.performanceRoutesList.innerHTML = `
+            <table class="perf-table">
+                <thead>
+                    <tr>
+                        <th>Route</th>
+                        <th>Customers</th>
+                        <th>Sales Count</th>
+                        <th>Sales Total</th>
+                        <th>Collections</th>
+                        <th>Outstanding</th>
+                        <th>Overdue</th>
+                        <th>Delivered</th>
+                        <th>Avg Sale</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.map(row => `
+                        <tr>
+                            <td>${esc(row.route_name || "—")}</td>
+                            <td>${row.customers_count || 0}</td>
+                            <td>${row.sales_count || 0}</td>
+                            <td>${fmtPrice(row.sales_total || 0)}</td>
+                            <td>${fmtPrice(row.collections_total || 0)}</td>
+                            <td>${fmtPrice(row.outstanding_credit || 0)}</td>
+                            <td>${fmtPrice(row.overdue_credit || 0)}</td>
+                            <td>${row.delivered_orders_count || 0}</td>
+                            <td>${fmtPrice(row.average_sale_value || 0)}</td>
+                        </tr>
+                    `).join("")}
+                </tbody>
+            </table>
+        `;
+    }
+}
+
+function renderCashierSummary(data) {
+    if (!els.performanceCashiersSummary) return;
+    const totals = data.reduce(
+        (acc, row) => {
+            acc.sales += Number(row.sales_total_processed || 0);
+            acc.collections += Number(row.collections_processed || 0);
+            acc.refunds += Number(row.refunds_total || 0);
+            return acc;
+        },
+        { sales: 0, collections: 0, refunds: 0 }
+    );
+    els.performanceCashiersSummary.innerHTML = `
+        <div class="ledger-summary-grid">
+            <div class="ledger-summary-card">
+                <span>Total Sales Processed</span>
+                <strong>${fmtPrice(totals.sales)}</strong>
+            </div>
+            <div class="ledger-summary-card">
+                <span>Total Collections</span>
+                <strong>${fmtPrice(totals.collections)}</strong>
+            </div>
+            <div class="ledger-summary-card">
+                <span>Total Refunds</span>
+                <strong>${fmtPrice(totals.refunds)}</strong>
+            </div>
+        </div>
+    `;
+}
+
+function renderSalespersonSummary(data) {
+    if (!els.performanceSalesSummary) return;
+    const totals = data.reduce(
+        (acc, row) => {
+            acc.sales += Number(row.sales_total_assigned || 0);
+            acc.grossProfit += Number(row.gross_profit_generated || 0);
+            acc.outstanding += Number(row.outstanding_credit || 0);
+            return acc;
+        },
+        { sales: 0, grossProfit: 0, outstanding: 0 }
+    );
+    els.performanceSalesSummary.innerHTML = `
+        <div class="ledger-summary-grid">
+            <div class="ledger-summary-card">
+                <span>Total Sales</span>
+                <strong>${fmtPrice(totals.sales)}</strong>
+            </div>
+            <div class="ledger-summary-card">
+                <span>Total Gross Profit</span>
+                <strong>${fmtPrice(totals.grossProfit)}</strong>
+            </div>
+            <div class="ledger-summary-card">
+                <span>Total Outstanding Credit</span>
+                <strong>${fmtPrice(totals.outstanding)}</strong>
+            </div>
+        </div>
+    `;
+}
+
+function renderDeliverySummary(data) {
+    if (!els.performanceDeliverySummary) return;
+    const totals = data.reduce(
+        (acc, row) => {
+            acc.assigned += Number(row.assigned_orders_count || 0);
+            acc.delivered += Number(row.delivered_orders_count || 0);
+            acc.collections += Number(row.collections_processed || 0);
+            return acc;
+        },
+        { assigned: 0, delivered: 0, collections: 0 }
+    );
+    els.performanceDeliverySummary.innerHTML = `
+        <div class="ledger-summary-grid">
+            <div class="ledger-summary-card">
+                <span>Total Assigned Orders</span>
+                <strong>${totals.assigned}</strong>
+            </div>
+            <div class="ledger-summary-card">
+                <span>Total Delivered Orders</span>
+                <strong>${totals.delivered}</strong>
+            </div>
+            <div class="ledger-summary-card">
+                <span>Total Collections</span>
+                <strong>${fmtPrice(totals.collections)}</strong>
+            </div>
+        </div>
+    `;
+}
+
+function renderRouteSummary(data) {
+    if (!els.performanceRoutesSummary) return;
+    const totals = data.reduce(
+        (acc, row) => {
+            acc.sales += Number(row.sales_total || 0);
+            acc.collections += Number(row.collections_total || 0);
+            acc.outstanding += Number(row.outstanding_credit || 0);
+            return acc;
+        },
+        { sales: 0, collections: 0, outstanding: 0 }
+    );
+    els.performanceRoutesSummary.innerHTML = `
+        <div class="ledger-summary-grid">
+            <div class="ledger-summary-card">
+                <span>Total Sales</span>
+                <strong>${fmtPrice(totals.sales)}</strong>
+            </div>
+            <div class="ledger-summary-card">
+                <span>Total Collections</span>
+                <strong>${fmtPrice(totals.collections)}</strong>
+            </div>
+            <div class="ledger-summary-card">
+                <span>Total Outstanding Credit</span>
+                <strong>${fmtPrice(totals.outstanding)}</strong>
+            </div>
+        </div>
+    `;
+}
+
+async function exportPerformanceCsv() {
+    const params = buildPerformanceParams();
+    const endpointMap = {
+        cashiers: "/finance/performance/cashiers/export/",
+        salespeople: "/finance/performance/salespeople/export/",
+        delivery: "/finance/performance/delivery/export/",
+        routes: "/finance/performance/routes/export/",
+    };
+    const endpoint = endpointMap[performanceActiveTab] || endpointMap.cashiers;
+    const url = params ? `${endpoint}?${params}` : endpoint;
+    await downloadCsv(url, `performance_${performanceActiveTab}.csv`);
 }
 
 async function exportFinanceCsv() {
-    const params = new URLSearchParams(buildLedgerParams().replace("?", ""));
+    const params = buildLedgerParams();
     if (els.financeExportInclude?.checked) {
         params.set("include_entries", "1");
     }
@@ -1967,7 +2753,8 @@ async function exportFinanceCsv() {
 
 async function exportExpensesCsv() {
     const params = buildExpenseParams();
-    await downloadCsv(`/expenses/export/${params}`, "expenses_export.csv");
+    const qs = params.toString();
+    await downloadCsv(`/expenses/export/${qs ? `?${qs}` : ""}`, "expenses_export.csv");
 }
 
 async function downloadCsv(endpoint, filename) {
@@ -1999,7 +2786,7 @@ async function downloadCsv(endpoint, filename) {
     }
 }
 
-function buildExpenseParams() {
+function buildExpenseParams({ includePagination = false } = {}) {
     const params = new URLSearchParams();
     const start = els.expenseStart?.value;
     const end = els.expenseEnd?.value;
@@ -2009,8 +2796,11 @@ function buildExpenseParams() {
     if (end) params.set("date_to", end);
     if (category) params.set("category", category);
     if (branchId) params.set("branch", branchId);
-    const qs = params.toString();
-    return qs ? `?${qs}` : "";
+    if (includePagination) {
+        params.set("limit", EXPENSES_LIMIT);
+        params.set("offset", expensesOffset);
+    }
+    return params;
 }
 
 async function loadExpenses() {
@@ -2020,20 +2810,32 @@ async function loadExpenses() {
     if (els.expenseError) els.expenseError.classList.add("hidden");
     if (els.expenseEmpty) els.expenseEmpty.classList.add("hidden");
 
-    const params = buildExpenseParams();
-    const data = await apiFetch(`/expenses/${params}`);
+    const params = buildExpenseParams({ includePagination: true });
+    const qs = params.toString();
+    const data = await apiFetch(`/expenses/${qs ? `?${qs}` : ""}`);
+    const page = normalizePaginated(data);
     if (!data) {
         expensesFailed = true;
         expensesList = [];
+        expensesPage = { count: 0, next: null, previous: null, results: [] };
         if (els.expenseError) {
             els.expenseError.textContent = "Unable to load expenses. Please try again.";
             els.expenseError.classList.remove("hidden");
         }
     } else {
-        expensesList = data;
+        expensesList = page.results;
+        expensesPage = page;
     }
     if (els.expenseLoading) els.expenseLoading.classList.add("hidden");
     renderExpenses();
+    updatePager({
+        prevEl: els.expensePrev,
+        nextEl: els.expenseNext,
+        pageEl: els.expensePage,
+        offset: expensesOffset,
+        limit: EXPENSES_LIMIT,
+        pageData: expensesPage,
+    });
 }
 
 function renderExpenses() {
@@ -2101,12 +2903,158 @@ async function createExpense() {
         if (els.expenseCategory) els.expenseCategory.value = "";
         if (els.expenseDescription) els.expenseDescription.value = "";
         if (els.expenseReference) els.expenseReference.value = "";
+        expensesOffset = 0;
+        ledgerOffset = 0;
         loadExpenses();
         loadLedger();
     } catch (err) {
         if (els.expenseFormError) {
             els.expenseFormError.textContent = err.message || "Unable to add expense.";
             els.expenseFormError.classList.remove("hidden");
+        }
+    }
+}
+
+// ——— Returns / Refunds ———
+function openReturnsModal() {
+    if (!API_TOKEN || !currentUser) {
+        toast("Please log in to process returns", "error");
+        openAuthModal();
+        return;
+    }
+    if (!canProcessReturns()) {
+        toast("You do not have permission to process returns", "error");
+        return;
+    }
+    if (!els.returnsModal) return;
+    els.returnsModal.classList.remove("hidden");
+    clearReturnsState();
+}
+
+function closeReturnsModal() {
+    if (!els.returnsModal) return;
+    els.returnsModal.classList.add("hidden");
+}
+
+function clearReturnsState() {
+    returnSale = null;
+    returnItems = [];
+    if (els.returnsSaleMeta) {
+        els.returnsSaleMeta.classList.add("hidden");
+        els.returnsSaleMeta.textContent = "";
+    }
+    if (els.returnsItems) els.returnsItems.innerHTML = "";
+    if (els.returnsTotal) els.returnsTotal.textContent = "Refund Total: —";
+    if (els.returnsError) els.returnsError.classList.add("hidden");
+}
+
+async function loadReturnableSale() {
+    const saleId = (els.returnsSaleId?.value || "").trim();
+    if (!saleId) {
+        toast("Enter a sale ID", "error");
+        return;
+    }
+    const data = await apiFetch(`/sales/${saleId}/returns/`);
+    if (!data) {
+        toast("Unable to load sale for return", "error");
+        return;
+    }
+    returnSale = data.sale;
+    returnItems = data.items || [];
+    renderReturnsSale();
+}
+
+function renderReturnsSale() {
+    if (!returnSale) return;
+    if (els.returnsSaleMeta) {
+        const customerName = customers.find(c => c.id === returnSale.customer)?.name || "Customer";
+        els.returnsSaleMeta.innerHTML = `
+            <strong>Sale #${shortOrderId(returnSale.id)}</strong> • ${esc(customerName)} • ${formatDateTime(returnSale.completed_at)}
+        `;
+        els.returnsSaleMeta.classList.remove("hidden");
+    }
+    renderReturnsItems();
+}
+
+function renderReturnsItems() {
+    if (!els.returnsItems) return;
+    if (!returnItems.length) {
+        els.returnsItems.innerHTML = `<div class="orders-empty">No returnable items found.</div>`;
+        return;
+    }
+    els.returnsItems.innerHTML = returnItems.map(item => {
+        const remaining = item.quantity_remaining ?? 0;
+        return `
+            <div class="return-item" data-sale-item="${item.sale_item_id}">
+                <div>
+                    <div class="item-name">${esc(item.product_name)}</div>
+                    <div class="item-meta">Sold ${item.quantity_sold} • Returned ${item.quantity_returned} • Remaining ${remaining}</div>
+                </div>
+                <div>
+                    <label class="item-meta">Qty to return</label>
+                    <input type="number" min="0" max="${remaining}" value="0" class="summary-input return-qty">
+                </div>
+                <div>
+                    <label class="item-meta">Restock</label>
+                    <input type="checkbox" class="return-restock" checked>
+                </div>
+                <div class="item-meta">Unit ${fmtPrice(item.unit_price || 0)}</div>
+            </div>
+        `;
+    }).join("");
+}
+
+function buildReturnPayload() {
+    if (!els.returnsItems) return { items: [] };
+    const items = [];
+    els.returnsItems.querySelectorAll(".return-item").forEach(row => {
+        const saleItemId = row.dataset.saleItem;
+        const qtyInput = row.querySelector(".return-qty");
+        const restockInput = row.querySelector(".return-restock");
+        const qty = parseInt(qtyInput?.value || "0", 10);
+        if (qty > 0) {
+            items.push({
+                sale_item: saleItemId,
+                quantity_returned: qty,
+                restock_to_inventory: restockInput?.checked ?? true,
+            });
+        }
+    });
+    return { items };
+}
+
+async function submitReturn(dryRun) {
+    if (!returnSale) {
+        toast("Load a sale first", "error");
+        return;
+    }
+    const payload = buildReturnPayload();
+    if (!payload.items.length) {
+        toast("Select at least one item to return", "error");
+        return;
+    }
+    payload.dry_run = !!dryRun;
+    if (els.returnsError) els.returnsError.classList.add("hidden");
+
+    try {
+        const res = await apiRequest(`/sales/${returnSale.id}/returns/`, {
+            method: "POST",
+            body: payload,
+        });
+        if (dryRun) {
+            const total = res.total_refund_amount || 0;
+            if (els.returnsTotal) els.returnsTotal.textContent = `Refund Total: ${fmtPrice(total)}`;
+            toast("Refund calculated", "info");
+        } else {
+            const total = res.total_refund_amount || 0;
+            if (els.returnsTotal) els.returnsTotal.textContent = `Refund Total: ${fmtPrice(total)}`;
+            toast("Return processed", "success");
+            loadReturnableSale();
+        }
+    } catch (err) {
+        if (els.returnsError) {
+            els.returnsError.textContent = err.message || "Return failed.";
+            els.returnsError.classList.remove("hidden");
         }
     }
 }
@@ -2134,6 +3082,23 @@ function renderLedgerSummary() {
                 <div class="ledger-summary-card">
                     <span>Sales This Month</span>
                     <strong>${fmtPrice(summary.sales_month || 0)}</strong>
+                </div>
+            </div>
+        </div>
+        <div class="ledger-section">
+            <div class="ledger-section-title">Gross Profit</div>
+            <div class="ledger-summary-grid">
+                <div class="ledger-summary-card">
+                    <span>Gross Profit Today</span>
+                    <strong>${fmtPrice(summary.gross_profit_today || 0)}</strong>
+                </div>
+                <div class="ledger-summary-card">
+                    <span>Gross Profit This Month</span>
+                    <strong>${fmtPrice(summary.gross_profit_month || 0)}</strong>
+                </div>
+                <div class="ledger-summary-card">
+                    <span>Gross Margin This Month</span>
+                    <strong>${fmtPercent(summary.gross_margin_percent_month || 0)}</strong>
                 </div>
             </div>
         </div>
@@ -2254,16 +3219,48 @@ function renderLedgerEntries() {
 async function loadHeldSales() {
     if (!canPerformSales()) {
         heldSalesCache = [];
+        heldSalesPage = { count: 0, next: null, previous: null, results: [] };
+        updatePager({
+            prevEl: els.heldSalesPrev,
+            nextEl: els.heldSalesNext,
+            pageEl: els.heldSalesPage,
+            offset: heldSalesOffset,
+            limit: HELD_SALES_LIMIT,
+            pageData: heldSalesPage,
+        });
         renderHeldSales([]);
         return;
     }
-    const held = await apiFetch("/sales/held/");
+    const endpoint = withParams("/sales/held/", {
+        limit: HELD_SALES_LIMIT,
+        offset: heldSalesOffset,
+    });
+    const held = await apiFetch(endpoint);
+    const page = normalizePaginated(held);
     if (!held) {
         heldSalesCache = [];
+        heldSalesPage = { count: 0, next: null, previous: null, results: [] };
+        updatePager({
+            prevEl: els.heldSalesPrev,
+            nextEl: els.heldSalesNext,
+            pageEl: els.heldSalesPage,
+            offset: heldSalesOffset,
+            limit: HELD_SALES_LIMIT,
+            pageData: heldSalesPage,
+        });
         renderHeldSales([]);
         return;
     }
-    heldSalesCache = held;
+    heldSalesCache = page.results;
+    heldSalesPage = page;
+    updatePager({
+        prevEl: els.heldSalesPrev,
+        nextEl: els.heldSalesNext,
+        pageEl: els.heldSalesPage,
+        offset: heldSalesOffset,
+        limit: HELD_SALES_LIMIT,
+        pageData: heldSalesPage,
+    });
     renderHeldSales(heldSalesCache);
 }
 
@@ -2307,13 +3304,13 @@ async function resumeHeldSale(saleId) {
         return;
     }
 
-    if (!allProducts.length) {
+    if (!ensureArray(allProducts, "allProducts").length) {
         await loadProducts();
     }
 
     const items = sale.items || [];
     cart = items.map(item => {
-        const product = allProducts.find(p => p.id === item.product) || {
+        const product = ensureArray(allProducts, "allProducts").find(p => p.id === item.product) || {
             id: item.product,
             name: "Unknown Product",
             selling_price: item.unit_price,
@@ -2361,6 +3358,12 @@ async function resumeHeldSale(saleId) {
 // ——— Utilities ———
 function fmtPrice(value) {
     return `KSh ${parseFloat(value).toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtPercent(value) {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num)) return "0.00%";
+    return `${num.toFixed(2)}%`;
 }
 
 function shortOrderId(id) {
@@ -2508,7 +3511,7 @@ function applySaleDetailToCart(sale) {
     els.saleTypeSelect.value = currentSaleType;
 
     const updated = sale.items.map(si => {
-        const product = allProducts.find(p => p.id === si.product) || {
+        const product = ensureArray(allProducts, "allProducts").find(p => p.id === si.product) || {
             id: si.product,
             name: "Unknown Product",
             selling_price: si.unit_price,
@@ -2638,6 +3641,10 @@ async function bootstrapAuth() {
 }
 
 async function loadInitialData() {
+    allProducts = ensureArray([], "allProducts");
+    activeCategory = "all";
+    buildCategoryFilters();
+    renderProducts();
     if (!canPerformSales()) {
         if (!canManageCustomerOrders()) {
             toast("Logged in successfully, but your role does not have POS access.", "error");
@@ -2707,6 +3714,7 @@ function clearAuth() {
     if (els.creditModal) els.creditModal.classList.add("hidden");
     if (els.customerOrdersModal) els.customerOrdersModal.classList.add("hidden");
     if (els.ledgerModal) els.ledgerModal.classList.add("hidden");
+    if (els.returnsModal) els.returnsModal.classList.add("hidden");
 }
 
 function logout() {
@@ -2716,6 +3724,10 @@ function logout() {
 }
 
 function canPerformSales() {
+    return ["cashier", "salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
+}
+
+function canProcessReturns() {
     return ["cashier", "salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }
 
@@ -2736,6 +3748,11 @@ function applyRoleUI() {
     }
     if (els.creditBtn) {
         els.creditBtn.disabled = !canSell;
+    }
+    if (els.returnsBtn) {
+        const canReturn = canProcessReturns();
+        els.returnsBtn.classList.toggle("btn-disabled", !canReturn);
+        els.returnsBtn.setAttribute("aria-disabled", canReturn ? "false" : "true");
     }
     if (els.customerOrdersBtn) {
         const canManage = canManageCustomerOrders();

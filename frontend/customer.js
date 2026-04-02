@@ -17,6 +17,11 @@ let orderDetailPoll = null;
 let currentOrderId = null;
 let ordersLoadFailed = false;
 let deferredInstallPrompt = null;
+let ordersOffset = 0;
+let ordersPage = { count: 0, next: null, previous: null, results: [] };
+
+const ORDERS_LIMIT = 20;
+const BULK_FETCH_LIMIT = 100;
 
 const ORDER_STATUS_STEPS = [
     "pending",
@@ -64,6 +69,9 @@ const els = {
     ordersLoading: document.getElementById("orders-loading"),
     ordersError: document.getElementById("orders-error"),
     refreshOrders: document.getElementById("refresh-orders"),
+    ordersPrev: document.getElementById("orders-prev"),
+    ordersNext: document.getElementById("orders-next"),
+    ordersPage: document.getElementById("orders-page"),
     orderDetail: document.getElementById("order-detail"),
     orderDetailEmpty: document.getElementById("order-detail-empty"),
     backToOrders: document.getElementById("back-to-orders"),
@@ -100,7 +108,24 @@ function bindEvents() {
     els.catalogSearch.addEventListener("input", renderCatalog);
     els.clearCart.addEventListener("click", clearCart);
     els.placeOrder.addEventListener("click", placeOrder);
-    els.refreshOrders.addEventListener("click", loadOrders);
+    els.refreshOrders.addEventListener("click", () => {
+        ordersOffset = 0;
+        loadOrders();
+    });
+    if (els.ordersPrev) {
+        els.ordersPrev.addEventListener("click", () => {
+            if (ordersOffset <= 0) return;
+            ordersOffset = Math.max(0, ordersOffset - ORDERS_LIMIT);
+            loadOrders();
+        });
+    }
+    if (els.ordersNext) {
+        els.ordersNext.addEventListener("click", () => {
+            if (ordersOffset + ORDERS_LIMIT >= ordersPage.count) return;
+            ordersOffset += ORDERS_LIMIT;
+            loadOrders();
+        });
+    }
     els.backToOrders.addEventListener("click", () => navigate("orders"));
     els.navButtons.forEach(btn => btn.addEventListener("click", () => {
         const target = btn.dataset.nav;
@@ -272,6 +297,84 @@ async function apiRequest(endpoint, { method = "GET", body = null, auth = true }
     return data;
 }
 
+function normalizePaginated(data) {
+    if (!data) {
+        return { count: 0, next: null, previous: null, results: [] };
+    }
+    if (Array.isArray(data)) {
+        return { count: data.length, next: null, previous: null, results: data };
+    }
+    if (Array.isArray(data.results)) {
+        const count = Number.isFinite(data.count) ? data.count : data.results.length;
+        return {
+            count,
+            next: data.next || null,
+            previous: data.previous || null,
+            results: data.results,
+        };
+    }
+    return { count: 0, next: null, previous: null, results: [] };
+}
+
+function withParams(endpoint, paramsObj) {
+    const [path, query = ""] = endpoint.split("?");
+    const params = new URLSearchParams(query);
+    Object.entries(paramsObj || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === "") return;
+        params.set(key, value);
+    });
+    const qs = params.toString();
+    return qs ? `${path}?${qs}` : path;
+}
+
+function normalizeApiEndpoint(urlOrEndpoint) {
+    if (!urlOrEndpoint) return "";
+    try {
+        const url = new URL(urlOrEndpoint, window.location.origin);
+        let path = `${url.pathname}${url.search}`;
+        if (path.startsWith(`${API_BASE}/`)) {
+            path = path.slice(API_BASE.length);
+        }
+        return path;
+    } catch (err) {
+        return urlOrEndpoint;
+    }
+}
+
+async function apiRequestAll(endpoint, { limit = BULK_FETCH_LIMIT } = {}) {
+    let results = [];
+    let nextEndpoint = withParams(endpoint, { limit, offset: 0 });
+    while (nextEndpoint) {
+        const data = await apiRequest(nextEndpoint);
+        if (Array.isArray(data)) return data;
+        const page = normalizePaginated(data);
+        results = results.concat(page.results);
+        if (page.next) {
+            nextEndpoint = normalizeApiEndpoint(page.next);
+            continue;
+        }
+        if (page.results.length === 0 || results.length >= page.count) break;
+        nextEndpoint = withParams(endpoint, { limit, offset: results.length });
+    }
+    return results;
+}
+
+function updatePager({ prevEl, nextEl, pageEl, offset, limit, pageData }) {
+    if (!prevEl && !nextEl && !pageEl) return;
+    const count = pageData?.count || 0;
+    const totalPages = count ? Math.ceil(count / limit) : 1;
+    const currentPage = count ? Math.floor(offset / limit) + 1 : 1;
+    if (pageEl) {
+        pageEl.textContent = `Page ${currentPage} of ${totalPages}`;
+    }
+    if (prevEl) {
+        prevEl.disabled = offset <= 0;
+    }
+    if (nextEl) {
+        nextEl.disabled = offset + limit >= count;
+    }
+}
+
 async function bootstrapAuth() {
     if (!apiToken) {
         renderAccount();
@@ -389,6 +492,7 @@ function renderAccount() {
 }
 
 async function loadInitialData() {
+    ordersOffset = 0;
     await Promise.all([
         loadBranches(),
         loadCatalog(),
@@ -443,7 +547,7 @@ async function loadCatalog() {
     els.catalogEmpty.classList.add("hidden");
     try {
         const endpoint = selectedBranch ? `/customer/catalog/?branch=${selectedBranch}` : "/customer/catalog/";
-        catalog = await apiRequest(endpoint);
+        catalog = await apiRequestAll(endpoint);
     } catch (err) {
         catalog = [];
         toast("Failed to load catalog", "error");
@@ -623,6 +727,7 @@ async function placeOrder() {
         };
         const order = await apiRequest("/customer/orders/", { method: "POST", body: payload });
         clearCart();
+        ordersOffset = 0;
         await loadOrders();
         toast("Order placed", "success");
         location.hash = `order/${order.id}`;
@@ -638,10 +743,18 @@ async function loadOrders() {
     els.ordersError.classList.add("hidden");
     ordersLoadFailed = false;
     try {
-        orders = await apiRequest("/customer/orders/");
+        const endpoint = withParams("/customer/orders/", {
+            limit: ORDERS_LIMIT,
+            offset: ordersOffset,
+        });
+        const data = await apiRequest(endpoint);
+        const page = normalizePaginated(data);
+        orders = page.results;
+        ordersPage = page;
     } catch (err) {
         orders = [];
         ordersLoadFailed = true;
+        ordersPage = { count: 0, next: null, previous: null, results: [] };
         els.ordersError.textContent = "Orders are unavailable right now. Please try again.";
         els.ordersError.classList.remove("hidden");
         toast("Failed to load orders", "error");
@@ -649,6 +762,14 @@ async function loadOrders() {
         els.ordersLoading.classList.add("hidden");
     }
     renderOrders();
+    updatePager({
+        prevEl: els.ordersPrev,
+        nextEl: els.ordersNext,
+        pageEl: els.ordersPage,
+        offset: ordersOffset,
+        limit: ORDERS_LIMIT,
+        pageData: ordersPage,
+    });
 }
 
 function renderOrders() {

@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import RolePermission
 from .models import Expense
 from .serializers import ExpenseSerializer
+from core.pagination import StandardLimitOffsetPagination
 
 
 def _parse_date(value, label):
@@ -43,7 +44,13 @@ class ExpenseListCreateView(APIView):
             qs = qs.filter(branch_id=branch_id)
 
         qs = qs.order_by("-date", "-created_at")
-        return Response(ExpenseSerializer(qs, many=True).data)
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+        data = ExpenseSerializer(page, many=True).data
+        if page is not qs:
+            return paginator.get_paginated_response(data)
+        return Response(data)
 
     def post(self, request):
         serializer = ExpenseSerializer(data=request.data)

@@ -1,19 +1,26 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Sum, Count, Q
-from .models import Sale
+from decimal import Decimal
+from .models import Sale, SaleReturnItem
+from inventory.models import Inventory, StockMovement
+from .models import LedgerEntry
+from .services import money
 from accounts.permissions import RolePermission
+from core.pagination import StandardLimitOffsetPagination
 
 from .serializers import (
     SaleSerializer,
     SaleDetailSerializer,
     SaleCompleteSerializer,
     SalePaymentCreateSerializer,
+    SaleReturnCreateSerializer,
+    SaleReturnSerializer,
 )
 
 
@@ -120,7 +127,13 @@ class HeldSalesListView(APIView):
 
     def get(self, request):
         held_sales = Sale.objects.filter(status="held").order_by("-updated_at")
-        return Response(SaleDetailSerializer(held_sales, many=True).data)
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(held_sales, request, view=self)
+        page = page if page is not None else held_sales
+        data = SaleDetailSerializer(page, many=True).data
+        if page is not held_sales:
+            return paginator.get_paginated_response(data)
+        return Response(data)
 
 
 class SalePaymentCreateView(APIView):
@@ -270,3 +283,130 @@ class SaleReceiptView(APIView):
         }
 
         return Response(receipt)
+
+
+class SaleReturnListCreateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
+
+    def get(self, request, sale_id):
+        sale = get_object_or_404(Sale, id=sale_id)
+        if sale.status != "completed":
+            return Response({"detail": "Only completed sales can be returned."}, status=400)
+
+        returns = sale.returns.all().order_by("-created_at")
+        return_items = []
+        for item in sale.items.all():
+            returned_qty = (
+                SaleReturnItem.objects.filter(sale_item=item)
+                .aggregate(total=Sum("quantity_returned"))
+                .get("total")
+                or 0
+            )
+            remaining = item.quantity - returned_qty
+            return_items.append(
+                {
+                    "sale_item_id": str(item.id),
+                    "product_id": str(item.product_id),
+                    "product_name": item.product.name,
+                    "product_unit": str(item.product_unit_id) if item.product_unit_id else None,
+                    "unit_price": str(item.unit_price),
+                    "quantity_sold": item.quantity,
+                    "quantity_returned": returned_qty,
+                    "quantity_remaining": remaining,
+                    "conversion_snapshot": item.conversion_snapshot,
+                }
+            )
+
+        return Response(
+            {
+                "sale": SaleDetailSerializer(sale).data,
+                "items": return_items,
+                "returns": SaleReturnSerializer(returns, many=True).data,
+            }
+        )
+
+    def post(self, request, sale_id):
+        sale = get_object_or_404(Sale, id=sale_id)
+        serializer = SaleReturnCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        dry_run = serializer.validated_data.get("dry_run", False)
+        if dry_run:
+            preview = serializer._build_return(sale=sale, processed_by=request.user, dry_run=True)
+            return Response(
+                {
+                    "total_refund_amount": preview["total_refund_amount"],
+                    "items": [
+                        {
+                            "sale_item_id": str(entry["sale_item"].id),
+                            "product_name": entry["sale_item"].product.name,
+                            "quantity_returned": entry["quantity_returned"],
+                            "refund_amount": entry["refund_amount"],
+                            "restock_to_inventory": entry["restock_to_inventory"],
+                        }
+                        for entry in preview["items"]
+                    ],
+                }
+            )
+
+        try:
+            with transaction.atomic():
+                sale_return = serializer._build_return(sale=sale, processed_by=request.user, dry_run=False)
+
+                # Apply inventory restock if requested
+                for item in sale_return.items.select_related("sale_item", "sale_item__product").all():
+                    if not item.restock_to_inventory:
+                        continue
+                    sale_item = item.sale_item
+                    inventory = Inventory.objects.select_for_update().get(
+                        branch=sale.branch, product=sale_item.product
+                    )
+                    previous_qty = inventory.quantity
+                    inventory.quantity = previous_qty + item.base_quantity_returned
+                    inventory.save(update_fields=["quantity", "updated_at"])
+
+                    StockMovement.objects.create(
+                        inventory=inventory,
+                        product=sale_item.product,
+                        branch=inventory.branch,
+                        sale=sale,
+                        movement_type="return",
+                        quantity_change=item.base_quantity_returned,
+                        previous_quantity=previous_qty,
+                        new_quantity=inventory.quantity,
+                        notes=f"Return {sale_return.id} for Sale #{sale.id}",
+                    )
+
+                # Apply financial adjustments
+                refund_amount = sale_return.total_refund_amount
+                if sale.is_credit_sale:
+                    balance_due = money(sale.balance_due or 0)
+                    amount_paid = money(sale.amount_paid or 0)
+                    remaining = money(refund_amount)
+                    if balance_due > 0:
+                        reduction = min(balance_due, remaining)
+                        balance_due = money(balance_due - reduction)
+                        remaining = money(remaining - reduction)
+                    if remaining > 0:
+                        amount_paid = money(max(Decimal("0.00"), amount_paid - remaining))
+                    sale.balance_due = balance_due
+                    sale.amount_paid = amount_paid
+                else:
+                    amount_paid = money(sale.amount_paid or 0)
+                    if refund_amount > amount_paid:
+                        raise serializers.ValidationError({"detail": "Refund exceeds amount paid."})
+                    sale.amount_paid = money(amount_paid - refund_amount)
+
+                sale.refresh_payment_status()
+                sale.save(update_fields=["amount_paid", "balance_due", "payment_status", "updated_at"])
+
+                LedgerEntry.record_refund(sale_return=sale_return, actor=request.user)
+
+        except Inventory.DoesNotExist:
+            return Response({"detail": "Inventory record not found for return."}, status=400)
+        except serializers.ValidationError as exc:
+            return Response(exc.detail, status=400)
+
+        return Response(SaleReturnSerializer(sale_return).data, status=201)

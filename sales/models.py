@@ -4,6 +4,7 @@ from django.utils import timezone
 from decimal import Decimal
 from datetime import timedelta
 from core.models import BaseModel
+from core.middleware import get_current_user
 from inventory.models import Inventory
 from inventory.models import StockMovement
 from accounts.models import User
@@ -62,6 +63,20 @@ class Sale(BaseModel):
         null=True,
         blank=True,
         related_name="assigned_sales",
+    )
+    route_snapshot = models.ForeignKey(
+        "logistics.Route",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sales",
+    )
+    completed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="completed_sales",
     )
 
     def __str__(self):
@@ -154,13 +169,19 @@ class Sale(BaseModel):
 
         self.status = "completed"
         self.completed_at = timezone.now()
+        if self.route_snapshot_id is None and self.customer and getattr(self.customer, "route_id", None):
+            # Snapshot route at completion time for legacy records without a snapshot.
+            self.route_snapshot = self.customer.route
+        if self.completed_by_id is None:
+            current_user = get_current_user()
+            self.completed_by = current_user if current_user and current_user.is_authenticated else self.updated_by or self.created_by
         if self.is_credit_sale and not self.due_date:
             self.due_date = (self.completed_at.date() + timedelta(days=3))
         if self.balance_due is None or self.balance_due == Decimal("0.00"):
             self.balance_due = self.balance
         self.refresh_payment_status()
         self.save()
-        LedgerEntry.record_sale_completion(sale=self, actor=self.updated_by)
+        LedgerEntry.record_sale_completion(sale=self, actor=self.completed_by or self.updated_by)
 
     @transaction.atomic
     def apply_payment(self, *, amount, received_by=None, payment_method=None, reference="", note=""):
@@ -209,6 +230,9 @@ class SaleItem(BaseModel):
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    cost_price_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_cost_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    gross_profit_snapshot = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     conversion_snapshot = models.PositiveIntegerField(default=1)
     base_quantity = models.PositiveIntegerField(default=0)
     price_type_used = models.CharField(max_length=20, blank=True)
@@ -239,6 +263,42 @@ class SalePayment(BaseModel):
 
     def __str__(self):
         return f"Payment {self.amount} for Sale {self.sale_id}"
+
+
+class SaleReturn(BaseModel):
+    sale = models.ForeignKey("sales.Sale", on_delete=models.CASCADE, related_name="returns")
+    customer = models.ForeignKey("customers.Customer", on_delete=models.CASCADE)
+    processed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="processed_returns",
+    )
+    reason = models.TextField(blank=True, default="")
+    total_refund_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Return {self.id} for Sale {self.sale_id}"
+
+
+class SaleReturnItem(BaseModel):
+    sale_return = models.ForeignKey("sales.SaleReturn", on_delete=models.CASCADE, related_name="items")
+    sale_item = models.ForeignKey("sales.SaleItem", on_delete=models.PROTECT, related_name="return_items")
+    quantity_returned = models.PositiveIntegerField()
+    refund_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    restock_to_inventory = models.BooleanField(default=True)
+    base_quantity_returned = models.PositiveIntegerField(default=0)
+    note = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Return item {self.sale_item_id} qty {self.quantity_returned}"
 
 
 class LedgerEntry(BaseModel):
@@ -359,6 +419,29 @@ class LedgerEntry(BaseModel):
         entry, _ = cls.objects.get_or_create(
             payment=payment,
             defaults=defaults,
+        )
+        return entry
+
+    @classmethod
+    def record_refund(cls, *, sale_return, actor=None):
+        if not sale_return:
+            return None
+        amount = money(sale_return.total_refund_amount)
+        if amount <= 0:
+            return None
+        reference = f"return:{sale_return.id}"
+        if cls.objects.filter(entry_type="refund", reference=reference).exists():
+            return None
+        entry = cls.objects.create(
+            entry_type="refund",
+            direction="out",
+            amount=amount,
+            description=f"Refund for Sale #{sale_return.sale_id}",
+            sale=sale_return.sale,
+            customer=sale_return.customer,
+            actor=actor,
+            reference=reference,
+            metadata={"sale_return_id": str(sale_return.id)},
         )
         return entry
 

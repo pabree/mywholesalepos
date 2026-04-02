@@ -134,7 +134,8 @@ class SaleLifecycleTests(TestCase):
 
         held = self.client.get("/api/sales/held/")
         self.assertEqual(held.status_code, 200)
-        held_ids = {s["id"] for s in held.data}
+        self.assertIn("results", held.data)
+        held_ids = {s["id"] for s in held.data["results"]}
         self.assertIn(str(sale1_id), held_ids)
         self.assertNotIn(str(sale2_id), held_ids)
 
@@ -143,7 +144,7 @@ class SaleLifecycleTests(TestCase):
 
         held_after = self.client.get("/api/sales/held/")
         self.assertEqual(held_after.status_code, 200)
-        held_after_ids = {s["id"] for s in held_after.data}
+        held_after_ids = {s["id"] for s in held_after.data["results"]}
         self.assertNotIn(str(sale1_id), held_after_ids)
 
     def test_stock_not_changed_when_held(self):

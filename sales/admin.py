@@ -1,6 +1,6 @@
 from django.contrib import admin
 from core.admin import BaseModelAdmin, BaseTabularInline
-from .models import Sale, SaleItem, CustomerOrder, LedgerEntry
+from .models import Sale, SaleItem, CustomerOrder, LedgerEntry, SaleReturn, SaleReturnItem
 
 
 class SaleItemInline(BaseTabularInline):
@@ -40,3 +40,18 @@ class LedgerEntryAdmin(BaseModelAdmin):
     list_filter = ("entry_type", "direction", "created_at")
     search_fields = ("id", "sale__id", "payment__id", "customer__name", "actor__username")
     raw_id_fields = ("sale", "payment", "customer", "actor")
+
+
+@admin.register(SaleReturn)
+class SaleReturnAdmin(BaseModelAdmin):
+    list_display = ("id", "sale", "customer", "processed_by", "total_refund_amount", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("id", "sale__id", "customer__name")
+    raw_id_fields = ("sale", "customer", "processed_by")
+
+
+@admin.register(SaleReturnItem)
+class SaleReturnItemAdmin(BaseModelAdmin):
+    list_display = ("sale_return", "sale_item", "quantity_returned", "refund_amount", "restock_to_inventory")
+    search_fields = ("sale_return__id", "sale_item__id", "sale_item__product__name")
+    raw_id_fields = ("sale_return", "sale_item")

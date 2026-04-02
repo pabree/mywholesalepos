@@ -44,6 +44,7 @@ class ProductUnit(BaseModel):
     unit_code = models.CharField(max_length=32)
     conversion_to_base_unit = models.PositiveIntegerField()
     is_base_unit = models.BooleanField(default=False)
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     retail_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     wholesale_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     wholesale_threshold = models.PositiveIntegerField(null=True, blank=True)

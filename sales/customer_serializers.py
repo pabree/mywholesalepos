@@ -70,6 +70,7 @@ class CustomerOrderCreateSerializer(serializers.Serializer):
             branch=branch,
             customer=customer,
             sale_type=sale_type,
+            route_snapshot=customer.route if getattr(customer, "route_id", None) else None,
             total_amount=totals["subtotal"],
             discount=money("0.00"),
             tax=totals["tax"],

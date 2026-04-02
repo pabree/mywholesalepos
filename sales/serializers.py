@@ -1,7 +1,8 @@
 from decimal import Decimal
 from django.db import transaction, IntegrityError
+from django.db.models import Sum
 from rest_framework import serializers
-from .models import Sale, SaleItem, SalePayment
+from .models import Sale, SaleItem, SalePayment, SaleReturn, SaleReturnItem
 from .pricing import get_unit_price
 from .services import money, compute_totals
 
@@ -16,12 +17,25 @@ class SaleItemSerializer(serializers.ModelSerializer):
             "quantity",
             "unit_price",
             "total_price",
+            "cost_price_snapshot",
+            "total_cost_snapshot",
+            "gross_profit_snapshot",
             "conversion_snapshot",
             "base_quantity",
             "price_type_used",
             "pricing_reason",
         ]
-        read_only_fields = ["unit_price", "total_price", "conversion_snapshot", "base_quantity", "price_type_used", "pricing_reason"]
+        read_only_fields = [
+            "unit_price",
+            "total_price",
+            "cost_price_snapshot",
+            "total_cost_snapshot",
+            "gross_profit_snapshot",
+            "conversion_snapshot",
+            "base_quantity",
+            "price_type_used",
+            "pricing_reason",
+        ]
 
 
 class SaleSerializer(serializers.ModelSerializer):
@@ -155,6 +169,10 @@ class SaleSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"discount": str(exc)})
         self._enforce_amount_paid_bounds(amount_paid, totals["grand_total"])
 
+        customer = validated_data.get("customer")
+        if customer and getattr(customer, "route_id", None):
+            validated_data.setdefault("route_snapshot", customer.route)
+
         sale = Sale.objects.create(
             **validated_data,
             total_amount=totals["subtotal"],
@@ -185,6 +203,9 @@ class SaleSerializer(serializers.ModelSerializer):
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
+        if customer_changed:
+            instance.route_snapshot = instance.customer.route if getattr(instance.customer, "route_id", None) else None
 
         sale_items_payload = None
         if items_data is not None:
@@ -303,6 +324,13 @@ class SaleCompleteSerializer(serializers.Serializer):
         return sale
 
 
+def _resolve_unit_cost(product, product_unit, *, conversion):
+    if product_unit and product_unit.cost_price is not None:
+        return money(product_unit.cost_price)
+    base_cost = money(product.cost_price)
+    return money(base_cost * Decimal(conversion))
+
+
 def _build_sale_items(items_data, *, customer, sale_type):
     subtotal = Decimal("0.00")
     sale_items_payload = []
@@ -335,10 +363,26 @@ def _build_sale_items(items_data, *, customer, sale_type):
         base_quantity = quantity * conversion
 
         total_price = money(unit_price * quantity)
+        unit_cost = _resolve_unit_cost(product, product_unit, conversion=conversion)
+        total_cost = money(unit_cost * quantity)
+        gross_profit = money(total_price - total_cost)
 
         subtotal += total_price
         sale_items_payload.append(
-            (product, product_unit, quantity, unit_price, total_price, conversion, base_quantity, price_type, reason)
+            (
+                product,
+                product_unit,
+                quantity,
+                unit_price,
+                total_price,
+                unit_cost,
+                total_cost,
+                gross_profit,
+                conversion,
+                base_quantity,
+                price_type,
+                reason,
+            )
         )
 
     subtotal = money(subtotal)
@@ -346,7 +390,20 @@ def _build_sale_items(items_data, *, customer, sale_type):
 
 
 def _persist_sale_items(sale, sale_items_payload):
-    for product, product_unit, quantity, unit_price, total_price, conversion, base_quantity, price_type, reason in sale_items_payload:
+    for (
+        product,
+        product_unit,
+        quantity,
+        unit_price,
+        total_price,
+        unit_cost,
+        total_cost,
+        gross_profit,
+        conversion,
+        base_quantity,
+        price_type,
+        reason,
+    ) in sale_items_payload:
         SaleItem.objects.create(
             sale=sale,
             product=product,
@@ -354,6 +411,9 @@ def _persist_sale_items(sale, sale_items_payload):
             quantity=quantity,
             unit_price=unit_price,
             total_price=total_price,
+            cost_price_snapshot=unit_cost,
+            total_cost_snapshot=total_cost,
+            gross_profit_snapshot=gross_profit,
             conversion_snapshot=conversion,
             base_quantity=base_quantity,
             price_type_used=price_type,
@@ -401,3 +461,131 @@ class SalePaymentCreateSerializer(serializers.Serializer):
             reference=reference,
             note=note,
         )
+
+
+class SaleReturnItemOutputSerializer(serializers.ModelSerializer):
+    sale_item_id = serializers.CharField(source="sale_item.id", read_only=True)
+    product_name = serializers.CharField(source="sale_item.product.name", read_only=True)
+    unit_price = serializers.DecimalField(source="sale_item.unit_price", max_digits=10, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = SaleReturnItem
+        fields = [
+            "id",
+            "sale_item_id",
+            "product_name",
+            "quantity_returned",
+            "refund_amount",
+            "restock_to_inventory",
+            "base_quantity_returned",
+            "note",
+        ]
+        read_only_fields = fields
+
+
+class SaleReturnSerializer(serializers.ModelSerializer):
+    items = SaleReturnItemOutputSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SaleReturn
+        fields = [
+            "id",
+            "sale",
+            "customer",
+            "processed_by",
+            "reason",
+            "total_refund_amount",
+            "created_at",
+            "items",
+        ]
+        read_only_fields = fields
+
+
+class SaleReturnItemInputSerializer(serializers.Serializer):
+    sale_item = serializers.UUIDField()
+    quantity_returned = serializers.IntegerField(min_value=1)
+    restock_to_inventory = serializers.BooleanField(default=True)
+    note = serializers.CharField(required=False, allow_blank=True)
+
+
+class SaleReturnCreateSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True)
+    items = SaleReturnItemInputSerializer(many=True)
+    dry_run = serializers.BooleanField(required=False, default=False)
+
+    def _build_return(self, *, sale, processed_by, dry_run=False):
+        if sale.status != "completed":
+            raise serializers.ValidationError({"sale": "Only completed sales can be returned."})
+        if not self.validated_data.get("items"):
+            raise serializers.ValidationError({"items": "At least one return item is required."})
+
+        total_refund = Decimal("0.00")
+        return_items = []
+        for item in self.validated_data["items"]:
+            sale_item_id = item["sale_item"]
+            qty = int(item["quantity_returned"])
+            restock = item.get("restock_to_inventory", True)
+            note = item.get("note", "")
+
+            try:
+                sale_item = SaleItem.objects.select_related("sale", "product").get(id=sale_item_id)
+            except SaleItem.DoesNotExist:
+                raise serializers.ValidationError({"items": f"Sale item {sale_item_id} not found."})
+            if sale_item.sale_id != sale.id:
+                raise serializers.ValidationError({"items": "Sale item does not belong to this sale."})
+
+            already_returned = (
+                SaleReturnItem.objects.filter(sale_item_id=sale_item_id)
+                .aggregate(total=Sum("quantity_returned"))
+                .get("total")
+                or 0
+            )
+            remaining = sale_item.quantity - already_returned
+            if qty > remaining:
+                raise serializers.ValidationError({"items": f"Return quantity exceeds remaining for {sale_item.product.name}."})
+
+            refund_amount = money(sale_item.unit_price * qty)
+            base_qty = int(sale_item.conversion_snapshot or 1) * qty
+            total_refund = money(total_refund + refund_amount)
+
+            return_items.append(
+                {
+                    "sale_item": sale_item,
+                    "quantity_returned": qty,
+                    "refund_amount": refund_amount,
+                    "restock_to_inventory": restock,
+                    "base_quantity_returned": base_qty,
+                    "note": note,
+                }
+            )
+
+        if dry_run:
+            return {
+                "total_refund_amount": total_refund,
+                "items": return_items,
+            }
+
+        if not sale.is_credit_sale:
+            if total_refund > money(sale.amount_paid):
+                raise serializers.ValidationError({"amount": "Refund exceeds amount paid."})
+
+        sale_return = SaleReturn.objects.create(
+            sale=sale,
+            customer=sale.customer,
+            processed_by=processed_by,
+            reason=self.validated_data.get("reason", ""),
+            total_refund_amount=total_refund,
+        )
+
+        for entry in return_items:
+            SaleReturnItem.objects.create(
+                sale_return=sale_return,
+                sale_item=entry["sale_item"],
+                quantity_returned=entry["quantity_returned"],
+                refund_amount=entry["refund_amount"],
+                restock_to_inventory=entry["restock_to_inventory"],
+                base_quantity_returned=entry["base_quantity_returned"],
+                note=entry["note"],
+            )
+
+        return sale_return

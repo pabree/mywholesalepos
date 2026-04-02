@@ -730,6 +730,24 @@ body {
     border-color: rgba(239, 68, 68, 0.6);
 }
 
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.pagination-meta {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.pagination-controls .btn.ghost:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
@@ -788,6 +806,7 @@ body {
         gap: 10px;
         text-align: left;
     }
+
 }
 
 @media (min-width: 900px) {
