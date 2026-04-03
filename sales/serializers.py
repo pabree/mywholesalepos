@@ -268,15 +268,34 @@ class SaleDetailSerializer(SaleSerializer):
 class SaleCompleteSerializer(serializers.Serializer):
     discount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
     amount_paid = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    method = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    payment_method = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    reference = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
 
     def validate(self, attrs):
         _, discount, amount_paid = SaleSerializer()._validate_money_fields(attrs)
         attrs["discount"] = discount
         attrs["amount_paid"] = amount_paid
+        method = (attrs.get("method") or attrs.get("payment_method") or "cash").lower()
+        attrs["method"] = method
+        if method not in dict(SalePayment.METHOD_CHOICES):
+            raise serializers.ValidationError({"method": "Unsupported payment method."})
+        reference = (attrs.get("reference") or "").strip()
+        phone_number = (attrs.get("phone_number") or "").strip()
+        attrs["reference"] = reference
+        attrs["phone_number"] = phone_number
+        if method == "mpesa":
+            if not reference:
+                raise serializers.ValidationError({"reference": "Transaction code is required for M-Pesa."})
+            if SalePayment.objects.filter(method="mpesa", reference=reference).exists():
+                raise serializers.ValidationError({"reference": "Transaction code already used."})
+            if not phone_number:
+                raise serializers.ValidationError({"phone_number": "Phone number is required for M-Pesa."})
         return attrs
 
     @transaction.atomic
-    def save(self, sale):
+    def save(self, sale, received_by=None):
         sale = Sale.objects.select_for_update().get(pk=sale.pk)
         if sale.status not in ("draft", "held"):
             raise serializers.ValidationError({"detail": "Only draft or held sales can be completed."})
@@ -287,6 +306,9 @@ class SaleCompleteSerializer(serializers.Serializer):
         provided_amount_paid = "amount_paid" in self.initial_data
         discount = self.validated_data["discount"] if provided_discount else sale.discount
         amount_paid = self.validated_data["amount_paid"] if provided_amount_paid else sale.amount_paid
+        method = self.validated_data.get("method") or "cash"
+        reference = self.validated_data.get("reference") or ""
+        phone_number = self.validated_data.get("phone_number") or ""
 
         if provided_discount:
             sale.discount = discount
@@ -306,6 +328,8 @@ class SaleCompleteSerializer(serializers.Serializer):
         sale.balance_due = totals["balance"]
         if not sale.is_credit_sale and sale.balance_due > 0:
             raise serializers.ValidationError({"amount_paid": "Non-credit sales require full payment."})
+        if method == "mpesa" and amount_paid > totals["grand_total"]:
+            raise serializers.ValidationError({"amount_paid": "M-Pesa amount cannot exceed the remaining balance."})
         if sale.is_credit_sale:
             if sale.sale_type != "wholesale":
                 raise serializers.ValidationError({"sale_type": "Credit sales must be wholesale."})
@@ -313,6 +337,8 @@ class SaleCompleteSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"customer": "Credit sales require a customer."})
             if sale.assigned_to_id is None:
                 raise serializers.ValidationError({"assigned_to": "Credit sales require an assigned delivery person or salesperson."})
+        else:
+            sale.payment_mode = method
         sale.refresh_payment_status()
         sale.save()
 
@@ -320,6 +346,17 @@ class SaleCompleteSerializer(serializers.Serializer):
             sale.complete_sale()
         except (ValueError, IntegrityError) as exc:
             raise serializers.ValidationError({"detail": str(exc)})
+
+        if amount_paid > 0:
+            sale.record_initial_payment(
+                amount=amount_paid,
+                method=method,
+                received_by=received_by,
+                status="completed",
+                reference=reference,
+                phone_number=phone_number,
+                note="",
+            )
 
         return sale
 
@@ -426,6 +463,22 @@ def _compute_totals(*args, **kwargs):  # backward compatibility shim
 
 
 class SalePaymentSerializer(serializers.ModelSerializer):
+    payment_method = serializers.CharField(source="method", read_only=True)
+    received_by_name = serializers.SerializerMethodField()
+
+    def get_received_by_name(self, obj):
+        user = obj.received_by
+        if not user:
+            return ""
+        display = getattr(user, "display_name", "") or ""
+        if display:
+            return display
+        if hasattr(user, "get_full_name"):
+            full_name = user.get_full_name()
+            if full_name:
+                return full_name
+        return getattr(user, "username", "") or ""
+
     class Meta:
         model = SalePayment
         fields = [
@@ -433,10 +486,14 @@ class SalePaymentSerializer(serializers.ModelSerializer):
             "sale",
             "customer",
             "amount",
+            "method",
             "payment_method",
+            "status",
             "received_by",
+            "received_by_name",
             "payment_date",
             "reference",
+            "phone_number",
             "note",
             "created_at",
         ]
@@ -445,20 +502,38 @@ class SalePaymentSerializer(serializers.ModelSerializer):
 
 class SalePaymentCreateSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
-    payment_method = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    method = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    payment_method = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    status = serializers.CharField(max_length=20, required=False, allow_blank=True)
     reference = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
     note = serializers.CharField(required=False, allow_blank=True)
 
     def save(self, *, sale, received_by):
         amount = self.validated_data["amount"]
-        payment_method = self.validated_data.get("payment_method") or "cash"
-        reference = self.validated_data.get("reference") or ""
+        method = (self.validated_data.get("method") or self.validated_data.get("payment_method") or "cash").lower()
+        status = (self.validated_data.get("status") or "completed").lower()
+        reference = (self.validated_data.get("reference") or "").strip()
+        phone_number = (self.validated_data.get("phone_number") or "").strip()
+        if method not in dict(SalePayment.METHOD_CHOICES):
+            raise serializers.ValidationError({"method": "Unsupported payment method."})
+        if status not in dict(SalePayment.STATUS_CHOICES):
+            raise serializers.ValidationError({"status": "Unsupported payment status."})
+        if method == "mpesa":
+            if not reference:
+                raise serializers.ValidationError({"reference": "Transaction code is required for M-Pesa."})
+            if SalePayment.objects.filter(method="mpesa", reference=reference).exists():
+                raise serializers.ValidationError({"reference": "Transaction code already used."})
+            if not phone_number:
+                raise serializers.ValidationError({"phone_number": "Phone number is required for M-Pesa."})
         note = self.validated_data.get("note") or ""
         return sale.apply_payment(
             amount=amount,
             received_by=received_by,
-            payment_method=payment_method,
+            method=method,
+            status=status,
             reference=reference,
+            phone_number=phone_number,
             note=note,
         )
 

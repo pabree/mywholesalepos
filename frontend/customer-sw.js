@@ -1,8 +1,9 @@
-const CACHE_NAME = "customer-app-v4";
+const CACHE_NAME = "customer-app-v5";
+const APP_BUILD = "2026-04-03.1";
 const APP_SHELL = [
     "/customer/",
-    "/static/customer.css",
-    "/static/customer.js",
+    `/static/customer.css?v=${APP_BUILD}`,
+    `/static/customer.js?v=${APP_BUILD}`,
     "/static/customer-manifest.webmanifest",
     "/static/customer-icon-192.png",
     "/static/customer-icon-512.png",

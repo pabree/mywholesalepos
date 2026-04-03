@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-01.1";
+const APP_BUILD = "2026-04-03.1";
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
 const customerOrdersLog = (...args) => {
@@ -72,12 +72,18 @@ let heldSalesPage = { count: 0, next: null, previous: null, results: [] };
 let customerOrdersPage = { count: 0, next: null, previous: null, results: [] };
 let ledgerPage = { count: 0, next: null, previous: null, results: [] };
 let expensesPage = { count: 0, next: null, previous: null, results: [] };
+let lastFilteredProducts = [];
+let mpesaPendingPayment = null;
+let mpesaPollTimer = null;
+let mpesaPollAttempts = 0;
 
 const HELD_SALES_LIMIT = 20;
 const CUSTOMER_ORDERS_LIMIT = 20;
 const LEDGER_LIMIT = 20;
 const EXPENSES_LIMIT = 20;
 const BULK_FETCH_LIMIT = 100;
+const MPESA_POLL_INTERVAL = 4000;
+const MPESA_POLL_MAX = 30;
 
 const EXPENSE_CATEGORIES = [
     { value: "transport", label: "Transport" },
@@ -106,6 +112,11 @@ const els = {
     grandTotal:      document.getElementById("grand-total"),
     amountPaid:      document.getElementById("amount-paid-input"),
     amountPaidLabel: document.getElementById("amount-paid-label"),
+    paymentMethodSelect: document.getElementById("payment-method-select"),
+    mpesaFields: document.getElementById("mpesa-fields"),
+    mpesaPhone: document.getElementById("mpesa-phone"),
+    mpesaReference: document.getElementById("mpesa-reference"),
+    mpesaStatus: document.getElementById("mpesa-status"),
     changeAmount:    document.getElementById("change-amount"),
     changeRow:       document.getElementById("change-row"),
     creditToggle:    document.getElementById("credit-toggle"),
@@ -121,6 +132,7 @@ const els = {
     receiptModal:    document.getElementById("receipt-modal"),
     receiptContent:  document.getElementById("receipt-content"),
     printReceiptBtn: document.getElementById("print-receipt-btn"),
+    receiptCloseBtn: document.getElementById("receipt-close-btn"),
     newSaleBtn:      document.getElementById("new-sale-btn"),
     toastContainer:  document.getElementById("toast-container"),
     authBtn:         document.getElementById("auth-btn"),
@@ -153,6 +165,8 @@ const els = {
     refreshCreditSales: document.getElementById("refresh-credit-sales"),
     paymentAmount:   document.getElementById("payment-amount"),
     paymentMethod:   document.getElementById("payment-method"),
+    paymentPhoneRow: document.getElementById("payment-phone-row"),
+    paymentPhone:    document.getElementById("payment-phone"),
     paymentReference: document.getElementById("payment-reference"),
     paymentNote:     document.getElementById("payment-note"),
     submitPaymentBtn: document.getElementById("submit-payment-btn"),
@@ -258,6 +272,103 @@ const els = {
     returnsError: document.getElementById("returns-error"),
 };
 
+// ——— Overlay / Modal Helpers ———
+const overlayStack = [];
+
+function getOverlayCloseHandler(id) {
+    switch (id) {
+        case "auth-modal":
+            return closeAuthModal;
+        case "credit-modal":
+            return closeCreditModal;
+        case "customer-orders-modal":
+            return closeCustomerOrdersModal;
+        case "ledger-modal":
+            return closeLedgerModal;
+        case "returns-modal":
+            return closeReturnsModal;
+        case "receipt-modal":
+            return closeReceiptModal;
+        default:
+            return null;
+    }
+}
+
+function getOpenOverlays() {
+    return Array.from(document.querySelectorAll(".modal-overlay"))
+        .filter(overlay => !overlay.classList.contains("hidden"));
+}
+
+function updateOverlayState() {
+    const hasOpenOverlay = getOpenOverlays().length > 0;
+    document.body.classList.toggle("overlay-open", hasOpenOverlay);
+}
+
+function openOverlay(overlayEl, { closeOthers = true } = {}) {
+    if (!overlayEl) return;
+    if (closeOthers) closeAllOverlays({ except: overlayEl });
+    overlayEl.classList.remove("hidden");
+    const existingIndex = overlayStack.indexOf(overlayEl.id);
+    if (existingIndex !== -1) overlayStack.splice(existingIndex, 1);
+    overlayStack.push(overlayEl.id);
+    updateOverlayState();
+}
+
+function closeOverlay(overlayEl) {
+    if (!overlayEl) return;
+    overlayEl.classList.add("hidden");
+    const index = overlayStack.indexOf(overlayEl.id);
+    if (index !== -1) overlayStack.splice(index, 1);
+    updateOverlayState();
+}
+
+function closeOverlayById(id) {
+    if (!id) return;
+    const handler = getOverlayCloseHandler(id);
+    if (handler) {
+        handler();
+        return;
+    }
+    closeOverlay(document.getElementById(id));
+}
+
+function closeAllOverlays({ except } = {}) {
+    getOpenOverlays().forEach(overlay => {
+        if (except && overlay === except) return;
+        closeOverlayById(overlay.id);
+    });
+    updateOverlayState();
+}
+
+function getTopOverlay() {
+    if (overlayStack.length) {
+        const id = overlayStack[overlayStack.length - 1];
+        const overlay = document.getElementById(id);
+        if (overlay && !overlay.classList.contains("hidden")) {
+            return overlay;
+        }
+    }
+    const open = getOpenOverlays();
+    return open.length ? open[open.length - 1] : null;
+}
+
+function setupOverlayInteractions() {
+    document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        const overlay = getTopOverlay();
+        if (!overlay) return;
+        closeOverlayById(overlay.id);
+    });
+
+    document.querySelectorAll(".modal-overlay").forEach(overlay => {
+        overlay.addEventListener("click", (event) => {
+            if (event.target !== overlay) return;
+            if (overlay.dataset.backdropClose !== "true") return;
+            closeOverlayById(overlay.id);
+        });
+    });
+}
+
 customerOrdersLog("[customer-orders] button element", { found: Boolean(els.customerOrdersBtn) });
 customerOrdersLog("[customer-orders] modal element", { found: Boolean(els.customerOrdersModal) });
 
@@ -279,6 +390,8 @@ customerOrdersLog("[customer-orders] delegated listener attached");
 
 function registerStaffServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") return;
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
         // silent failure; POS still works without SW
     });
@@ -318,8 +431,15 @@ document.addEventListener("DOMContentLoaded", () => {
     registerStaffServiceWorker();
     setupStaffInstallPrompt();
     renderExpenseCategoryOptions();
+    setupOverlayInteractions();
 
     els.productSearch.addEventListener("input", renderProducts);
+    els.productSearch.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        const first = ensureArray(lastFilteredProducts, "lastFilteredProducts")[0];
+        if (first) addToCart(first.id);
+    });
     els.saleTypeSelect.addEventListener("change", () => {
         currentSaleType = els.saleTypeSelect.value || "retail";
         if (isCreditSaleSelected() && currentSaleType !== "wholesale") {
@@ -339,6 +459,12 @@ document.addEventListener("DOMContentLoaded", () => {
         amountPaidDirty = true;
         updateTotals();
     });
+    if (els.paymentMethodSelect) {
+        els.paymentMethodSelect.addEventListener("change", () => {
+            updateMpesaFields();
+        });
+        updateMpesaFields();
+    }
     if (els.creditToggle) {
         els.creditToggle.addEventListener("change", () => {
             handleCreditToggle();
@@ -357,6 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
     posLog("[pos] checkout button bound", { found: Boolean(els.checkoutBtn) });
     els.printReceiptBtn.addEventListener("click", () => window.print());
     els.newSaleBtn.addEventListener("click", newSale);
+    if (els.receiptCloseBtn) els.receiptCloseBtn.addEventListener("click", closeReceiptModal);
     els.authBtn.addEventListener("click", openAuthModal);
     els.logoutBtn.addEventListener("click", logout);
     if (els.creditBtn) els.creditBtn.addEventListener("click", openCreditModal);
@@ -465,6 +592,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (els.submitPaymentBtn) els.submitPaymentBtn.addEventListener("click", submitPayment);
     if (els.payFullBtn) els.payFullBtn.addEventListener("click", fillFullBalance);
     if (els.paymentAmount) els.paymentAmount.addEventListener("input", validatePaymentInput);
+    if (els.paymentMethod) {
+        els.paymentMethod.addEventListener("change", () => {
+            updateCreditPaymentMethodFields();
+        });
+        updateCreditPaymentMethodFields();
+    }
     if (els.creditCustomerSelect) els.creditCustomerSelect.addEventListener("change", loadCustomerCredit);
     if (els.creditAssignedSelect) els.creditAssignedSelect.addEventListener("change", loadAssignedCredit);
     els.authCloseBtn.addEventListener("click", closeAuthModal);
@@ -813,6 +946,7 @@ function renderProducts() {
         );
     }
 
+    lastFilteredProducts = filtered;
     if (filtered.length === 0) {
         els.productsGrid.innerHTML = `<div class="no-results">No products found</div>`;
         return;
@@ -822,7 +956,7 @@ function renderProducts() {
         const stockClass = p.stock <= 0 ? "stock-out" : p.stock <= 10 ? "stock-low" : "stock-ok";
         const stockLabel = p.stock <= 0 ? "Out of stock" : `${p.stock} in stock`;
         return `
-            <div class="product-card" data-id="${p.id}" onclick="addToCart('${p.id}')">
+            <div class="product-card compact" data-id="${p.id}" onclick="addToCart('${p.id}')">
                 <span class="product-stock ${stockClass}">${stockLabel}</span>
                 <span class="product-name">${esc(p.name)}</span>
                 <span class="product-sku">SKU: ${esc(p.sku)}</span>
@@ -888,6 +1022,7 @@ function removeFromCart(productId) {
 }
 
 async function clearCart() {
+    resetMpesaPending();
     if (currentSaleId) {
         try {
             await cancelSale(currentSaleId);
@@ -950,6 +1085,69 @@ function renderCart() {
 
 function isCreditSaleSelected() {
     return !!(els.creditToggle && els.creditToggle.checked);
+}
+
+function getSelectedPaymentMethod() {
+    return (els.paymentMethodSelect?.value || "cash").toLowerCase();
+}
+
+function updateMpesaFields() {
+    if (!els.mpesaFields) return;
+    const isMpesa = getSelectedPaymentMethod() === "mpesa";
+    els.mpesaFields.classList.toggle("hidden", !isMpesa);
+    if (!isMpesa) {
+        if (els.mpesaPhone) els.mpesaPhone.value = "";
+        if (els.mpesaReference) els.mpesaReference.value = "";
+        setMpesaStatus("");
+    }
+    updateCheckoutButtonLabel();
+}
+
+function updateCreditPaymentMethodFields() {
+    if (!els.paymentPhoneRow) return;
+    const isMpesa = (els.paymentMethod?.value || "cash").toLowerCase() === "mpesa";
+    els.paymentPhoneRow.classList.toggle("hidden", !isMpesa);
+    if (!isMpesa && els.paymentPhone) {
+        els.paymentPhone.value = "";
+    }
+}
+
+function setMpesaStatus(message, tone = "info") {
+    if (!els.mpesaStatus) return;
+    if (!message) {
+        els.mpesaStatus.textContent = "";
+        els.mpesaStatus.classList.add("hidden");
+        els.mpesaStatus.dataset.tone = "";
+        return;
+    }
+    els.mpesaStatus.textContent = message;
+    els.mpesaStatus.dataset.tone = tone;
+    els.mpesaStatus.classList.remove("hidden");
+}
+
+function resetMpesaPending() {
+    if (mpesaPollTimer) {
+        clearInterval(mpesaPollTimer);
+        mpesaPollTimer = null;
+    }
+    mpesaPollAttempts = 0;
+    mpesaPendingPayment = null;
+    setMpesaStatus("");
+    updateCheckoutButtonLabel();
+}
+
+function updateCheckoutButtonLabel() {
+    if (!els.checkoutBtn) return;
+    if (mpesaPendingPayment) {
+        els.checkoutBtn.innerHTML = `<div class="spinner" style="width:18px;height:18px;border-width:2px;"></div> Waiting for M-Pesa...`;
+        return;
+    }
+    const method = getSelectedPaymentMethod();
+    if (method === "mpesa") {
+        els.checkoutBtn.innerHTML = `<span class="btn-icon">📲</span> Send STK Push`;
+    } else {
+        els.checkoutBtn.innerHTML = `<span class="btn-icon">💳</span> Complete Sale`;
+    }
 }
 
 function handleCreditToggle(skipToast = false) {
@@ -1024,7 +1222,8 @@ function updateTotals() {
     const empty = cart.length === 0;
     const canSell = canPerformSales();
     const completion = getCompletionValidation();
-    els.checkoutBtn.disabled = empty || !canSell || !completion.valid;
+    const mpesaPending = Boolean(mpesaPendingPayment);
+    els.checkoutBtn.disabled = empty || !canSell || !completion.valid || mpesaPending;
     els.holdSaleBtn.disabled = empty || !canSell;
     els.clearCartBtn.disabled = !canSell;
 
@@ -1049,6 +1248,7 @@ function updateTotals() {
     }
 
     updateCreditSummary();
+    updateCheckoutButtonLabel();
 }
 
 function buildPayload({ status } = {}) {
@@ -1132,8 +1332,18 @@ function validateSaleInputs({ requirePayment = false, debug = false } = {}) {
 function getCompletionValidation() {
     const amountPaid = parseFloat(els.amountPaid.value) || 0;
     const grandTotal = parseCurrency(els.grandTotal.textContent);
+    const method = getSelectedPaymentMethod();
+    const phoneNumber = (els.mpesaPhone?.value || "").trim();
     if (amountPaid < 0) {
         return { valid: false, message: "Amount paid cannot be negative." };
+    }
+    if (method === "mpesa") {
+        if (amountPaid <= 0) {
+            return { valid: false, message: "M-Pesa payment requires an amount." };
+        }
+        if (!phoneNumber) {
+            return { valid: false, message: "M-Pesa phone number is required." };
+        }
     }
     if (isCreditSaleSelected()) {
         if ((currentSaleType || "retail") !== "wholesale") {
@@ -1167,7 +1377,7 @@ function openCreditModal() {
         return;
     }
     if (!els.creditModal) return;
-    els.creditModal.classList.remove("hidden");
+    openOverlay(els.creditModal);
     setCreditTab("payments");
     loadCreditSales();
     hydrateCreditSelectors();
@@ -1175,7 +1385,7 @@ function openCreditModal() {
 
 function closeCreditModal() {
     if (!els.creditModal) return;
-    els.creditModal.classList.add("hidden");
+    closeOverlay(els.creditModal);
 }
 
 function setCreditTab(tab) {
@@ -1253,12 +1463,7 @@ function renderCreditSaleDetail(sale) {
         return;
     }
     const payments = sale.payments || [];
-    const paymentsHtml = payments.length ? payments.map(p => `
-        <div class="payment-history-item">
-            <span>${fmtPrice(p.amount)} • ${p.payment_method || "cash"}</span>
-            <span>${new Date(p.payment_date).toLocaleDateString()}</span>
-        </div>
-    `).join("") : `<div class="credit-empty">No payments yet</div>`;
+    const paymentsHtml = renderPaymentHistoryList(payments, { compact: true });
 
     els.creditSaleDetail.innerHTML = `
         <div class="credit-detail-row"><span>Customer</span><strong>${esc(getCustomerName(sale.customer))}</strong></div>
@@ -1312,16 +1517,33 @@ async function submitPayment() {
         toast("Payment cannot exceed balance due", "error");
         return;
     }
+    const method = (els.paymentMethod?.value || "cash").toLowerCase();
+    const reference = (els.paymentReference?.value || "").trim();
+    const phoneNumber = (els.paymentPhone?.value || "").trim();
+    if (method === "mpesa") {
+        if (!reference) {
+            setPaymentError("M-Pesa transaction code is required.");
+            toast("M-Pesa transaction code is required", "error");
+            return;
+        }
+        if (!phoneNumber) {
+            setPaymentError("M-Pesa phone number is required.");
+            toast("M-Pesa phone number is required", "error");
+            return;
+        }
+    }
     clearPaymentError();
     const payload = {
         amount: amount.toFixed(2),
-        payment_method: els.paymentMethod?.value || "cash",
-        reference: els.paymentReference?.value || "",
+        method,
+        reference,
+        phone_number: phoneNumber,
         note: els.paymentNote?.value || "",
     };
     try {
         await apiRequest(`/sales/${selectedCreditSale.id}/payments/`, { method: "POST", body: payload });
         toast("Payment recorded", "success");
+        if (els.paymentPhone) els.paymentPhone.value = "";
         if (els.paymentReference) els.paymentReference.value = "";
         if (els.paymentNote) els.paymentNote.value = "";
         await loadCreditSales();
@@ -1455,11 +1677,17 @@ async function updateSale(saleId, payload) {
 }
 
 async function completeSale(saleId, payload) {
+    const method = getSelectedPaymentMethod();
+    const reference = (els.mpesaReference?.value || "").trim();
+    const phoneNumber = (els.mpesaPhone?.value || "").trim();
     return apiRequest(`/sales/${saleId}/complete/`, {
         method: "POST",
         body: {
             discount: payload.discount,
             amount_paid: payload.amount_paid,
+            method,
+            reference,
+            phone_number: phoneNumber,
         },
     });
 }
@@ -1483,8 +1711,17 @@ async function checkout() {
         saleType: currentSaleType,
         isCredit: isCreditSaleSelected(),
     });
+    if (mpesaPendingPayment) {
+        toast("Waiting for M-Pesa confirmation", "info");
+        return;
+    }
     if (!validateSaleInputs({ requirePayment: true, debug: POS_DEBUG })) {
         posLog("[pos] checkout aborted: validation failed");
+        return;
+    }
+
+    if (getSelectedPaymentMethod() === "mpesa") {
+        await checkoutMpesa();
         return;
     }
 
@@ -1521,7 +1758,108 @@ async function checkout() {
         toast(`Sale failed: ${err.message}`, "error");
     } finally {
         els.checkoutBtn.disabled = false;
-        els.checkoutBtn.innerHTML = `<span class="btn-icon">💳</span> Complete Sale`;
+        updateCheckoutButtonLabel();
+    }
+}
+
+async function checkoutMpesa() {
+    const payload = buildPayload();
+    const amountPaid = parseFloat(els.amountPaid.value) || 0;
+    const phoneNumber = (els.mpesaPhone?.value || "").trim();
+
+    if (!phoneNumber) {
+        toast("M-Pesa phone number is required", "error");
+        return;
+    }
+
+    if (!amountPaid || amountPaid <= 0) {
+        toast("Enter the amount to pay via M-Pesa", "error");
+        return;
+    }
+
+    els.checkoutBtn.disabled = true;
+    els.checkoutBtn.innerHTML = `<div class="spinner" style="width:20px;height:20px;border-width:2px;"></div> Sending STK push...`;
+
+    try {
+        let saleId = currentSaleId;
+        if (saleId) {
+            await updateSale(saleId, payload);
+        } else {
+            const sale = await createSale(payload);
+            saleId = sale.id;
+            currentSaleId = saleId;
+        }
+
+        const response = await apiRequest(`/payments/mpesa/stk-push/`, {
+            method: "POST",
+            body: {
+                sale_id: saleId,
+                phone_number: phoneNumber,
+                amount: amountPaid.toFixed(2),
+            },
+        });
+
+        mpesaPendingPayment = {
+            id: response.payment_id,
+            saleId,
+            checkoutId: response.checkout_request_id,
+        };
+        setMpesaStatus("Waiting for customer confirmation...", "info");
+        toast(response.message || "STK Push sent", "info");
+        startMpesaPolling(mpesaPendingPayment.id);
+    } catch (err) {
+        toast(`M-Pesa failed: ${err.message}`, "error");
+        resetMpesaPending();
+    } finally {
+        updateCheckoutButtonLabel();
+        updateTotals();
+    }
+}
+
+function startMpesaPolling(paymentId) {
+    if (!paymentId) return;
+    if (mpesaPollTimer) clearInterval(mpesaPollTimer);
+    mpesaPollAttempts = 0;
+    mpesaPollTimer = setInterval(() => {
+        pollMpesaPayment(paymentId);
+    }, MPESA_POLL_INTERVAL);
+    pollMpesaPayment(paymentId);
+}
+
+async function pollMpesaPayment(paymentId) {
+    if (!mpesaPendingPayment || mpesaPendingPayment.id !== paymentId) return;
+    mpesaPollAttempts += 1;
+    if (mpesaPollAttempts > MPESA_POLL_MAX) {
+        toast("M-Pesa confirmation timed out. Please check the phone or retry.", "warning");
+        resetMpesaPending();
+        return;
+    }
+
+    try {
+        const statusData = await apiFetch(`/payments/${paymentId}/`);
+        if (!statusData) return;
+        if (statusData.status === "completed") {
+            toast("M-Pesa payment confirmed", "success");
+            resetMpesaPending();
+            if (statusData.sale_status === "completed") {
+                currentSaleId = null;
+                currentSaleMeta = null;
+                currentSaleType = "retail";
+                showReceipt(statusData.sale_id);
+                loadProducts();
+                loadHeldSales();
+                await refreshCustomerOrdersAfterSaleComplete(statusData.sale_id);
+            } else {
+                toast("Payment received. Finalizing sale...", "info");
+            }
+        } else if (statusData.status === "failed") {
+            toast(statusData.provider_result_desc || "M-Pesa payment failed", "error");
+            resetMpesaPending();
+        } else {
+            setMpesaStatus("Waiting for customer confirmation...", "info");
+        }
+    } catch (err) {
+        posLog("[pos] mpesa poll error", err?.message || err);
     }
 }
 
@@ -1582,10 +1920,15 @@ async function showReceipt(saleId) {
         </div>
     `).join("");
 
+    const paymentList = ensureArray(saleDetail?.payments || receipt.payments || [], "receiptPayments");
+    const paymentHistory = renderPaymentHistoryList(paymentList, { compact: true });
+    const balanceValue = receipt.balance_due ?? receipt.balance;
+    const paymentStatus = receipt.payment_status || saleDetail?.payment_status || "";
+
     const creditMeta = saleDetail && saleDetail.is_credit_sale ? `
         <div class="receipt-total-row receipt-balance">
             <span>Payment Status</span>
-            <span>${formatStatus(saleDetail.payment_status || "unpaid")}</span>
+            <span>${formatStatus(paymentStatus || "unpaid")}</span>
         </div>
         <div class="receipt-total-row receipt-balance">
             <span>Balance Due</span>
@@ -1618,17 +1961,26 @@ async function showReceipt(saleId) {
             </div>
             <div class="receipt-total-row receipt-balance">
                 <span>Balance</span>
-                <span>${fmtPrice(receipt.balance)}</span>
+                <span>${fmtPrice(balanceValue)}</span>
             </div>
             ${creditMeta}
         </div>
+        <div class="receipt-payments">
+            <div class="receipt-section-title">Payments</div>
+            ${paymentHistory}
+        </div>
     `;
 
-    els.receiptModal.classList.remove("hidden");
+    openOverlay(els.receiptModal);
+}
+
+function closeReceiptModal() {
+    newSale();
 }
 
 function newSale() {
-    els.receiptModal.classList.add("hidden");
+    closeOverlay(els.receiptModal);
+    resetMpesaPending();
     clearCart();
     currentSaleId = null;
     currentSaleType = "retail";
@@ -1672,7 +2024,7 @@ function openCustomerOrdersModal() {
         return;
     }
     if (!els.customerOrdersModal) return;
-    els.customerOrdersModal.classList.remove("hidden");
+    openOverlay(els.customerOrdersModal);
     customerOrdersLog("[customer-orders] modal opened");
     customerOrdersOffset = 0;
     loadCustomerOrders();
@@ -1681,7 +2033,7 @@ function openCustomerOrdersModal() {
 
 function closeCustomerOrdersModal() {
     if (!els.customerOrdersModal) return;
-    els.customerOrdersModal.classList.add("hidden");
+    closeOverlay(els.customerOrdersModal);
 }
 
 async function ensureAssignableUsers() {
@@ -2241,14 +2593,14 @@ function openLedgerModal() {
         els.expenseDate.value = today;
     }
     setLedgerTab("overview");
-    els.ledgerModal.classList.remove("hidden");
+    openOverlay(els.ledgerModal);
     ledgerOffset = 0;
     loadLedger();
 }
 
 function closeLedgerModal() {
     if (!els.ledgerModal) return;
-    els.ledgerModal.classList.add("hidden");
+    closeOverlay(els.ledgerModal);
 }
 
 async function loadLedger() {
@@ -2927,13 +3279,14 @@ function openReturnsModal() {
         return;
     }
     if (!els.returnsModal) return;
-    els.returnsModal.classList.remove("hidden");
+    openOverlay(els.returnsModal);
     clearReturnsState();
 }
 
 function closeReturnsModal() {
     if (!els.returnsModal) return;
-    els.returnsModal.classList.add("hidden");
+    clearReturnsState();
+    closeOverlay(els.returnsModal);
 }
 
 function clearReturnsState() {
@@ -3390,6 +3743,43 @@ function renderStatusBadge(status) {
     return `<span class="status-badge status-${normalized}">${label}</span>`;
 }
 
+function formatPaymentMethod(method) {
+    const normalized = (method || "cash").toString().toLowerCase();
+    if (normalized === "mpesa") return "M-Pesa";
+    return "Cash";
+}
+
+function renderPaymentHistoryList(payments, { compact = false } = {}) {
+    const list = ensureArray(payments, "payments");
+    if (!list.length) {
+        return `<div class="payment-empty">No payments yet</div>`;
+    }
+    const rows = list.map(payment => {
+        const method = formatPaymentMethod(payment.method || payment.payment_method);
+        const status = (payment.status || "completed").toString().toLowerCase();
+        const metaParts = [];
+        if (payment.reference) metaParts.push(`Ref: ${esc(payment.reference)}`);
+        if (payment.phone_number) metaParts.push(esc(payment.phone_number));
+        if (payment.payment_date) metaParts.push(formatDateTime(payment.payment_date));
+        const metaLine = metaParts.length ? `<div class="payment-sub">${metaParts.join(" • ")}</div>` : "";
+        const receivedBy = payment.received_by_name ? `<div class="payment-received">By ${esc(payment.received_by_name)}</div>` : "";
+        return `
+            <div class="payment-history-item ${compact ? "compact" : ""}">
+                <div class="payment-main">
+                    <div class="payment-line">
+                        <span class="payment-method">${method}</span>
+                        <span class="payment-amount">${fmtPrice(payment.amount)}</span>
+                        ${renderStatusBadge(status)}
+                    </div>
+                    ${metaLine}
+                </div>
+                ${receivedBy}
+            </div>
+        `;
+    }).join("");
+    return `<div class="payment-history-list ${compact ? "compact" : ""}">${rows}</div>`;
+}
+
 function renderOrderStatusBadge(status) {
     const normalized = (status || "pending").toString().toLowerCase();
     const label = formatStatus(normalized).replace(/_/g, " ");
@@ -3615,12 +4005,12 @@ function updateAuthStatus() {
 
 function openAuthModal() {
     if (!els.authModal) return;
-    els.authModal.classList.remove("hidden");
+    openOverlay(els.authModal);
 }
 
 function closeAuthModal() {
     if (!els.authModal) return;
-    els.authModal.classList.add("hidden");
+    closeOverlay(els.authModal);
 }
 
 async function bootstrapAuth() {
@@ -3711,10 +4101,11 @@ function clearAuth() {
     firstProtectedFailure = null;
     updateAuthStatus();
     applyRoleUI();
-    if (els.creditModal) els.creditModal.classList.add("hidden");
-    if (els.customerOrdersModal) els.customerOrdersModal.classList.add("hidden");
-    if (els.ledgerModal) els.ledgerModal.classList.add("hidden");
-    if (els.returnsModal) els.returnsModal.classList.add("hidden");
+    if (els.creditModal) closeOverlay(els.creditModal);
+    if (els.customerOrdersModal) closeOverlay(els.customerOrdersModal);
+    if (els.ledgerModal) closeOverlay(els.ledgerModal);
+    if (els.returnsModal) closeOverlay(els.returnsModal);
+    if (els.receiptModal) closeOverlay(els.receiptModal);
 }
 
 function logout() {

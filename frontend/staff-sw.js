@@ -1,8 +1,9 @@
-const CACHE_NAME = "staff-app-v3";
+const CACHE_NAME = "staff-app-v5";
+const APP_BUILD = "2026-04-03.1";
 const APP_SHELL = [
     "/",
-    "/static/style.css",
-    "/static/app.js",
+    `/static/style.css?v=${APP_BUILD}`,
+    `/static/app.js?v=${APP_BUILD}`,
     "/static/staff-manifest.webmanifest",
     "/static/staff-icon-192.png",
     "/static/staff-icon-512.png",

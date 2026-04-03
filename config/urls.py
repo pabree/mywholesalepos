@@ -49,6 +49,7 @@ urlpatterns = [
     path("api/ledger/", include("sales.ledger_urls")),
     path("api/finance/export/", FinanceExportView.as_view(), name="finance-export"),
     path("api/finance/performance/", include("sales.performance_urls")),
+    path("api/payments/", include("sales.payment_urls")),
     path("api/expenses/", include("expenses.urls")),
     path("api/routes/", include("logistics.urls")),
     path("api/sales/", include("sales.urls")),

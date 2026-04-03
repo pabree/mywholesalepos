@@ -31,6 +31,7 @@ class Sale(BaseModel):
     ]
     PAYMENT_MODE_CHOICES = [
         ("cash", "Cash"),
+        ("mpesa", "M-Pesa"),
         ("mobile_money", "Mobile Money"),
         ("card", "Card"),
         ("bank", "Bank Transfer"),
@@ -184,7 +185,17 @@ class Sale(BaseModel):
         LedgerEntry.record_sale_completion(sale=self, actor=self.completed_by or self.updated_by)
 
     @transaction.atomic
-    def apply_payment(self, *, amount, received_by=None, payment_method=None, reference="", note=""):
+    def apply_payment(
+        self,
+        *,
+        amount,
+        received_by=None,
+        method=None,
+        status="completed",
+        reference="",
+        phone_number="",
+        note="",
+    ):
         if self.status != "completed":
             raise ValueError("Payments can only be recorded for completed sales.")
         if not self.is_credit_sale:
@@ -194,25 +205,83 @@ class Sale(BaseModel):
         amount = money(amount)
         if amount <= 0:
             raise ValueError("Payment amount must be greater than zero.")
-        if self.balance_due <= 0:
+        if status == "completed" and self.balance_due <= 0:
             raise ValueError("This sale is already fully paid.")
+        if status == "completed" and amount > self.balance_due:
+            raise ValueError("Payment amount cannot exceed balance due.")
 
         payment = SalePayment.objects.create(
             sale=self,
             customer=self.customer,
             amount=amount,
-            payment_method=payment_method or "cash",
+            method=method or "cash",
+            status=status or "completed",
             received_by=received_by,
             reference=reference or "",
+            phone_number=phone_number or "",
             note=note or "",
         )
 
+        if payment.status == "completed":
+            self.amount_paid = money(self.amount_paid + amount)
+            self.balance_due = money(max(Decimal("0.00"), self.grand_total - self.amount_paid))
+            self.refresh_payment_status()
+            self.save(update_fields=["amount_paid", "balance_due", "payment_status", "updated_at"])
+            LedgerEntry.record_credit_payment(payment=payment, actor=received_by)
+        return payment
+
+    def record_initial_payment(
+        self,
+        *,
+        amount,
+        method,
+        received_by=None,
+        status="completed",
+        reference="",
+        phone_number="",
+        note="",
+    ):
+        if amount is None:
+            raise ValueError("Payment amount is required.")
+        amount = money(amount)
+        if amount <= 0:
+            return None
+        return SalePayment.objects.create(
+            sale=self,
+            customer=self.customer,
+            amount=amount,
+            method=method or "cash",
+            status=status or "completed",
+            received_by=received_by,
+            reference=reference or "",
+            phone_number=phone_number or "",
+            note=note or "",
+        )
+
+    @transaction.atomic
+    def apply_existing_payment(self, payment, *, received_by=None):
+        if not payment:
+            return None
+        if payment.sale_id != self.id:
+            raise ValueError("Payment does not belong to this sale.")
+        if payment.status != "completed":
+            return payment
+        if payment.applied_at:
+            return payment
+        if not self.is_credit_sale:
+            raise ValueError("Only credit sales can apply existing payments.")
+        amount = money(payment.amount)
+        if amount <= 0:
+            return payment
+        if self.balance_due is not None and amount > self.balance_due:
+            raise ValueError("Payment amount cannot exceed balance due.")
         self.amount_paid = money(self.amount_paid + amount)
         self.balance_due = money(max(Decimal("0.00"), self.grand_total - self.amount_paid))
         self.refresh_payment_status()
         self.save(update_fields=["amount_paid", "balance_due", "payment_status", "updated_at"])
-
-        LedgerEntry.record_credit_payment(payment=payment, actor=received_by)
+        LedgerEntry.record_credit_payment(payment=payment, actor=received_by or payment.received_by)
+        payment.applied_at = timezone.now()
+        payment.save(update_fields=["applied_at", "updated_at"])
         return payment
 
 # each sale product
@@ -243,10 +312,30 @@ class SaleItem(BaseModel):
 
 
 class SalePayment(BaseModel):
+    METHOD_CHOICES = [
+        ("cash", "Cash"),
+        ("mpesa", "M-Pesa"),
+    ]
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    ]
+
     sale = models.ForeignKey("Sale", on_delete=models.CASCADE, related_name="payments")
     customer = models.ForeignKey("customers.Customer", on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
-    payment_method = models.CharField(max_length=50, blank=True, null=True)
+    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default="cash")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="completed")
+    reference = models.CharField(max_length=120, blank=True, default="")
+    phone_number = models.CharField(max_length=20, blank=True, default="")
+    provider = models.CharField(max_length=30, blank=True, default="")
+    provider_request_id = models.CharField(max_length=120, blank=True, default="")
+    provider_checkout_id = models.CharField(max_length=120, blank=True, default="")
+    provider_result_code = models.CharField(max_length=20, blank=True, default="")
+    provider_result_desc = models.CharField(max_length=255, blank=True, default="")
+    provider_metadata = models.JSONField(blank=True, default=dict)
+    raw_callback = models.JSONField(blank=True, default=dict)
     received_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -254,12 +343,32 @@ class SalePayment(BaseModel):
         blank=True,
         related_name="received_payments",
     )
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="verified_payments",
+    )
     payment_date = models.DateTimeField(default=timezone.now)
-    reference = models.CharField(max_length=120, blank=True, default="")
     note = models.TextField(blank=True, default="")
+    verified_at = models.DateTimeField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-payment_date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reference"],
+                condition=Q(reference__gt="", method="mpesa"),
+                name="uniq_mpesa_reference",
+            ),
+            models.UniqueConstraint(
+                fields=["provider_checkout_id"],
+                condition=Q(provider_checkout_id__gt="", provider="mpesa"),
+                name="uniq_mpesa_checkout_id",
+            ),
+        ]
 
     def __str__(self):
         return f"Payment {self.amount} for Sale {self.sale_id}"
@@ -413,7 +522,7 @@ class LedgerEntry(BaseModel):
             "actor": actor or payment.received_by,
             "reference": payment.reference or "",
             "metadata": {
-                "payment_method": payment.payment_method or "",
+                "payment_method": payment.method or "",
             },
         }
         entry, _ = cls.objects.get_or_create(

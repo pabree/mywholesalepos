@@ -8,7 +8,7 @@
     <meta name="theme-color" content="#0f172a">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>RetailPOS — Point of Sale</title>
+    <title>Stery Wholesalers — Wholesale POS</title>
     <meta name="description" content="Retail Point of Sale System for managing sales, inventory, and receipts.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-01.1">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-03.1">
 </head>
 <body>
     <!-- Top Bar -->
@@ -25,7 +25,10 @@
         <div class="topbar-left">
             <div class="logo">
                 <span class="logo-icon">◆</span>
-                <span class="logo-text">Retail<span class="accent">POS</span></span>
+                <span class="logo-copy">
+                    <span class="logo-text">Stery <span class="accent">Wholesalers</span></span>
+                    <span class="logo-subtitle">Wholesale POS</span>
+                </span>
             </div>
         </div>
         <div class="topbar-center">
@@ -68,16 +71,16 @@
         <!-- LEFT: Products Panel -->
         <section id="products-panel">
             <div class="panel-header">
-                <h1>Products</h1>
+                <h1>Product Search</h1>
                 <div class="search-wrapper">
                     <span class="search-icon">⌕</span>
                     <input type="text" id="product-search" placeholder="Search by name or SKU..." autocomplete="off">
                 </div>
             </div>
-            <div class="category-filters" id="category-filters">
+            <div class="category-filters secondary" id="category-filters">
                 <button class="cat-btn active" data-category="all">All</button>
             </div>
-            <div id="products-grid" class="products-grid">
+            <div id="products-grid" class="products-grid compact">
                 <div class="loading-state">
                     <div class="spinner"></div>
                     <p>Loading products...</p>
@@ -120,6 +123,20 @@
                 <div class="summary-row">
                     <label for="amount-paid-input" id="amount-paid-label">Amount Paid</label>
                     <input type="number" id="amount-paid-input" value="0" min="0" step="0.01" class="summary-input">
+                </div>
+                <div class="summary-row">
+                    <label for="payment-method-select">Payment Method</label>
+                    <select id="payment-method-select" class="summary-select">
+                        <option value="cash">Cash</option>
+                        <option value="mpesa">M-Pesa</option>
+                    </select>
+                </div>
+                <div id="mpesa-fields" class="mpesa-fields hidden">
+                    <div class="summary-row">
+                        <label for="mpesa-phone">M-Pesa Phone</label>
+                        <input type="tel" id="mpesa-phone" class="summary-input" placeholder="07XXXXXXXX">
+                    </div>
+                    <div id="mpesa-status" class="mpesa-status hidden"></div>
                 </div>
                 <div class="summary-row change-row" id="change-row">
                     <span>Change</span>
@@ -183,10 +200,16 @@
     </main>
 
     <!-- Receipt Modal -->
-    <div id="receipt-modal" class="modal-overlay hidden">
+    <div id="receipt-modal" class="modal-overlay hidden" data-backdrop-close="true">
         <div class="modal-content receipt-modal">
-            <div class="receipt" id="receipt-content">
-                <!-- Populated by JS -->
+            <div class="modal-header">
+                <h3>Receipt</h3>
+                <button id="receipt-close-btn" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <div class="receipt" id="receipt-content">
+                    <!-- Populated by JS -->
+                </div>
             </div>
             <div class="modal-actions">
                 <button id="print-receipt-btn" class="btn-primary">🖨️ Print</button>
@@ -202,23 +225,25 @@
                 <h3>Login</h3>
                 <button id="auth-close-btn" class="btn-ghost">✕</button>
             </div>
-            <div class="modal-body">
-                <div class="auth-section">
-                    <label for="auth-username">Username</label>
-                    <input id="auth-username" type="text" class="modal-input" placeholder="username">
+            <div class="modal-body-scroll">
+                <div class="modal-body">
+                    <div class="auth-section">
+                        <label for="auth-username">Username</label>
+                        <input id="auth-username" type="text" class="modal-input" placeholder="username">
+                    </div>
+                    <div class="auth-section">
+                        <label for="auth-password">Password</label>
+                        <input id="auth-password" type="password" class="modal-input" placeholder="••••••••">
+                    </div>
+                    <button id="auth-login-btn" class="btn-primary full-width">Login</button>
+                    <div id="auth-status" class="auth-status">No token saved</div>
                 </div>
-                <div class="auth-section">
-                    <label for="auth-password">Password</label>
-                    <input id="auth-password" type="password" class="modal-input" placeholder="••••••••">
-                </div>
-                <button id="auth-login-btn" class="btn-primary full-width">Login</button>
-                <div id="auth-status" class="auth-status">No token saved</div>
             </div>
         </div>
     </div>
 
     <!-- Credit Center Modal -->
-    <div id="credit-modal" class="modal-overlay hidden">
+    <div id="credit-modal" class="modal-overlay hidden" data-backdrop-close="true">
         <div class="modal-content credit-modal">
             <div class="modal-header">
                 <h3>Credit Center</h3>
@@ -229,100 +254,104 @@
                 <button class="credit-tab" data-tab="customer">Customer Credit</button>
                 <button class="credit-tab" data-tab="assigned">Delivery Accountability</button>
             </div>
-            <div class="credit-body">
-                <section id="credit-payments-panel" class="credit-panel">
-                    <div class="credit-panel-grid">
-                        <div class="credit-panel-left">
-                            <div class="credit-section">
-                                <div class="credit-section-header">
-                                    <h4>Open Credit Sales</h4>
-                                    <button id="refresh-credit-sales" class="btn-ghost">Refresh</button>
-                                </div>
-                                <input id="credit-search" class="summary-input credit-search" placeholder="Search by customer or sale id">
-                                <div id="credit-sales-list" class="credit-sales-list">
-                                    <div class="credit-empty">No open credit sales</div>
+            <div class="modal-body-scroll">
+                <div class="credit-body">
+                    <section id="credit-payments-panel" class="credit-panel">
+                        <div class="credit-panel-grid">
+                            <div class="credit-panel-left">
+                                <div class="credit-section">
+                                    <div class="credit-section-header">
+                                        <h4>Open Credit Sales</h4>
+                                        <button id="refresh-credit-sales" class="btn-ghost">Refresh</button>
+                                    </div>
+                                    <input id="credit-search" class="summary-input credit-search" placeholder="Search by customer or sale id">
+                                    <div id="credit-sales-list" class="credit-sales-list">
+                                        <div class="credit-empty">No open credit sales</div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="credit-panel-right">
-                            <div class="credit-section">
-                                <h4>Selected Sale</h4>
-                                <div id="credit-sale-detail" class="credit-detail">
-                                    <div class="credit-empty">Select a sale to view details</div>
+                            <div class="credit-panel-right">
+                                <div class="credit-section">
+                                    <h4>Selected Sale</h4>
+                                    <div id="credit-sale-detail" class="credit-detail">
+                                        <div class="credit-empty">Select a sale to view details</div>
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="credit-section">
-                                <h4>Record Payment</h4>
-                                <div class="credit-form">
-                                    <div class="summary-row">
-                                        <label for="payment-amount">Amount</label>
-                                        <input id="payment-amount" type="number" class="summary-input" min="0" step="0.01">
-                                    </div>
-                                    <div class="credit-inline">
-                                        <button id="pay-full-btn" class="btn-secondary">Pay Full Balance</button>
-                                        <div id="payment-error" class="credit-error"></div>
-                                    </div>
+                                <div class="credit-section">
+                                    <h4>Record Payment</h4>
+                                    <div class="credit-form">
+                                        <div class="summary-row">
+                                            <label for="payment-amount">Amount</label>
+                                            <input id="payment-amount" type="number" class="summary-input" min="0" step="0.01">
+                                        </div>
+                                        <div class="credit-inline">
+                                            <button id="pay-full-btn" class="btn-secondary">Pay Full Balance</button>
+                                            <div id="payment-error" class="credit-error"></div>
+                                        </div>
                                     <div class="summary-row">
                                         <label for="payment-method">Method</label>
                                         <select id="payment-method" class="summary-select">
                                             <option value="cash">Cash</option>
-                                            <option value="mobile_money">Mobile Money</option>
-                                            <option value="card">Card</option>
-                                            <option value="bank">Bank Transfer</option>
+                                            <option value="mpesa">M-Pesa</option>
                                         </select>
+                                    </div>
+                                    <div class="summary-row hidden" id="payment-phone-row">
+                                        <label for="payment-phone">M-Pesa Phone</label>
+                                        <input id="payment-phone" type="tel" class="summary-input" placeholder="07XXXXXXXX">
                                     </div>
                                     <div class="summary-row">
                                         <label for="payment-reference">Reference</label>
                                         <input id="payment-reference" type="text" class="summary-input">
                                     </div>
-                                    <div class="summary-row">
-                                        <label for="payment-note">Note</label>
-                                        <input id="payment-note" type="text" class="summary-input">
+                                        <div class="summary-row">
+                                            <label for="payment-note">Note</label>
+                                            <input id="payment-note" type="text" class="summary-input">
+                                        </div>
+                                        <button id="submit-payment-btn" class="btn-primary full-width">Record Payment</button>
                                     </div>
-                                    <button id="submit-payment-btn" class="btn-primary full-width">Record Payment</button>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </section>
+                    </section>
 
-                <section id="credit-customer-panel" class="credit-panel hidden">
-                    <div class="credit-section">
-                        <div class="summary-row">
-                            <label for="credit-customer-select">Customer</label>
-                            <select id="credit-customer-select" class="summary-select"></select>
+                    <section id="credit-customer-panel" class="credit-panel hidden">
+                        <div class="credit-section">
+                            <div class="summary-row">
+                                <label for="credit-customer-select">Customer</label>
+                                <select id="credit-customer-select" class="summary-select"></select>
+                            </div>
+                            <div id="customer-summary" class="credit-summary"></div>
+                            <div class="credit-section-header">
+                                <h4>Open Credit Sales</h4>
+                            </div>
+                            <div id="customer-credit-list" class="credit-sales-list">
+                                <div class="credit-empty">Select a customer</div>
+                            </div>
                         </div>
-                        <div id="customer-summary" class="credit-summary"></div>
-                        <div class="credit-section-header">
-                            <h4>Open Credit Sales</h4>
-                        </div>
-                        <div id="customer-credit-list" class="credit-sales-list">
-                            <div class="credit-empty">Select a customer</div>
-                        </div>
-                    </div>
-                </section>
+                    </section>
 
-                <section id="credit-assigned-panel" class="credit-panel hidden">
-                    <div class="credit-section">
-                        <div class="summary-row">
-                            <label for="credit-assigned-select">Assigned User</label>
-                            <select id="credit-assigned-select" class="summary-select"></select>
+                    <section id="credit-assigned-panel" class="credit-panel hidden">
+                        <div class="credit-section">
+                            <div class="summary-row">
+                                <label for="credit-assigned-select">Assigned User</label>
+                                <select id="credit-assigned-select" class="summary-select"></select>
+                            </div>
+                            <div id="assigned-summary" class="credit-summary"></div>
+                            <div class="credit-section-header">
+                                <h4>Assigned Open Credit Sales</h4>
+                            </div>
+                            <div id="assigned-credit-list" class="credit-sales-list">
+                                <div class="credit-empty">Select a delivery/salesperson</div>
+                            </div>
                         </div>
-                        <div id="assigned-summary" class="credit-summary"></div>
-                        <div class="credit-section-header">
-                            <h4>Assigned Open Credit Sales</h4>
-                        </div>
-                        <div id="assigned-credit-list" class="credit-sales-list">
-                            <div class="credit-empty">Select a delivery/salesperson</div>
-                        </div>
-                    </div>
-                </section>
+                    </section>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Customer Orders Modal -->
-    <div id="customer-orders-modal" class="modal-overlay hidden">
+    <div id="customer-orders-modal" class="modal-overlay hidden" data-backdrop-close="true">
         <div class="modal-content orders-modal">
             <div class="modal-header">
                 <h3>Customer Orders</h3>
@@ -331,40 +360,42 @@
                     <button id="customer-orders-close-btn" class="btn-ghost">✕</button>
                 </div>
             </div>
-            <div class="orders-toolbar">
-                <div class="order-filters" id="customer-orders-filters">
-                    <button class="order-filter active" data-status="all">All</button>
-                    <button class="order-filter" data-status="pending">Pending</button>
-                    <button class="order-filter" data-status="pending_credit_approval">Pending Credit</button>
-                    <button class="order-filter" data-status="confirmed">Confirmed</button>
-                    <button class="order-filter" data-status="processing">Processing</button>
-                    <button class="order-filter" data-status="out_for_delivery">Out for Delivery</button>
-                    <button class="order-filter" data-status="delivered">Delivered</button>
-                    <button class="order-filter" data-status="cancelled">Cancelled</button>
-                </div>
-                <input id="customer-orders-search" class="modal-input orders-search" placeholder="Search by customer or order id">
-            </div>
-            <div class="orders-grid">
-                <div class="orders-list-panel">
-                    <div id="customer-orders-loading" class="orders-loading hidden">Loading customer orders...</div>
-                    <div id="customer-orders-error" class="orders-error hidden"></div>
-                    <div id="customer-orders-list" class="orders-list"></div>
-                    <div id="customer-orders-empty" class="orders-empty">No customer orders found.</div>
-                    <div class="pagination-controls">
-                        <button id="customer-orders-prev" class="btn-ghost" disabled>Prev</button>
-                        <span id="customer-orders-page" class="pagination-meta">Page 1 of 1</span>
-                        <button id="customer-orders-next" class="btn-ghost" disabled>Next</button>
+            <div class="modal-body-scroll">
+                <div class="orders-toolbar">
+                    <div class="order-filters" id="customer-orders-filters">
+                        <button class="order-filter active" data-status="all">All</button>
+                        <button class="order-filter" data-status="pending">Pending</button>
+                        <button class="order-filter" data-status="pending_credit_approval">Pending Credit</button>
+                        <button class="order-filter" data-status="confirmed">Confirmed</button>
+                        <button class="order-filter" data-status="processing">Processing</button>
+                        <button class="order-filter" data-status="out_for_delivery">Out for Delivery</button>
+                        <button class="order-filter" data-status="delivered">Delivered</button>
+                        <button class="order-filter" data-status="cancelled">Cancelled</button>
                     </div>
+                    <input id="customer-orders-search" class="modal-input orders-search" placeholder="Search by customer or order id">
                 </div>
-                <div class="orders-detail-panel">
-                    <div id="customer-order-detail" class="orders-detail-empty">Select an order to view details.</div>
+                <div class="orders-grid">
+                    <div class="orders-list-panel">
+                        <div id="customer-orders-loading" class="orders-loading hidden">Loading customer orders...</div>
+                        <div id="customer-orders-error" class="orders-error hidden"></div>
+                        <div id="customer-orders-list" class="orders-list"></div>
+                        <div id="customer-orders-empty" class="orders-empty">No customer orders found.</div>
+                        <div class="pagination-controls">
+                            <button id="customer-orders-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="customer-orders-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="customer-orders-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div class="orders-detail-panel">
+                        <div id="customer-order-detail" class="orders-detail-empty">Select an order to view details.</div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Ledger Modal -->
-    <div id="ledger-modal" class="modal-overlay hidden">
+    <div id="ledger-modal" class="modal-overlay hidden" data-backdrop-close="true">
         <div class="modal-content ledger-modal">
             <div class="modal-header">
                 <h3>Financial Overview</h3>
@@ -378,203 +409,205 @@
                 <button class="ledger-tab" data-ledger-tab="expenses">Expenses</button>
                 <button class="ledger-tab" data-ledger-tab="performance">Performance</button>
             </div>
-            <div id="ledger-overview-panel">
-                <div class="ledger-toolbar">
-                    <div class="ledger-filters">
-                        <div class="ledger-filter">
-                            <label for="ledger-start">Start Date</label>
-                            <input id="ledger-start" type="date" class="summary-input">
+            <div class="modal-body-scroll">
+                <div id="ledger-overview-panel">
+                    <div class="ledger-toolbar">
+                        <div class="ledger-filters">
+                            <div class="ledger-filter">
+                                <label for="ledger-start">Start Date</label>
+                                <input id="ledger-start" type="date" class="summary-input">
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="ledger-end">End Date</label>
+                                <input id="ledger-end" type="date" class="summary-input">
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="ledger-type">Entry Type</label>
+                                <select id="ledger-type" class="summary-select">
+                                    <option value="">All types</option>
+                                    <option value="sale_payment">Sale payments</option>
+                                    <option value="credit_payment">Credit payments</option>
+                                </select>
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="ledger-customer">Customer</label>
+                                <select id="ledger-customer" class="summary-select">
+                                    <option value="">All customers</option>
+                                </select>
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="ledger-branch">Branch</label>
+                                <select id="ledger-branch" class="summary-select">
+                                    <option value="">All branches</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="ledger-filter">
-                            <label for="ledger-end">End Date</label>
-                            <input id="ledger-end" type="date" class="summary-input">
-                        </div>
-                        <div class="ledger-filter">
-                            <label for="ledger-type">Entry Type</label>
-                            <select id="ledger-type" class="summary-select">
-                                <option value="">All types</option>
-                                <option value="sale_payment">Sale payments</option>
-                                <option value="credit_payment">Credit payments</option>
-                            </select>
-                        </div>
-                        <div class="ledger-filter">
-                            <label for="ledger-customer">Customer</label>
-                            <select id="ledger-customer" class="summary-select">
-                                <option value="">All customers</option>
-                            </select>
-                        </div>
-                        <div class="ledger-filter">
-                            <label for="ledger-branch">Branch</label>
-                            <select id="ledger-branch" class="summary-select">
-                                <option value="">All branches</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="ledger-actions">
-                        <label class="ledger-export-toggle">
-                            <input type="checkbox" id="finance-export-include">
-                            Include entries
-                        </label>
-                        <button id="finance-export-btn" class="btn-secondary">Export CSV</button>
-                    </div>
-                </div>
-                <div id="ledger-summary" class="ledger-summary"></div>
-                <div class="ledger-list-panel">
-                    <div id="ledger-loading" class="orders-loading hidden">Loading ledger...</div>
-                    <div id="ledger-error" class="orders-error hidden"></div>
-                    <div id="ledger-list" class="ledger-list"></div>
-                    <div id="ledger-empty" class="orders-empty">No ledger entries found.</div>
-                    <div class="pagination-controls">
-                        <button id="ledger-prev" class="btn-ghost" disabled>Prev</button>
-                        <span id="ledger-page" class="pagination-meta">Page 1 of 1</span>
-                        <button id="ledger-next" class="btn-ghost" disabled>Next</button>
-                    </div>
-                </div>
-            </div>
-            <div id="ledger-expenses-panel" class="hidden">
-                <div class="ledger-toolbar">
-                    <div class="ledger-filters">
-                        <div class="ledger-filter">
-                            <label for="expense-start">Start Date</label>
-                            <input id="expense-start" type="date" class="summary-input">
-                        </div>
-                        <div class="ledger-filter">
-                            <label for="expense-end">End Date</label>
-                            <input id="expense-end" type="date" class="summary-input">
-                        </div>
-                        <div class="ledger-filter">
-                            <label for="expense-category-filter">Category</label>
-                            <select id="expense-category-filter" class="summary-select">
-                                <option value="">All categories</option>
-                            </select>
-                        </div>
-                        <div class="ledger-filter">
-                            <label for="expense-branch-filter">Branch</label>
-                            <select id="expense-branch-filter" class="summary-select">
-                                <option value="">All branches</option>
-                            </select>
+                        <div class="ledger-actions">
+                            <label class="ledger-export-toggle">
+                                <input type="checkbox" id="finance-export-include">
+                                Include entries
+                            </label>
+                            <button id="finance-export-btn" class="btn-secondary">Export CSV</button>
                         </div>
                     </div>
-                    <div class="ledger-actions">
-                        <button id="expenses-export-btn" class="btn-secondary">Export CSV</button>
-                    </div>
-                </div>
-                <div class="expense-form">
-                    <div class="expense-form-grid">
-                        <div class="expense-field">
-                            <label for="expense-date">Date</label>
-                            <input id="expense-date" type="date" class="summary-input">
-                        </div>
-                        <div class="expense-field">
-                            <label for="expense-amount">Amount</label>
-                            <input id="expense-amount" type="number" step="0.01" min="0" class="summary-input" placeholder="0.00">
-                        </div>
-                        <div class="expense-field">
-                            <label for="expense-category">Category</label>
-                            <select id="expense-category" class="summary-select">
-                                <option value="">Select category</option>
-                            </select>
-                        </div>
-                        <div class="expense-field">
-                            <label for="expense-branch">Branch</label>
-                            <select id="expense-branch" class="summary-select">
-                                <option value="">All branches</option>
-                            </select>
-                        </div>
-                        <div class="expense-field">
-                            <label for="expense-reference">Reference</label>
-                            <input id="expense-reference" type="text" class="summary-input" placeholder="Receipt #">
-                        </div>
-                        <div class="expense-field wide">
-                            <label for="expense-description">Description</label>
-                            <input id="expense-description" type="text" class="summary-input" placeholder="Optional notes">
+                    <div id="ledger-summary" class="ledger-summary"></div>
+                    <div class="ledger-list-panel">
+                        <div id="ledger-loading" class="orders-loading hidden">Loading ledger...</div>
+                        <div id="ledger-error" class="orders-error hidden"></div>
+                        <div id="ledger-list" class="ledger-list"></div>
+                        <div id="ledger-empty" class="orders-empty">No ledger entries found.</div>
+                        <div class="pagination-controls">
+                            <button id="ledger-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="ledger-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="ledger-next" class="btn-ghost" disabled>Next</button>
                         </div>
                     </div>
-                    <div class="expense-actions">
-                        <button id="expense-save-btn" class="btn-primary">Add Expense</button>
-                        <div id="expense-form-error" class="orders-error hidden"></div>
-                    </div>
                 </div>
-                <div class="ledger-list-panel">
-                    <div id="expense-loading" class="orders-loading hidden">Loading expenses...</div>
-                    <div id="expense-error" class="orders-error hidden"></div>
-                    <div id="expense-list" class="ledger-list"></div>
-                    <div id="expense-empty" class="orders-empty">No expenses found.</div>
-                    <div class="pagination-controls">
-                        <button id="expense-prev" class="btn-ghost" disabled>Prev</button>
-                        <span id="expense-page" class="pagination-meta">Page 1 of 1</span>
-                        <button id="expense-next" class="btn-ghost" disabled>Next</button>
-                    </div>
-                </div>
-            </div>
-            <div id="ledger-performance-panel" class="hidden">
-                <div class="ledger-toolbar">
-                    <div class="ledger-filters">
-                        <div class="ledger-filter">
-                            <label for="performance-start">Start Date</label>
-                            <input id="performance-start" type="date" class="summary-input">
+                <div id="ledger-expenses-panel" class="hidden">
+                    <div class="ledger-toolbar">
+                        <div class="ledger-filters">
+                            <div class="ledger-filter">
+                                <label for="expense-start">Start Date</label>
+                                <input id="expense-start" type="date" class="summary-input">
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="expense-end">End Date</label>
+                                <input id="expense-end" type="date" class="summary-input">
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="expense-category-filter">Category</label>
+                                <select id="expense-category-filter" class="summary-select">
+                                    <option value="">All categories</option>
+                                </select>
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="expense-branch-filter">Branch</label>
+                                <select id="expense-branch-filter" class="summary-select">
+                                    <option value="">All branches</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="ledger-filter">
-                            <label for="performance-end">End Date</label>
-                            <input id="performance-end" type="date" class="summary-input">
-                        </div>
-                        <div class="ledger-filter">
-                            <label for="performance-branch">Branch</label>
-                            <select id="performance-branch" class="summary-select">
-                                <option value="">All branches</option>
-                            </select>
-                        </div>
-                        <div class="ledger-filter" id="performance-user-filter">
-                            <label for="performance-user">User</label>
-                            <select id="performance-user" class="summary-select">
-                                <option value="">All users</option>
-                            </select>
-                        </div>
-                        <div class="ledger-filter hidden" id="performance-route-filter">
-                            <label for="performance-route">Route</label>
-                            <select id="performance-route" class="summary-select">
-                                <option value="">All routes</option>
-                            </select>
+                        <div class="ledger-actions">
+                            <button id="expenses-export-btn" class="btn-secondary">Export CSV</button>
                         </div>
                     </div>
-                    <div class="ledger-actions">
-                        <button id="performance-export-btn" class="btn-secondary">Export CSV</button>
+                    <div class="expense-form">
+                        <div class="expense-form-grid">
+                            <div class="expense-field">
+                                <label for="expense-date">Date</label>
+                                <input id="expense-date" type="date" class="summary-input">
+                            </div>
+                            <div class="expense-field">
+                                <label for="expense-amount">Amount</label>
+                                <input id="expense-amount" type="number" step="0.01" min="0" class="summary-input" placeholder="0.00">
+                            </div>
+                            <div class="expense-field">
+                                <label for="expense-category">Category</label>
+                                <select id="expense-category" class="summary-select">
+                                    <option value="">Select category</option>
+                                </select>
+                            </div>
+                            <div class="expense-field">
+                                <label for="expense-branch">Branch</label>
+                                <select id="expense-branch" class="summary-select">
+                                    <option value="">All branches</option>
+                                </select>
+                            </div>
+                            <div class="expense-field">
+                                <label for="expense-reference">Reference</label>
+                                <input id="expense-reference" type="text" class="summary-input" placeholder="Receipt #">
+                            </div>
+                            <div class="expense-field wide">
+                                <label for="expense-description">Description</label>
+                                <input id="expense-description" type="text" class="summary-input" placeholder="Optional notes">
+                            </div>
+                        </div>
+                        <div class="expense-actions">
+                            <button id="expense-save-btn" class="btn-primary">Add Expense</button>
+                            <div id="expense-form-error" class="orders-error hidden"></div>
+                        </div>
+                    </div>
+                    <div class="ledger-list-panel">
+                        <div id="expense-loading" class="orders-loading hidden">Loading expenses...</div>
+                        <div id="expense-error" class="orders-error hidden"></div>
+                        <div id="expense-list" class="ledger-list"></div>
+                        <div id="expense-empty" class="orders-empty">No expenses found.</div>
+                        <div class="pagination-controls">
+                            <button id="expense-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="expense-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="expense-next" class="btn-ghost" disabled>Next</button>
+                        </div>
                     </div>
                 </div>
-                <div class="perf-tabs">
-                    <button class="perf-tab active" data-perf-tab="cashiers">Cashiers</button>
-                    <button class="perf-tab" data-perf-tab="salespeople">Salespeople</button>
-                    <button class="perf-tab" data-perf-tab="delivery">Delivery</button>
-                    <button class="perf-tab" data-perf-tab="routes">Routes</button>
-                </div>
-                <div id="performance-loading" class="orders-loading hidden">Loading performance...</div>
-                <div id="performance-error" class="orders-error hidden"></div>
-                <div id="performance-cashiers-panel" class="perf-panel">
-                    <div id="performance-cashiers-summary" class="perf-summary"></div>
-                    <div id="performance-cashiers-list" class="perf-list"></div>
-                    <div id="performance-cashiers-empty" class="orders-empty hidden">No cashier data found.</div>
-                </div>
-                <div id="performance-salespeople-panel" class="perf-panel hidden">
-                    <div id="performance-salespeople-summary" class="perf-summary"></div>
-                    <div id="performance-salespeople-list" class="perf-list"></div>
-                    <div id="performance-salespeople-empty" class="orders-empty hidden">No salesperson data found.</div>
-                </div>
-                <div id="performance-delivery-panel" class="perf-panel hidden">
-                    <div id="performance-delivery-summary" class="perf-summary"></div>
-                    <div id="performance-delivery-list" class="perf-list"></div>
-                    <div id="performance-delivery-empty" class="orders-empty hidden">No delivery data found.</div>
-                </div>
-                <div id="performance-routes-panel" class="perf-panel hidden">
-                    <div id="performance-routes-summary" class="perf-summary"></div>
-                    <div id="performance-routes-list" class="perf-list"></div>
-                    <div id="performance-routes-empty" class="orders-empty hidden">No route data found.</div>
+                <div id="ledger-performance-panel" class="hidden">
+                    <div class="ledger-toolbar">
+                        <div class="ledger-filters">
+                            <div class="ledger-filter">
+                                <label for="performance-start">Start Date</label>
+                                <input id="performance-start" type="date" class="summary-input">
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="performance-end">End Date</label>
+                                <input id="performance-end" type="date" class="summary-input">
+                            </div>
+                            <div class="ledger-filter">
+                                <label for="performance-branch">Branch</label>
+                                <select id="performance-branch" class="summary-select">
+                                    <option value="">All branches</option>
+                                </select>
+                            </div>
+                            <div class="ledger-filter" id="performance-user-filter">
+                                <label for="performance-user">User</label>
+                                <select id="performance-user" class="summary-select">
+                                    <option value="">All users</option>
+                                </select>
+                            </div>
+                            <div class="ledger-filter hidden" id="performance-route-filter">
+                                <label for="performance-route">Route</label>
+                                <select id="performance-route" class="summary-select">
+                                    <option value="">All routes</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="ledger-actions">
+                            <button id="performance-export-btn" class="btn-secondary">Export CSV</button>
+                        </div>
+                    </div>
+                    <div class="perf-tabs">
+                        <button class="perf-tab active" data-perf-tab="cashiers">Cashiers</button>
+                        <button class="perf-tab" data-perf-tab="salespeople">Salespeople</button>
+                        <button class="perf-tab" data-perf-tab="delivery">Delivery</button>
+                        <button class="perf-tab" data-perf-tab="routes">Routes</button>
+                    </div>
+                    <div id="performance-loading" class="orders-loading hidden">Loading performance...</div>
+                    <div id="performance-error" class="orders-error hidden"></div>
+                    <div id="performance-cashiers-panel" class="perf-panel">
+                        <div id="performance-cashiers-summary" class="perf-summary"></div>
+                        <div id="performance-cashiers-list" class="perf-list"></div>
+                        <div id="performance-cashiers-empty" class="orders-empty hidden">No cashier data found.</div>
+                    </div>
+                    <div id="performance-salespeople-panel" class="perf-panel hidden">
+                        <div id="performance-salespeople-summary" class="perf-summary"></div>
+                        <div id="performance-salespeople-list" class="perf-list"></div>
+                        <div id="performance-salespeople-empty" class="orders-empty hidden">No salesperson data found.</div>
+                    </div>
+                    <div id="performance-delivery-panel" class="perf-panel hidden">
+                        <div id="performance-delivery-summary" class="perf-summary"></div>
+                        <div id="performance-delivery-list" class="perf-list"></div>
+                        <div id="performance-delivery-empty" class="orders-empty hidden">No delivery data found.</div>
+                    </div>
+                    <div id="performance-routes-panel" class="perf-panel hidden">
+                        <div id="performance-routes-summary" class="perf-summary"></div>
+                        <div id="performance-routes-list" class="perf-list"></div>
+                        <div id="performance-routes-empty" class="orders-empty hidden">No route data found.</div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Returns Modal -->
-    <div id="returns-modal" class="modal-overlay hidden">
+    <div id="returns-modal" class="modal-overlay hidden" data-backdrop-close="true">
         <div class="modal-content returns-modal">
             <div class="modal-header">
                 <h3>Return / Refund</h3>
@@ -582,27 +615,29 @@
                     <button id="returns-close-btn" class="btn-ghost">✕</button>
                 </div>
             </div>
-            <div class="returns-toolbar">
-                <div class="returns-field">
-                    <label for="returns-sale-id">Sale ID</label>
-                    <input id="returns-sale-id" class="summary-input" placeholder="Paste sale ID">
+            <div class="modal-body-scroll">
+                <div class="returns-toolbar">
+                    <div class="returns-field">
+                        <label for="returns-sale-id">Sale ID</label>
+                        <input id="returns-sale-id" class="summary-input" placeholder="Paste sale ID">
+                    </div>
+                    <button id="returns-load-btn" class="btn-secondary">Load Sale</button>
                 </div>
-                <button id="returns-load-btn" class="btn-secondary">Load Sale</button>
+                <div id="returns-sale-meta" class="returns-meta hidden"></div>
+                <div id="returns-items" class="returns-items"></div>
+                <div class="returns-actions">
+                    <button id="returns-calc-btn" class="btn-ghost">Calculate Refund</button>
+                    <button id="returns-submit-btn" class="btn-primary">Confirm Return</button>
+                    <div id="returns-total" class="returns-total">Refund Total: —</div>
+                </div>
+                <div id="returns-error" class="orders-error hidden"></div>
             </div>
-            <div id="returns-sale-meta" class="returns-meta hidden"></div>
-            <div id="returns-items" class="returns-items"></div>
-            <div class="returns-actions">
-                <button id="returns-calc-btn" class="btn-ghost">Calculate Refund</button>
-                <button id="returns-submit-btn" class="btn-primary">Confirm Return</button>
-                <div id="returns-total" class="returns-total">Refund Total: —</div>
-            </div>
-            <div id="returns-error" class="orders-error hidden"></div>
         </div>
     </div>
 
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-01.1"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-03.1"></script>
 </body>
 </html>

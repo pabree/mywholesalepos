@@ -19,6 +19,7 @@ from .serializers import (
     SaleDetailSerializer,
     SaleCompleteSerializer,
     SalePaymentCreateSerializer,
+    SalePaymentSerializer,
     SaleReturnCreateSerializer,
     SaleReturnSerializer,
 )
@@ -114,7 +115,7 @@ class SaleCompleteView(APIView):
 
         with transaction.atomic():
             sale = get_object_or_404(Sale.objects.select_for_update(), id=sale_id)
-            sale = serializer.save(sale=sale)
+            sale = serializer.save(sale=sale, received_by=request.user)
             return Response(
                 {"message": "Sale completed", "sale_id": sale.id, "status": sale.status},
                 status=status.HTTP_200_OK,
@@ -280,6 +281,9 @@ class SaleReceiptView(APIView):
             "total": sale.grand_total,
             "paid": sale.amount_paid,
             "balance": sale.balance,
+            "balance_due": sale.balance_due,
+            "payment_status": sale.payment_status,
+            "payments": SalePaymentSerializer(sale.payments.all(), many=True).data,
         }
 
         return Response(receipt)

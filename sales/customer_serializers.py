@@ -115,14 +115,34 @@ class CustomerSaleItemSerializer(serializers.ModelSerializer):
 
 
 class CustomerSalePaymentSerializer(serializers.ModelSerializer):
+    payment_method = serializers.CharField(source="method", read_only=True)
+    received_by_name = serializers.SerializerMethodField()
+
+    def get_received_by_name(self, obj):
+        user = obj.received_by
+        if not user:
+            return ""
+        display = getattr(user, "display_name", "") or ""
+        if display:
+            return display
+        if hasattr(user, "get_full_name"):
+            full_name = user.get_full_name()
+            if full_name:
+                return full_name
+        return getattr(user, "username", "") or ""
+
     class Meta:
         model = SalePayment
         fields = [
             "id",
             "amount",
+            "method",
             "payment_method",
+            "status",
+            "received_by_name",
             "payment_date",
             "reference",
+            "phone_number",
             "note",
         ]
         read_only_fields = fields
