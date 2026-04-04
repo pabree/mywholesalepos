@@ -214,6 +214,7 @@ class CustomerOrderSerializer(serializers.ModelSerializer):
 class StaffCustomerOrderListSerializer(serializers.ModelSerializer):
     customer = serializers.SerializerMethodField()
     branch = serializers.SerializerMethodField()
+    route = serializers.SerializerMethodField()
     sale = serializers.SerializerMethodField()
     assigned_to = serializers.SerializerMethodField()
     items_preview = serializers.SerializerMethodField()
@@ -234,6 +235,7 @@ class StaffCustomerOrderListSerializer(serializers.ModelSerializer):
             "updated_at",
             "customer",
             "branch",
+            "route",
             "sale",
             "assigned_to",
             "items_preview",
@@ -257,6 +259,14 @@ class StaffCustomerOrderListSerializer(serializers.ModelSerializer):
         if not branch:
             return None
         return {"id": str(branch.id), "name": branch.branch_name, "location": branch.location}
+
+    def get_route(self, obj):
+        sale = self._sale(obj)
+        customer = getattr(sale, "customer", None)
+        route = getattr(customer, "route", None) if customer else None
+        if not route:
+            return None
+        return {"id": str(route.id), "name": route.name, "code": route.code}
 
     def get_sale(self, obj):
         sale = self._sale(obj)
@@ -304,6 +314,7 @@ class StaffCustomerOrderListSerializer(serializers.ModelSerializer):
 class StaffCustomerOrderDetailSerializer(serializers.ModelSerializer):
     customer = serializers.SerializerMethodField()
     branch = serializers.SerializerMethodField()
+    route = serializers.SerializerMethodField()
     sale = serializers.SerializerMethodField()
     assigned_to = serializers.SerializerMethodField()
     items = serializers.SerializerMethodField()
@@ -324,6 +335,7 @@ class StaffCustomerOrderDetailSerializer(serializers.ModelSerializer):
             "updated_at",
             "customer",
             "branch",
+            "route",
             "sale",
             "assigned_to",
             "items",
@@ -347,6 +359,14 @@ class StaffCustomerOrderDetailSerializer(serializers.ModelSerializer):
         if not branch:
             return None
         return {"id": str(branch.id), "name": branch.branch_name, "location": branch.location}
+
+    def get_route(self, obj):
+        sale = self._sale(obj)
+        customer = getattr(sale, "customer", None)
+        route = getattr(customer, "route", None) if customer else None
+        if not route:
+            return None
+        return {"id": str(route.id), "name": route.name, "code": route.code}
 
     def get_sale(self, obj):
         sale = self._sale(obj)

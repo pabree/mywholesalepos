@@ -4,7 +4,7 @@ const APP_SHELL = [
     "/",
     `/static/style.css?v=${APP_BUILD}`,
     `/static/app.js?v=${APP_BUILD}`,
-    "/static/staff-manifest.webmanifest",
+    "/manifest.json",
     "/static/staff-icon-192.png",
     "/static/staff-icon-512.png",
 ];

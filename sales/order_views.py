@@ -1,6 +1,8 @@
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from django.http import HttpResponse
+import csv
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -19,34 +21,69 @@ from .customer_serializers import (
 )
 
 
+def _backoffice_orders_queryset(request):
+    status_filter = request.query_params.get("status")
+    query = (request.query_params.get("q") or "").strip()
+    branch_id = request.query_params.get("branch")
+    route_id = request.query_params.get("route")
+
+    qs = CustomerOrder.objects.select_related(
+        "sale",
+        "sale__branch",
+        "sale__customer",
+        "sale__customer__route",
+        "sale__assigned_to",
+    ).prefetch_related(
+        "sale__items",
+        "sale__items__product",
+        "sale__items__product_unit",
+    ).order_by("-created_at")
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    if query:
+        qs = qs.filter(
+            Q(sale__customer__name__icontains=query)
+            | Q(id__icontains=query)
+            | Q(sale__id__icontains=query)
+        )
+    if branch_id:
+        qs = qs.filter(sale__branch_id=branch_id)
+    if route_id:
+        qs = qs.filter(sale__customer__route_id=route_id)
+
+    return qs
+
+
+def _format_dt(value):
+    if not value:
+        return ""
+    try:
+        return value.isoformat(sep=" ", timespec="seconds")
+    except TypeError:
+        return str(value)
+
+
+def _display_user(user):
+    if not user:
+        return ""
+    display = getattr(user, "display_name", "") or ""
+    if display:
+        return display
+    if hasattr(user, "get_full_name"):
+        full_name = user.get_full_name()
+        if full_name:
+            return full_name
+    return getattr(user, "username", "") or ""
+
+
 class CustomerOrderStaffListView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
     allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person"}
 
     def get(self, request):
-        status_filter = request.query_params.get("status")
-        query = (request.query_params.get("q") or "").strip()
-
-        qs = CustomerOrder.objects.select_related(
-            "sale",
-            "sale__branch",
-            "sale__customer",
-            "sale__assigned_to",
-        ).prefetch_related(
-            "sale__items",
-            "sale__items__product",
-            "sale__items__product_unit",
-        ).order_by("-created_at")
-
-        if status_filter:
-            qs = qs.filter(status=status_filter)
-
-        if query:
-            qs = qs.filter(
-                Q(sale__customer__name__icontains=query)
-                | Q(id__icontains=query)
-                | Q(sale__id__icontains=query)
-            )
+        qs = _backoffice_orders_queryset(request)
 
         paginator = StandardLimitOffsetPagination()
         page = paginator.paginate_queryset(qs, request, view=self)
@@ -55,6 +92,51 @@ class CustomerOrderStaffListView(APIView):
         if page is not qs:
             return paginator.get_paginated_response(serializer.data)
         return Response(serializer.data)
+
+
+class CustomerOrderStaffExportView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person"}
+
+    def get(self, request):
+        qs = _backoffice_orders_queryset(request)
+        limit = request.query_params.get("limit")
+        offset = request.query_params.get("offset")
+        if limit is not None or offset is not None:
+            paginator = StandardLimitOffsetPagination()
+            page = paginator.paginate_queryset(qs, request, view=self)
+            qs = page if page is not None else qs
+
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="backoffice-orders.csv"'
+        writer = csv.writer(response)
+        writer.writerow([
+            "order_id",
+            "customer",
+            "branch",
+            "route",
+            "status",
+            "total",
+            "assigned",
+            "created_at",
+        ])
+        for order in qs:
+            sale = order.sale
+            branch = sale.branch if sale else None
+            customer = sale.customer if sale else None
+            route = customer.route if customer else None
+            assigned_to = sale.assigned_to if sale else None
+            writer.writerow([
+                str(order.id),
+                customer.name if customer else "",
+                branch.branch_name if branch else "",
+                route.name if route else "",
+                order.status,
+                str(sale.grand_total) if sale else "",
+                _display_user(assigned_to),
+                _format_dt(order.created_at),
+            ])
+        return response
 
 
 class CustomerOrderStaffDetailView(APIView):

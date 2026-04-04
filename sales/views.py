@@ -5,8 +5,11 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.db.models import Sum, Count, Q
 from decimal import Decimal
+from django.http import HttpResponse
+import csv
 from .models import Sale, SaleReturnItem
 from inventory.models import Inventory, StockMovement
 from .models import LedgerEntry
@@ -23,6 +26,233 @@ from .serializers import (
     SaleReturnCreateSerializer,
     SaleReturnSerializer,
 )
+
+
+def _backoffice_sales_queryset(request):
+    query = (request.query_params.get("q") or "").strip()
+    status_filter = request.query_params.get("status")
+    branch_id = request.query_params.get("branch")
+    customer_id = request.query_params.get("customer")
+    date_from = parse_date(request.query_params.get("date_from") or "")
+    date_to = parse_date(request.query_params.get("date_to") or "")
+
+    qs = Sale.objects.select_related(
+        "branch",
+        "customer",
+        "assigned_to",
+        "completed_by",
+    )
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    if branch_id:
+        qs = qs.filter(branch_id=branch_id)
+    if customer_id:
+        qs = qs.filter(customer_id=customer_id)
+    if query:
+        qs = qs.filter(
+            Q(customer__name__icontains=query)
+            | Q(id__icontains=query)
+        )
+    if date_from:
+        qs = qs.filter(sale_date__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(sale_date__date__lte=date_to)
+
+    return qs.order_by("-sale_date")
+
+
+def _format_dt(value):
+    if not value:
+        return ""
+    try:
+        return value.isoformat(sep=" ", timespec="seconds")
+    except TypeError:
+        return str(value)
+
+
+class BackOfficeSalesListView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        qs = _backoffice_sales_queryset(request)
+
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+
+        data = []
+        for sale in page:
+            assigned = sale.assigned_to
+            completed_by = sale.completed_by
+            data.append(
+                {
+                    "id": str(sale.id),
+                    "status": sale.status,
+                    "sale_type": sale.sale_type,
+                    "payment_mode": sale.payment_mode,
+                    "payment_status": sale.payment_status,
+                    "is_credit_sale": sale.is_credit_sale,
+                    "total_amount": str(sale.total_amount),
+                    "discount": str(sale.discount),
+                    "tax": str(sale.tax),
+                    "grand_total": str(sale.grand_total),
+                    "amount_paid": str(sale.amount_paid),
+                    "balance_due": str(sale.balance_due),
+                    "sale_date": sale.sale_date,
+                    "completed_at": sale.completed_at,
+                    "due_date": sale.due_date,
+                    "branch": {
+                        "id": str(sale.branch_id) if sale.branch_id else None,
+                        "name": sale.branch.branch_name if sale.branch else None,
+                    },
+                    "customer": {
+                        "id": str(sale.customer_id) if sale.customer_id else None,
+                        "name": sale.customer.name if sale.customer else None,
+                    },
+                    "assigned_to": {
+                        "id": str(assigned.id),
+                        "display_name": f"{assigned.first_name} {assigned.last_name}".strip() or assigned.username,
+                        "role": assigned.role,
+                    } if assigned else None,
+                    "completed_by": {
+                        "id": str(completed_by.id),
+                        "display_name": f"{completed_by.first_name} {completed_by.last_name}".strip() or completed_by.username,
+                        "role": completed_by.role,
+                    } if completed_by else None,
+                }
+            )
+
+        if page is not qs:
+            return paginator.get_paginated_response(data)
+        return Response(data)
+
+
+class BackOfficeSalesExportView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        qs = _backoffice_sales_queryset(request)
+        limit = request.query_params.get("limit")
+        offset = request.query_params.get("offset")
+        if limit is not None or offset is not None:
+            paginator = StandardLimitOffsetPagination()
+            page = paginator.paginate_queryset(qs, request, view=self)
+            qs = page if page is not None else qs
+
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="backoffice-sales.csv"'
+        writer = csv.writer(response)
+        writer.writerow([
+            "sale_id",
+            "customer",
+            "branch",
+            "status",
+            "total",
+            "paid",
+            "balance",
+            "payment_mode",
+            "payment_status",
+            "created_at",
+        ])
+        for sale in qs:
+            writer.writerow([
+                str(sale.id),
+                sale.customer.name if sale.customer else "",
+                sale.branch.branch_name if sale.branch else "",
+                sale.status,
+                str(sale.grand_total),
+                str(sale.amount_paid),
+                str(sale.balance_due),
+                sale.payment_mode or "",
+                sale.payment_status or "",
+                _format_dt(sale.sale_date),
+            ])
+        return response
+
+
+class BackOfficeSaleDetailView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request, sale_id):
+        sale = get_object_or_404(
+            Sale.objects.select_related(
+                "branch",
+                "customer",
+                "assigned_to",
+                "completed_by",
+            ).prefetch_related(
+                "items",
+                "items__product",
+                "items__product_unit",
+                "payments",
+            ),
+            id=sale_id,
+        )
+
+        items = [
+            {
+                "id": str(item.id),
+                "product_id": str(item.product_id) if item.product_id else None,
+                "product_name": item.product.name if item.product else None,
+                "product_unit": str(item.product_unit_id) if item.product_unit_id else None,
+                "unit_name": item.product_unit.unit_name if item.product_unit else None,
+                "unit_code": item.product_unit.unit_code if item.product_unit else None,
+                "quantity": item.quantity,
+                "unit_price": str(item.unit_price),
+                "total_price": str(item.total_price),
+                "price_type_used": item.price_type_used,
+                "pricing_reason": item.pricing_reason,
+            }
+            for item in sale.items.all()
+        ]
+
+        payments = SalePaymentSerializer(sale.payments.all(), many=True).data
+        assigned = sale.assigned_to
+        completed_by = sale.completed_by
+
+        data = {
+            "id": str(sale.id),
+            "status": sale.status,
+            "sale_type": sale.sale_type,
+            "payment_mode": sale.payment_mode,
+            "payment_status": sale.payment_status,
+            "is_credit_sale": sale.is_credit_sale,
+            "total_amount": str(sale.total_amount),
+            "discount": str(sale.discount),
+            "tax": str(sale.tax),
+            "grand_total": str(sale.grand_total),
+            "amount_paid": str(sale.amount_paid),
+            "balance_due": str(sale.balance_due),
+            "sale_date": sale.sale_date,
+            "completed_at": sale.completed_at,
+            "due_date": sale.due_date,
+            "branch": {
+                "id": str(sale.branch_id) if sale.branch_id else None,
+                "name": sale.branch.branch_name if sale.branch else None,
+                "location": sale.branch.location if sale.branch else None,
+            },
+            "customer": {
+                "id": str(sale.customer_id) if sale.customer_id else None,
+                "name": sale.customer.name if sale.customer else None,
+            },
+            "assigned_to": {
+                "id": str(assigned.id),
+                "display_name": f"{assigned.first_name} {assigned.last_name}".strip() or assigned.username,
+                "role": assigned.role,
+            } if assigned else None,
+            "completed_by": {
+                "id": str(completed_by.id),
+                "display_name": f"{completed_by.first_name} {completed_by.last_name}".strip() or completed_by.username,
+                "role": completed_by.role,
+            } if completed_by else None,
+            "items": items,
+            "payments": payments,
+        }
+        return Response(data)
 
 
 class SaleCreateView(APIView):

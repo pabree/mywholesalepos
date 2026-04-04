@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-03.1";
+const APP_BUILD = "2026-04-04.2";
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
 const customerOrdersLog = (...args) => {
@@ -43,6 +43,54 @@ let staffInstallPrompt = null;
 let ledgerEntries = [];
 let ledgerSummary = null;
 let ledgerFailed = false;
+let backOfficeProducts = [];
+let backOfficeActiveSection = "products";
+let backOfficeQuery = "";
+let editingProductId = null;
+let backOfficeCategories = [];
+let backOfficeCustomers = [];
+let backOfficeCustomerQuery = "";
+let editingCustomerId = null;
+let backOfficeRoutes = [];
+let backOfficeCustomerOffset = 0;
+let backOfficeCustomerLimit = 20;
+let backOfficeCustomerPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficeStaff = [];
+let backOfficeStaffQuery = "";
+let editingStaffId = null;
+let backOfficeStaffOffset = 0;
+let backOfficeStaffLimit = 20;
+let backOfficeStaffPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficeSetupSection = "branches";
+let backOfficeBranchesList = [];
+let backOfficeRoutesSetup = [];
+let backOfficeCategoriesSetup = [];
+let backOfficeSetupBranchQuery = "";
+let backOfficeSetupRouteQuery = "";
+let backOfficeSetupCategoryQuery = "";
+let editingBranchId = null;
+let editingRouteId = null;
+let editingCategoryId = null;
+let inventoryAdjustments = [];
+let inventoryAdjustProducts = [];
+let inventoryAdjustOffset = 0;
+let inventoryAdjustLimit = 20;
+let inventoryAdjustPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficeSales = [];
+let backOfficeSalesQuery = "";
+let backOfficeSalesOffset = 0;
+let backOfficeSalesLimit = 20;
+let backOfficeSalesPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficeOrders = [];
+let backOfficeOrdersQuery = "";
+let backOfficeOrdersOffset = 0;
+let backOfficeOrdersLimit = 20;
+let backOfficeOrdersPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficePayments = [];
+let backOfficePaymentsQuery = "";
+let backOfficePaymentsOffset = 0;
+let backOfficePaymentsLimit = 20;
+let backOfficePaymentsPage = { count: 0, next: null, previous: null, results: [] };
 let performanceData = {
     cashiers: [],
     salespeople: [],
@@ -96,6 +144,15 @@ const EXPENSE_CATEGORIES = [
     { value: "miscellaneous", label: "Miscellaneous" },
 ];
 
+const STAFF_ROLE_OPTIONS = [
+    { value: "cashier", label: "Cashier" },
+    { value: "salesperson", label: "Salesperson" },
+    { value: "supervisor", label: "Supervisor" },
+    { value: "admin", label: "Admin" },
+    { value: "deliver_person", label: "Delivery person" },
+    { value: "customer", label: "Customer" },
+];
+
 // ——— DOM References ———
 const els = {
     branchSelect:    document.getElementById("branch-select"),
@@ -105,6 +162,11 @@ const els = {
     productSearch:   document.getElementById("product-search"),
     categoryFilters: document.getElementById("category-filters"),
     productsGrid:    document.getElementById("products-grid"),
+    productImportTools: document.getElementById("product-import-tools"),
+    productImportTemplate: document.getElementById("download-product-template"),
+    productImportFile: document.getElementById("product-import-file"),
+    productImportUpload: document.getElementById("upload-product-file"),
+    productImportResult: document.getElementById("product-import-result"),
     cartItems:       document.getElementById("cart-items"),
     subtotal:        document.getElementById("subtotal"),
     taxAmount:       document.getElementById("tax-amount"),
@@ -141,6 +203,7 @@ const els = {
     customerOrdersBtn: document.getElementById("customer-orders-btn"),
     ledgerBtn:       document.getElementById("ledger-btn"),
     returnsBtn:      document.getElementById("returns-btn"),
+    backofficeBtn:   document.getElementById("backoffice-btn"),
     installPosBtn:   document.getElementById("install-pos-btn"),
     authModal:       document.getElementById("auth-modal"),
     authCloseBtn:    document.getElementById("auth-close-btn"),
@@ -204,6 +267,184 @@ const els = {
     ledgerSummary: document.getElementById("ledger-summary"),
     ledgerList: document.getElementById("ledger-list"),
     ledgerLoading: document.getElementById("ledger-loading"),
+    backofficeModal: document.getElementById("backoffice-modal"),
+    backofficeCloseBtn: document.getElementById("backoffice-close-btn"),
+    backofficeTabs: document.querySelectorAll(".backoffice-tab"),
+    backofficeProductSection: document.getElementById("backoffice-products"),
+    backofficeCustomerSection: document.getElementById("backoffice-customers"),
+    backofficeStaffSection: document.getElementById("backoffice-staff"),
+    backofficeInventorySection: document.getElementById("backoffice-inventory"),
+    backofficeSalesSection: document.getElementById("backoffice-sales"),
+    backofficeOrdersSection: document.getElementById("backoffice-orders"),
+    backofficePaymentsSection: document.getElementById("backoffice-payments"),
+    backofficeSetupSection: document.getElementById("backoffice-setup"),
+    backofficeSetupTabs: document.querySelectorAll(".backoffice-subtab"),
+    setupBranchesSection: document.getElementById("setup-branches"),
+    setupRoutesSection: document.getElementById("setup-routes"),
+    setupCategoriesSection: document.getElementById("setup-categories"),
+    setupBranchSearch: document.getElementById("setup-branch-search"),
+    setupRouteSearch: document.getElementById("setup-route-search"),
+    setupCategorySearch: document.getElementById("setup-category-search"),
+    setupBranchAdd: document.getElementById("setup-branch-add"),
+    setupRouteAdd: document.getElementById("setup-route-add"),
+    setupCategoryAdd: document.getElementById("setup-category-add"),
+    setupBranchTable: document.getElementById("setup-branch-table"),
+    setupRouteTable: document.getElementById("setup-route-table"),
+    setupCategoryTable: document.getElementById("setup-category-table"),
+    inventoryAdjustSearch: document.getElementById("inventory-adjust-search"),
+    inventoryAdjustBranch: document.getElementById("inventory-adjust-branch"),
+    inventoryAdjustProduct: document.getElementById("inventory-adjust-product"),
+    inventoryAdjustStock: document.getElementById("inventory-adjust-stock"),
+    inventoryAdjustType: document.getElementById("inventory-adjust-type"),
+    inventoryAdjustQty: document.getElementById("inventory-adjust-qty"),
+    inventoryAdjustReason: document.getElementById("inventory-adjust-reason"),
+    inventoryAdjustNote: document.getElementById("inventory-adjust-note"),
+    inventoryAdjustError: document.getElementById("inventory-adjust-error"),
+    inventoryAdjustSubmit: document.getElementById("inventory-adjust-submit"),
+    inventoryAdjustTable: document.getElementById("inventory-adjust-history"),
+    inventoryAdjustPrev: document.getElementById("inventory-adjust-prev"),
+    inventoryAdjustNext: document.getElementById("inventory-adjust-next"),
+    inventoryAdjustPage: document.getElementById("inventory-adjust-page"),
+    backofficeSalesSearch: document.getElementById("backoffice-sales-search"),
+    backofficeSalesBranch: document.getElementById("backoffice-sales-branch"),
+    backofficeSalesStatus: document.getElementById("backoffice-sales-status"),
+    backofficeSalesFrom: document.getElementById("backoffice-sales-from"),
+    backofficeSalesTo: document.getElementById("backoffice-sales-to"),
+    backofficeSalesTable: document.getElementById("backoffice-sales-table"),
+    backofficeSalesPrev: document.getElementById("backoffice-sales-prev"),
+    backofficeSalesNext: document.getElementById("backoffice-sales-next"),
+    backofficeSalesPage: document.getElementById("backoffice-sales-page"),
+    backofficeSalesExport: document.getElementById("backoffice-sales-export"),
+    backofficeOrdersSearch: document.getElementById("backoffice-orders-search"),
+    backofficeOrdersBranch: document.getElementById("backoffice-orders-branch"),
+    backofficeOrdersRoute: document.getElementById("backoffice-orders-route"),
+    backofficeOrdersStatus: document.getElementById("backoffice-orders-status"),
+    backofficeOrdersTable: document.getElementById("backoffice-orders-table"),
+    backofficeOrdersPrev: document.getElementById("backoffice-orders-prev"),
+    backofficeOrdersNext: document.getElementById("backoffice-orders-next"),
+    backofficeOrdersPage: document.getElementById("backoffice-orders-page"),
+    backofficeOrdersExport: document.getElementById("backoffice-orders-export"),
+    backofficePaymentsSearch: document.getElementById("backoffice-payments-search"),
+    backofficePaymentsBranch: document.getElementById("backoffice-payments-branch"),
+    backofficePaymentsMethod: document.getElementById("backoffice-payments-method"),
+    backofficePaymentsStatus: document.getElementById("backoffice-payments-status"),
+    backofficePaymentsFrom: document.getElementById("backoffice-payments-from"),
+    backofficePaymentsTo: document.getElementById("backoffice-payments-to"),
+    backofficePaymentsTable: document.getElementById("backoffice-payments-table"),
+    backofficePaymentsPrev: document.getElementById("backoffice-payments-prev"),
+    backofficePaymentsNext: document.getElementById("backoffice-payments-next"),
+    backofficePaymentsPage: document.getElementById("backoffice-payments-page"),
+    backofficePaymentsExport: document.getElementById("backoffice-payments-export"),
+    backofficeCustomerSearch: document.getElementById("backoffice-customer-search"),
+    backofficeCustomerTable: document.getElementById("backoffice-customer-table"),
+    backofficeCustomerAdd: document.getElementById("backoffice-customer-add"),
+    backofficeCustomerBranch: document.getElementById("backoffice-customer-branch"),
+    backofficeCustomerRoute: document.getElementById("backoffice-customer-route"),
+    backofficeCustomerPrev: document.getElementById("backoffice-customer-prev"),
+    backofficeCustomerNext: document.getElementById("backoffice-customer-next"),
+    backofficeCustomerPage: document.getElementById("backoffice-customer-page"),
+    backofficeStaffSearch: document.getElementById("backoffice-staff-search"),
+    backofficeStaffTable: document.getElementById("backoffice-staff-table"),
+    backofficeStaffAdd: document.getElementById("backoffice-staff-add"),
+    backofficeStaffPrev: document.getElementById("backoffice-staff-prev"),
+    backofficeStaffNext: document.getElementById("backoffice-staff-next"),
+    backofficeStaffPage: document.getElementById("backoffice-staff-page"),
+    backofficeProductSearch: document.getElementById("backoffice-product-search"),
+    backofficeProductTable: document.getElementById("backoffice-product-table"),
+    backofficeProductAdd: document.getElementById("backoffice-product-add"),
+    backofficeProductTemplate: document.getElementById("backoffice-product-template"),
+    backofficeProductImport: document.getElementById("backoffice-product-import"),
+    backofficeProductFile: document.getElementById("backoffice-product-file"),
+    backofficeProductResult: document.getElementById("backoffice-product-result"),
+    productFormModal: document.getElementById("product-form-modal"),
+    productForm: document.getElementById("product-form"),
+    productFormTitle: document.getElementById("product-form-title"),
+    productFormClose: document.getElementById("product-form-close"),
+    productFormCancel: document.getElementById("product-form-cancel"),
+    productFormError: document.getElementById("product-form-error"),
+    productFormSave: document.getElementById("product-form-save"),
+    productSku: document.getElementById("product-sku"),
+    productName: document.getElementById("product-name"),
+    productCategory: document.getElementById("product-category"),
+    productUnit: document.getElementById("product-unit"),
+    productCost: document.getElementById("product-cost"),
+    productSelling: document.getElementById("product-selling"),
+    productRetail: document.getElementById("product-retail"),
+    productWholesale: document.getElementById("product-wholesale"),
+    productThreshold: document.getElementById("product-threshold"),
+    productBranch: document.getElementById("product-branch"),
+    productStock: document.getElementById("product-stock"),
+    productActive: document.getElementById("product-active"),
+    customerFormModal: document.getElementById("customer-form-modal"),
+    customerForm: document.getElementById("customer-form"),
+    customerFormTitle: document.getElementById("customer-form-title"),
+    customerFormClose: document.getElementById("customer-form-close"),
+    customerFormCancel: document.getElementById("customer-form-cancel"),
+    customerFormSave: document.getElementById("customer-form-save"),
+    customerFormError: document.getElementById("customer-form-error"),
+    customerName: document.getElementById("customer-name"),
+    customerRoute: document.getElementById("customer-route"),
+    customerWholesale: document.getElementById("customer-wholesale"),
+    customerActive: document.getElementById("customer-active"),
+    customerBalance: document.getElementById("customer-balance"),
+    staffFormModal: document.getElementById("staff-form-modal"),
+    staffForm: document.getElementById("staff-form"),
+    staffFormTitle: document.getElementById("staff-form-title"),
+    staffFormClose: document.getElementById("staff-form-close"),
+    staffFormCancel: document.getElementById("staff-form-cancel"),
+    staffFormSave: document.getElementById("staff-form-save"),
+    staffFormError: document.getElementById("staff-form-error"),
+    staffUsername: document.getElementById("staff-username"),
+    staffEmail: document.getElementById("staff-email"),
+    staffFirst: document.getElementById("staff-first"),
+    staffMiddle: document.getElementById("staff-middle"),
+    staffLast: document.getElementById("staff-last"),
+    staffPhone: document.getElementById("staff-phone"),
+    staffRole: document.getElementById("staff-role"),
+    staffBranch: document.getElementById("staff-branch"),
+    staffPassword: document.getElementById("staff-password"),
+    staffPasswordRequired: document.getElementById("staff-password-required"),
+    staffPasswordHint: document.getElementById("staff-password-hint"),
+    staffActive: document.getElementById("staff-active"),
+    branchFormModal: document.getElementById("branch-form-modal"),
+    branchForm: document.getElementById("branch-form"),
+    branchFormTitle: document.getElementById("branch-form-title"),
+    branchFormClose: document.getElementById("branch-form-close"),
+    branchFormCancel: document.getElementById("branch-form-cancel"),
+    branchFormSave: document.getElementById("branch-form-save"),
+    branchFormError: document.getElementById("branch-form-error"),
+    branchName: document.getElementById("branch-name"),
+    branchLocation: document.getElementById("branch-location"),
+    branchActive: document.getElementById("branch-active"),
+    routeFormModal: document.getElementById("route-form-modal"),
+    routeForm: document.getElementById("route-form"),
+    routeFormTitle: document.getElementById("route-form-title"),
+    routeFormClose: document.getElementById("route-form-close"),
+    routeFormCancel: document.getElementById("route-form-cancel"),
+    routeFormSave: document.getElementById("route-form-save"),
+    routeFormError: document.getElementById("route-form-error"),
+    routeName: document.getElementById("route-name"),
+    routeCode: document.getElementById("route-code"),
+    routeBranch: document.getElementById("route-branch"),
+    routeActive: document.getElementById("route-active"),
+    categoryFormModal: document.getElementById("category-form-modal"),
+    categoryForm: document.getElementById("category-form"),
+    categoryFormTitle: document.getElementById("category-form-title"),
+    categoryFormClose: document.getElementById("category-form-close"),
+    categoryFormCancel: document.getElementById("category-form-cancel"),
+    categoryFormSave: document.getElementById("category-form-save"),
+    categoryFormError: document.getElementById("category-form-error"),
+    categoryName: document.getElementById("category-name"),
+    categoryActive: document.getElementById("category-active"),
+    backofficeSaleDetailModal: document.getElementById("backoffice-sale-detail-modal"),
+    backofficeSaleDetailClose: document.getElementById("backoffice-sale-detail-close"),
+    backofficeSaleDetailBody: document.getElementById("backoffice-sale-detail-body"),
+    backofficeOrderDetailModal: document.getElementById("backoffice-order-detail-modal"),
+    backofficeOrderDetailClose: document.getElementById("backoffice-order-detail-close"),
+    backofficeOrderDetailBody: document.getElementById("backoffice-order-detail-body"),
+    backofficePaymentDetailModal: document.getElementById("backoffice-payment-detail-modal"),
+    backofficePaymentDetailClose: document.getElementById("backoffice-payment-detail-close"),
+    backofficePaymentDetailBody: document.getElementById("backoffice-payment-detail-body"),
     ledgerError: document.getElementById("ledger-error"),
     ledgerEmpty: document.getElementById("ledger-empty"),
     ledgerPrev: document.getElementById("ledger-prev"),
@@ -373,6 +614,12 @@ customerOrdersLog("[customer-orders] button element", { found: Boolean(els.custo
 customerOrdersLog("[customer-orders] modal element", { found: Boolean(els.customerOrdersModal) });
 
 document.addEventListener("click", (e) => {
+    const backofficeBtn = e.target.closest("#backoffice-btn");
+    if (backofficeBtn) {
+        e.preventDefault();
+        openBackOffice();
+        return;
+    }
     const customerBtn = e.target.closest("#customer-orders-btn");
     if (customerBtn) {
         customerOrdersLog("[customer-orders] button click", { target: e.target?.tagName });
@@ -440,6 +687,426 @@ document.addEventListener("DOMContentLoaded", () => {
         const first = ensureArray(lastFilteredProducts, "lastFilteredProducts")[0];
         if (first) addToCart(first.id);
     });
+    if (els.backofficeCloseBtn) {
+        els.backofficeCloseBtn.addEventListener("click", closeBackOffice);
+    }
+    if (els.backofficeTabs) {
+        els.backofficeTabs.forEach(btn => {
+            btn.addEventListener("click", () => {
+                if (btn.disabled) return;
+                setBackOfficeSection(btn.dataset.section);
+            });
+        });
+    }
+    if (els.backofficeSetupTabs) {
+        els.backofficeSetupTabs.forEach(btn => {
+            btn.addEventListener("click", () => {
+                setBackOfficeSetupSection(btn.dataset.setup);
+            });
+        });
+    }
+    if (els.inventoryAdjustSearch) {
+        els.inventoryAdjustSearch.addEventListener("input", () => {
+            loadInventoryAdjustProducts(els.inventoryAdjustSearch.value || "");
+        });
+    }
+    if (els.inventoryAdjustBranch) {
+        els.inventoryAdjustBranch.addEventListener("change", () => {
+            updateInventoryAdjustStock();
+            loadInventoryAdjustments();
+        });
+    }
+    if (els.inventoryAdjustProduct) {
+        els.inventoryAdjustProduct.addEventListener("change", () => {
+            updateInventoryAdjustStock();
+            loadInventoryAdjustments();
+        });
+    }
+    if (els.inventoryAdjustSubmit) {
+        els.inventoryAdjustSubmit.addEventListener("click", (event) => {
+            event.preventDefault();
+            submitInventoryAdjustment();
+        });
+    }
+    if (els.inventoryAdjustPrev) {
+        els.inventoryAdjustPrev.addEventListener("click", () => {
+            if (inventoryAdjustOffset <= 0) return;
+            inventoryAdjustOffset = Math.max(0, inventoryAdjustOffset - inventoryAdjustLimit);
+            loadInventoryAdjustments();
+        });
+    }
+    if (els.inventoryAdjustNext) {
+        els.inventoryAdjustNext.addEventListener("click", () => {
+            if (inventoryAdjustOffset + inventoryAdjustLimit >= (inventoryAdjustPage?.count || 0)) return;
+            inventoryAdjustOffset += inventoryAdjustLimit;
+            loadInventoryAdjustments();
+        });
+    }
+    if (els.backofficeCustomerSearch) {
+        els.backofficeCustomerSearch.addEventListener("input", () => {
+            backOfficeCustomerQuery = els.backofficeCustomerSearch.value || "";
+            backOfficeCustomerOffset = 0;
+            loadBackOfficeCustomers();
+        });
+    }
+    if (els.backofficeCustomerBranch) {
+        els.backofficeCustomerBranch.addEventListener("change", () => {
+            backOfficeCustomerOffset = 0;
+            loadBackOfficeRoutes();
+            loadBackOfficeCustomers();
+        });
+    }
+    if (els.backofficeCustomerRoute) {
+        els.backofficeCustomerRoute.addEventListener("change", () => {
+            backOfficeCustomerOffset = 0;
+            loadBackOfficeCustomers();
+        });
+    }
+    if (els.backofficeCustomerPrev) {
+        els.backofficeCustomerPrev.addEventListener("click", () => {
+            if (backOfficeCustomerOffset <= 0) return;
+            backOfficeCustomerOffset = Math.max(0, backOfficeCustomerOffset - backOfficeCustomerLimit);
+            loadBackOfficeCustomers();
+        });
+    }
+    if (els.backofficeCustomerNext) {
+        els.backofficeCustomerNext.addEventListener("click", () => {
+            if (backOfficeCustomerOffset + backOfficeCustomerLimit >= (backOfficeCustomerPage?.count || 0)) return;
+            backOfficeCustomerOffset += backOfficeCustomerLimit;
+            loadBackOfficeCustomers();
+        });
+    }
+    if (els.setupBranchSearch) {
+        els.setupBranchSearch.addEventListener("input", () => {
+            backOfficeSetupBranchQuery = els.setupBranchSearch.value || "";
+            loadBackOfficeBranchesSetup();
+        });
+    }
+    if (els.setupRouteSearch) {
+        els.setupRouteSearch.addEventListener("input", () => {
+            backOfficeSetupRouteQuery = els.setupRouteSearch.value || "";
+            loadBackOfficeRoutesSetup();
+        });
+    }
+    if (els.setupCategorySearch) {
+        els.setupCategorySearch.addEventListener("input", () => {
+            backOfficeSetupCategoryQuery = els.setupCategorySearch.value || "";
+            loadBackOfficeCategoriesSetup();
+        });
+    }
+    if (els.setupBranchAdd) {
+        els.setupBranchAdd.addEventListener("click", () => openBranchForm());
+    }
+    if (els.setupRouteAdd) {
+        els.setupRouteAdd.addEventListener("click", () => openRouteForm());
+    }
+    if (els.setupCategoryAdd) {
+        els.setupCategoryAdd.addEventListener("click", () => openCategoryForm());
+    }
+    if (els.branchFormClose) {
+        els.branchFormClose.addEventListener("click", closeBranchForm);
+    }
+    if (els.branchFormCancel) {
+        els.branchFormCancel.addEventListener("click", closeBranchForm);
+    }
+    if (els.branchForm) {
+        els.branchForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            saveBranchForm();
+        });
+    }
+    if (els.routeFormClose) {
+        els.routeFormClose.addEventListener("click", closeRouteForm);
+    }
+    if (els.routeFormCancel) {
+        els.routeFormCancel.addEventListener("click", closeRouteForm);
+    }
+    if (els.routeForm) {
+        els.routeForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            saveRouteForm();
+        });
+    }
+    if (els.categoryFormClose) {
+        els.categoryFormClose.addEventListener("click", closeCategoryForm);
+    }
+    if (els.categoryFormCancel) {
+        els.categoryFormCancel.addEventListener("click", closeCategoryForm);
+    }
+    if (els.categoryForm) {
+        els.categoryForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            saveCategoryForm();
+        });
+    }
+    if (els.backofficeStaffSearch) {
+        els.backofficeStaffSearch.addEventListener("input", () => {
+            backOfficeStaffQuery = els.backofficeStaffSearch.value || "";
+            backOfficeStaffOffset = 0;
+            loadBackOfficeStaff();
+        });
+    }
+    if (els.backofficeSalesSearch) {
+        els.backofficeSalesSearch.addEventListener("input", () => {
+            backOfficeSalesQuery = els.backofficeSalesSearch.value || "";
+            backOfficeSalesOffset = 0;
+            loadBackOfficeSales();
+        });
+    }
+    if (els.backofficeSalesBranch) {
+        els.backofficeSalesBranch.addEventListener("change", () => {
+            backOfficeSalesOffset = 0;
+            loadBackOfficeSales();
+        });
+    }
+    if (els.backofficeSalesStatus) {
+        els.backofficeSalesStatus.addEventListener("change", () => {
+            backOfficeSalesOffset = 0;
+            loadBackOfficeSales();
+        });
+    }
+    if (els.backofficeSalesFrom) {
+        els.backofficeSalesFrom.addEventListener("change", () => {
+            backOfficeSalesOffset = 0;
+            loadBackOfficeSales();
+        });
+    }
+    if (els.backofficeSalesTo) {
+        els.backofficeSalesTo.addEventListener("change", () => {
+            backOfficeSalesOffset = 0;
+            loadBackOfficeSales();
+        });
+    }
+    if (els.backofficeSalesPrev) {
+        els.backofficeSalesPrev.addEventListener("click", () => {
+            if (backOfficeSalesOffset <= 0) return;
+            backOfficeSalesOffset = Math.max(0, backOfficeSalesOffset - backOfficeSalesLimit);
+            loadBackOfficeSales();
+        });
+    }
+    if (els.backofficeSalesNext) {
+        els.backofficeSalesNext.addEventListener("click", () => {
+            if (backOfficeSalesOffset + backOfficeSalesLimit >= (backOfficeSalesPage?.count || 0)) return;
+            backOfficeSalesOffset += backOfficeSalesLimit;
+            loadBackOfficeSales();
+        });
+    }
+    if (els.backofficeSalesExport) {
+        els.backofficeSalesExport.addEventListener("click", () => {
+            exportBackOfficeSales();
+        });
+    }
+    if (els.backofficeOrdersSearch) {
+        els.backofficeOrdersSearch.addEventListener("input", () => {
+            backOfficeOrdersQuery = els.backofficeOrdersSearch.value || "";
+            backOfficeOrdersOffset = 0;
+            loadBackOfficeOrders();
+        });
+    }
+    if (els.backofficeOrdersBranch) {
+        els.backofficeOrdersBranch.addEventListener("change", () => {
+            backOfficeOrdersOffset = 0;
+            loadBackOfficeRoutes();
+            loadBackOfficeOrders();
+        });
+    }
+    if (els.backofficeOrdersRoute) {
+        els.backofficeOrdersRoute.addEventListener("change", () => {
+            backOfficeOrdersOffset = 0;
+            loadBackOfficeOrders();
+        });
+    }
+    if (els.backofficeOrdersStatus) {
+        els.backofficeOrdersStatus.addEventListener("change", () => {
+            backOfficeOrdersOffset = 0;
+            loadBackOfficeOrders();
+        });
+    }
+    if (els.backofficePaymentsSearch) {
+        els.backofficePaymentsSearch.addEventListener("input", () => {
+            backOfficePaymentsQuery = els.backofficePaymentsSearch.value || "";
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsBranch) {
+        els.backofficePaymentsBranch.addEventListener("change", () => {
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsMethod) {
+        els.backofficePaymentsMethod.addEventListener("change", () => {
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsStatus) {
+        els.backofficePaymentsStatus.addEventListener("change", () => {
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsFrom) {
+        els.backofficePaymentsFrom.addEventListener("change", () => {
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsTo) {
+        els.backofficePaymentsTo.addEventListener("change", () => {
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficeOrdersPrev) {
+        els.backofficeOrdersPrev.addEventListener("click", () => {
+            if (backOfficeOrdersOffset <= 0) return;
+            backOfficeOrdersOffset = Math.max(0, backOfficeOrdersOffset - backOfficeOrdersLimit);
+            loadBackOfficeOrders();
+        });
+    }
+    if (els.backofficeOrdersNext) {
+        els.backofficeOrdersNext.addEventListener("click", () => {
+            if (backOfficeOrdersOffset + backOfficeOrdersLimit >= (backOfficeOrdersPage?.count || 0)) return;
+            backOfficeOrdersOffset += backOfficeOrdersLimit;
+            loadBackOfficeOrders();
+        });
+    }
+    if (els.backofficeOrdersExport) {
+        els.backofficeOrdersExport.addEventListener("click", () => {
+            exportBackOfficeOrders();
+        });
+    }
+    if (els.backofficePaymentsPrev) {
+        els.backofficePaymentsPrev.addEventListener("click", () => {
+            if (backOfficePaymentsOffset <= 0) return;
+            backOfficePaymentsOffset = Math.max(0, backOfficePaymentsOffset - backOfficePaymentsLimit);
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsNext) {
+        els.backofficePaymentsNext.addEventListener("click", () => {
+            if (backOfficePaymentsOffset + backOfficePaymentsLimit >= (backOfficePaymentsPage?.count || 0)) return;
+            backOfficePaymentsOffset += backOfficePaymentsLimit;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsExport) {
+        els.backofficePaymentsExport.addEventListener("click", () => {
+            exportBackOfficePayments();
+        });
+    }
+    if (els.backofficeSaleDetailClose) {
+        els.backofficeSaleDetailClose.addEventListener("click", closeBackOfficeSaleDetail);
+    }
+    if (els.backofficeOrderDetailClose) {
+        els.backofficeOrderDetailClose.addEventListener("click", closeBackOfficeOrderDetail);
+    }
+    if (els.backofficePaymentDetailClose) {
+        els.backofficePaymentDetailClose.addEventListener("click", closeBackOfficePaymentDetail);
+    }
+    if (els.backofficeStaffPrev) {
+        els.backofficeStaffPrev.addEventListener("click", () => {
+            if (backOfficeStaffOffset <= 0) return;
+            backOfficeStaffOffset = Math.max(0, backOfficeStaffOffset - backOfficeStaffLimit);
+            loadBackOfficeStaff();
+        });
+    }
+    if (els.backofficeStaffNext) {
+        els.backofficeStaffNext.addEventListener("click", () => {
+            if (backOfficeStaffOffset + backOfficeStaffLimit >= (backOfficeStaffPage?.count || 0)) return;
+            backOfficeStaffOffset += backOfficeStaffLimit;
+            loadBackOfficeStaff();
+        });
+    }
+    if (els.backofficeStaffAdd) {
+        els.backofficeStaffAdd.addEventListener("click", () => openStaffForm());
+    }
+    if (els.staffFormClose) {
+        els.staffFormClose.addEventListener("click", closeStaffForm);
+    }
+    if (els.staffFormCancel) {
+        els.staffFormCancel.addEventListener("click", closeStaffForm);
+    }
+    if (els.staffForm) {
+        els.staffForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            saveStaffForm();
+        });
+    }
+    if (els.backofficeCustomerAdd) {
+        els.backofficeCustomerAdd.addEventListener("click", () => openCustomerForm());
+    }
+    if (els.customerFormClose) {
+        els.customerFormClose.addEventListener("click", closeCustomerForm);
+    }
+    if (els.customerFormCancel) {
+        els.customerFormCancel.addEventListener("click", closeCustomerForm);
+    }
+    if (els.customerForm) {
+        els.customerForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            saveCustomerForm();
+        });
+    }
+    if (els.backofficeProductSearch) {
+        els.backofficeProductSearch.addEventListener("input", () => {
+            backOfficeQuery = els.backofficeProductSearch.value || "";
+            renderBackOfficeProducts();
+        });
+    }
+    if (els.backofficeProductAdd) {
+        els.backofficeProductAdd.addEventListener("click", () => openProductForm());
+    }
+    if (els.backofficeProductTemplate) {
+        els.backofficeProductTemplate.addEventListener("click", (event) => {
+            event.preventDefault();
+            downloadProductTemplate();
+        });
+    }
+    if (els.backofficeProductImport) {
+        els.backofficeProductImport.addEventListener("click", () => {
+            if (els.backofficeProductFile) els.backofficeProductFile.click();
+        });
+    }
+    if (els.backofficeProductFile) {
+        els.backofficeProductFile.addEventListener("change", () => {
+            const file = els.backofficeProductFile.files?.[0];
+            if (file) uploadProductImport(file, { target: "backoffice" });
+        });
+    }
+    if (els.productFormClose) {
+        els.productFormClose.addEventListener("click", closeProductForm);
+    }
+    if (els.productFormCancel) {
+        els.productFormCancel.addEventListener("click", closeProductForm);
+    }
+    if (els.productForm) {
+        els.productForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            saveProductForm();
+        });
+    }
+    if (els.productImportTemplate) {
+        els.productImportTemplate.addEventListener("click", (event) => {
+            event.preventDefault();
+            downloadProductTemplate();
+        });
+    }
+    if (els.productImportUpload) {
+        els.productImportUpload.addEventListener("click", () => {
+            if (els.productImportFile) els.productImportFile.click();
+        });
+    }
+    if (els.productImportFile) {
+        els.productImportFile.addEventListener("change", () => {
+            const file = els.productImportFile.files?.[0];
+            if (file) {
+                uploadProductImport(file);
+            }
+        });
+    }
     els.saleTypeSelect.addEventListener("change", () => {
         currentSaleType = els.saleTypeSelect.value || "retail";
         if (isCreditSaleSelected() && currentSaleType !== "wholesale") {
@@ -807,6 +1474,33 @@ async function apiFetchAll(endpoint, { limit = BULK_FETCH_LIMIT } = {}) {
     return ensureArray(results, "apiFetchAll_results");
 }
 
+async function downloadCsv(endpoint, filename, params = {}) {
+    try {
+        const url = withParams(endpoint, params);
+        const res = await fetch(`${API_BASE}${url}`, {
+            method: "GET",
+            headers: API_TOKEN ? { Authorization: `Token ${API_TOKEN}` } : {},
+            credentials: "same-origin",
+        });
+        if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            throw new Error(errText || `Export failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        const link = document.createElement("a");
+        const objectUrl = URL.createObjectURL(blob);
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+        console.error("CSV export failed", err);
+        toast(`Export failed: ${err.message}`, "error");
+    }
+}
+
 function updatePager({ prevEl, nextEl, pageEl, offset, limit, pageData }) {
     if (!prevEl && !nextEl && !pageEl) return;
     const count = pageData?.count || 0;
@@ -908,6 +1602,1796 @@ async function loadProducts() {
     allProducts = ensureArray(products, "allProducts");
     buildCategoryFilters();
     renderProducts();
+}
+
+async function downloadProductTemplate() {
+    if (!API_TOKEN) {
+        toast("Please log in to download the template", "error");
+        openAuthModal();
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/inventory/products/import-template/`, {
+            headers: {
+                Authorization: `Token ${API_TOKEN}`,
+            },
+            credentials: "same-origin",
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(text || "Template download failed");
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "product-import-template.xlsx";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (err) {
+        toast(`Template download failed: ${err.message}`, "error");
+    }
+}
+
+async function uploadProductImport(file, { target } = {}) {
+    if (!API_TOKEN) {
+        toast("Please log in to import products", "error");
+        openAuthModal();
+        return;
+    }
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+        toast("Only .xlsx files are supported", "error");
+        return;
+    }
+    const resultTarget = target === "backoffice" ? els.backofficeProductResult : els.productImportResult;
+    if (resultTarget) {
+        resultTarget.classList.remove("hidden");
+        resultTarget.textContent = "Importing...";
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+        const res = await fetch(`${API_BASE}/inventory/products/import/`, {
+            method: "POST",
+            headers: {
+                Authorization: `Token ${API_TOKEN}`,
+            },
+            body: formData,
+            credentials: "same-origin",
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+            const message = data?.detail || "Import failed";
+            throw new Error(message);
+        }
+        renderImportResult(data, resultTarget);
+        await loadProducts();
+        toast("Product import completed", "success");
+    } catch (err) {
+        if (resultTarget) {
+            resultTarget.textContent = `Import failed: ${err.message}`;
+        }
+        toast(`Import failed: ${err.message}`, "error");
+    } finally {
+        if (els.productImportFile) {
+            els.productImportFile.value = "";
+        }
+        if (els.backofficeProductFile) {
+            els.backofficeProductFile.value = "";
+        }
+    }
+}
+
+function renderImportResult(result, targetEl = els.productImportResult) {
+    if (!targetEl) return;
+    const created = result?.created_count ?? 0;
+    const updated = result?.updated_count ?? 0;
+    const failed = result?.failed_count ?? 0;
+    const errors = ensureArray(result?.errors, "importErrors");
+
+    const summary = `
+        <div class="import-summary">
+            <span>Created: ${created}</span>
+            <span>Updated: ${updated}</span>
+            <span>Failed: ${failed}</span>
+        </div>
+    `;
+
+    let errorList = "";
+    if (errors.length) {
+        errorList = `
+            <div class="import-errors">
+                ${errors.map(err => `
+                    <div class="import-error-item">Row ${err.row} • ${err.field}: ${esc(err.error)}</div>
+                `).join("")}
+            </div>
+        `;
+    }
+
+    targetEl.innerHTML = `${summary}${errorList}`;
+    targetEl.classList.remove("hidden");
+}
+
+// ——— Back Office ———
+function canAccessBackOffice() {
+    return ["supervisor", "admin"].includes(normalizeRole(currentUserRole));
+}
+
+function openBackOffice() {
+    if (!canAccessBackOffice()) {
+        toast("You do not have access to the Back Office", "error");
+        return;
+    }
+    if (!els.backofficeModal) return;
+    openOverlay(els.backofficeModal);
+    setBackOfficeSection(backOfficeActiveSection || "products");
+    loadBackOfficeProducts();
+}
+
+function closeBackOffice() {
+    if (!els.backofficeModal) return;
+    closeOverlay(els.backofficeModal);
+}
+
+function setBackOfficeSection(section) {
+    backOfficeActiveSection = section || "products";
+    if (els.backofficeTabs) {
+        els.backofficeTabs.forEach(btn => btn.classList.toggle("active", btn.dataset.section === backOfficeActiveSection));
+    }
+    if (els.backofficeProductSection) {
+        els.backofficeProductSection.classList.toggle("hidden", backOfficeActiveSection !== "products");
+    }
+    if (els.backofficeCustomerSection) {
+        els.backofficeCustomerSection.classList.toggle("hidden", backOfficeActiveSection !== "customers");
+    }
+    if (els.backofficeStaffSection) {
+        els.backofficeStaffSection.classList.toggle("hidden", backOfficeActiveSection !== "staff");
+    }
+    if (els.backofficeInventorySection) {
+        els.backofficeInventorySection.classList.toggle("hidden", backOfficeActiveSection !== "inventory");
+    }
+    if (els.backofficeSalesSection) {
+        els.backofficeSalesSection.classList.toggle("hidden", backOfficeActiveSection !== "sales");
+    }
+    if (els.backofficeOrdersSection) {
+        els.backofficeOrdersSection.classList.toggle("hidden", backOfficeActiveSection !== "orders");
+    }
+    if (els.backofficePaymentsSection) {
+        els.backofficePaymentsSection.classList.toggle("hidden", backOfficeActiveSection !== "payments");
+    }
+    if (els.backofficeSetupSection) {
+        els.backofficeSetupSection.classList.toggle("hidden", backOfficeActiveSection !== "setup");
+    }
+    if (backOfficeActiveSection === "customers") {
+        loadBackOfficeCustomers();
+    }
+    if (backOfficeActiveSection === "staff") {
+        loadBackOfficeStaff();
+    }
+    if (backOfficeActiveSection === "inventory") {
+        initInventoryAdjustments();
+    }
+    if (backOfficeActiveSection === "sales") {
+        loadBackOfficeSales();
+    }
+    if (backOfficeActiveSection === "orders") {
+        loadBackOfficeOrders();
+    }
+    if (backOfficeActiveSection === "payments") {
+        loadBackOfficePayments();
+    }
+    if (backOfficeActiveSection === "setup") {
+        setBackOfficeSetupSection(backOfficeSetupSection || "branches");
+    }
+}
+
+function setBackOfficeSetupSection(section) {
+    backOfficeSetupSection = section || "branches";
+    if (els.backofficeSetupTabs) {
+        els.backofficeSetupTabs.forEach(btn => btn.classList.toggle("active", btn.dataset.setup === backOfficeSetupSection));
+    }
+    if (els.setupBranchesSection) {
+        els.setupBranchesSection.classList.toggle("hidden", backOfficeSetupSection !== "branches");
+    }
+    if (els.setupRoutesSection) {
+        els.setupRoutesSection.classList.toggle("hidden", backOfficeSetupSection !== "routes");
+    }
+    if (els.setupCategoriesSection) {
+        els.setupCategoriesSection.classList.toggle("hidden", backOfficeSetupSection !== "categories");
+    }
+    if (backOfficeSetupSection === "branches") {
+        loadBackOfficeBranchesSetup();
+    }
+    if (backOfficeSetupSection === "routes") {
+        loadBackOfficeRoutesSetup();
+    }
+    if (backOfficeSetupSection === "categories") {
+        loadBackOfficeCategoriesSetup();
+    }
+}
+
+async function loadBackOfficeProducts() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await Promise.all([
+            loadBackOfficeCategories(),
+            loadBackOfficeBranches(),
+        ]);
+        const products = await apiFetchAll("/inventory/products/");
+        backOfficeProducts = ensureArray(products, "backOfficeProducts");
+        renderBackOfficeProducts();
+    } catch (err) {
+        if (els.backofficeProductTable) {
+            const tbody = els.backofficeProductTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="8">Failed to load products</td></tr>`;
+            }
+        }
+    }
+}
+
+async function loadBackOfficeCustomers() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await Promise.all([
+            loadBackOfficeBranches(),
+            loadBackOfficeRoutes(),
+        ]);
+        const endpoint = withParams("/customers/", {
+            limit: backOfficeCustomerLimit,
+            offset: backOfficeCustomerOffset,
+            search: backOfficeCustomerQuery,
+            branch: els.backofficeCustomerBranch?.value || "",
+            route: els.backofficeCustomerRoute?.value || "",
+            include_inactive: "1",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficeCustomerPage = page;
+        backOfficeCustomers = ensureArray(page, "backOfficeCustomers");
+        renderBackOfficeCustomers();
+        updatePager({
+            prevEl: els.backofficeCustomerPrev,
+            nextEl: els.backofficeCustomerNext,
+            pageEl: els.backofficeCustomerPage,
+            offset: backOfficeCustomerOffset,
+            limit: backOfficeCustomerLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        if (els.backofficeCustomerTable) {
+            const tbody = els.backofficeCustomerTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="7">Failed to load customers</td></tr>`;
+            }
+        }
+    }
+}
+
+async function loadBackOfficeStaff() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await loadBackOfficeBranches();
+        renderStaffRoleOptions();
+        const endpoint = withParams("/accounts/users/", {
+            limit: backOfficeStaffLimit,
+            offset: backOfficeStaffOffset,
+            search: backOfficeStaffQuery,
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficeStaffPage = page;
+        backOfficeStaff = ensureArray(page, "backOfficeStaff");
+        renderBackOfficeStaff();
+        updatePager({
+            prevEl: els.backofficeStaffPrev,
+            nextEl: els.backofficeStaffNext,
+            pageEl: els.backofficeStaffPage,
+            offset: backOfficeStaffOffset,
+            limit: backOfficeStaffLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        if (els.backofficeStaffTable) {
+            const tbody = els.backofficeStaffTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="6">Failed to load users</td></tr>`;
+            }
+        }
+    }
+}
+
+async function loadBackOfficeRoutes() {
+    const branchId = els.backofficeOrdersBranch?.value || els.backofficeCustomerBranch?.value || "";
+    const currentCustomerRoute = els.backofficeCustomerRoute?.value || "";
+    const currentOrdersRoute = els.backofficeOrdersRoute?.value || "";
+    const data = await apiFetch(withParams("/routes/", { branch: branchId }));
+    backOfficeRoutes = ensureArray(data, "backOfficeRoutes");
+    if (!els.customerRoute) return;
+    if (!backOfficeRoutes.length) {
+        els.customerRoute.innerHTML = `<option value="">No routes found</option>`;
+        return;
+    }
+    els.customerRoute.innerHTML = `
+        <option value="">Select route (optional)</option>
+        ${backOfficeRoutes.map(r => `<option value="${r.id}">${esc(r.name)}${r.branch_name ? ` — ${esc(r.branch_name)}` : ""}</option>`).join("")}
+    `;
+
+    if (els.backofficeCustomerRoute) {
+        els.backofficeCustomerRoute.innerHTML = `
+            <option value="">All routes</option>
+            ${backOfficeRoutes.map(r => `<option value="${r.id}">${esc(r.name)}${r.branch_name ? ` — ${esc(r.branch_name)}` : ""}</option>`).join("")}
+        `;
+        if (currentCustomerRoute) {
+            els.backofficeCustomerRoute.value = currentCustomerRoute;
+        }
+    }
+
+    if (els.backofficeOrdersRoute) {
+        els.backofficeOrdersRoute.innerHTML = `
+            <option value="">All routes</option>
+            ${backOfficeRoutes.map(r => `<option value="${r.id}">${esc(r.name)}${r.branch_name ? ` — ${esc(r.branch_name)}` : ""}</option>`).join("")}
+        `;
+        if (currentOrdersRoute) {
+            els.backofficeOrdersRoute.value = currentOrdersRoute;
+        }
+    }
+}
+
+function renderBackOfficeCustomers() {
+    if (!els.backofficeCustomerTable) return;
+    const tbody = els.backofficeCustomerTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeCustomers;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7">No customers found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(customer => {
+        const wholesale = customer.is_wholesale_customer ? "Yes" : "No";
+        const active = customer.is_active ? "Active" : "Inactive";
+        const balance = customer.can_view_balance ? "Yes" : "No";
+        return `
+            <tr>
+                <td>${esc(customer.name)}</td>
+                <td>${esc(customer.route_name || "—")}</td>
+                <td>${esc(customer.branch_name || "—")}</td>
+                <td>${wholesale}</td>
+                <td>${active}</td>
+                <td>${balance}</td>
+                <td><button class="btn-ghost" onclick="openCustomerForm('${customer.id}')">Edit</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function renderStaffRoleOptions(selectedValue = "") {
+    if (!els.staffRole) return;
+    const current = selectedValue || els.staffRole.value || "";
+    els.staffRole.innerHTML = `
+        <option value="">Select role</option>
+        ${STAFF_ROLE_OPTIONS.map(role => `<option value="${role.value}">${role.label}</option>`).join("")}
+    `;
+    if (current) {
+        els.staffRole.value = current;
+    }
+}
+
+function formatStaffRole(role) {
+    const normalized = (role || "").trim().toLowerCase();
+    const match = STAFF_ROLE_OPTIONS.find(r => r.value === normalized);
+    return match ? match.label : (role || "—");
+}
+
+function renderBackOfficeStaff() {
+    if (!els.backofficeStaffTable) return;
+    const tbody = els.backofficeStaffTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeStaff;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="6">No users found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(user => {
+        const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || "—";
+        const statusClass = user.is_active ? "active" : "inactive";
+        const statusLabel = user.is_active ? "Active" : "Inactive";
+        return `
+            <tr>
+                <td>${esc(user.username || "—")}</td>
+                <td>${esc(name)}</td>
+                <td>${esc(formatStaffRole(user.role))}</td>
+                <td>${esc(user.branch_name || "—")}</td>
+                <td><span class="status-pill ${statusClass}">${statusLabel}</span></td>
+                <td><button class="btn-ghost" onclick="openStaffForm('${user.id}')">Edit</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function loadBackOfficeSales() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await loadBackOfficeBranches();
+        const endpoint = withParams("/sales/backoffice/sales/", {
+            limit: backOfficeSalesLimit,
+            offset: backOfficeSalesOffset,
+            q: backOfficeSalesQuery,
+            branch: els.backofficeSalesBranch?.value || "",
+            status: els.backofficeSalesStatus?.value || "",
+            date_from: els.backofficeSalesFrom?.value || "",
+            date_to: els.backofficeSalesTo?.value || "",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficeSalesPage = page;
+        backOfficeSales = ensureArray(page, "backOfficeSales");
+        renderBackOfficeSales();
+        updatePager({
+            prevEl: els.backofficeSalesPrev,
+            nextEl: els.backofficeSalesNext,
+            pageEl: els.backofficeSalesPage,
+            offset: backOfficeSalesOffset,
+            limit: backOfficeSalesLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        if (els.backofficeSalesTable) {
+            const tbody = els.backofficeSalesTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="10">Failed to load sales</td></tr>`;
+            }
+        }
+    }
+}
+
+function exportBackOfficeSales() {
+    if (!canAccessBackOffice()) return;
+    downloadCsv("/sales/backoffice/sales/export/", "backoffice-sales.csv", {
+        limit: backOfficeSalesLimit,
+        offset: backOfficeSalesOffset,
+        q: backOfficeSalesQuery,
+        branch: els.backofficeSalesBranch?.value || "",
+        status: els.backofficeSalesStatus?.value || "",
+        date_from: els.backofficeSalesFrom?.value || "",
+        date_to: els.backofficeSalesTo?.value || "",
+    });
+}
+
+function renderBackOfficeSales() {
+    if (!els.backofficeSalesTable) return;
+    const tbody = els.backofficeSalesTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeSales;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="10">No sales found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(sale => {
+        const paymentMethod = sale.payment_mode ? formatPaymentMode(sale.payment_mode) : "";
+        const paymentStatus = sale.payment_status ? renderStatusBadge(sale.payment_status) : "";
+        const paymentText = [paymentMethod, paymentStatus].filter(Boolean).join(" ") || "—";
+        return `
+            <tr>
+                <td>#${shortOrderId(sale.id)}</td>
+                <td>${esc(sale.customer?.name || "—")}</td>
+                <td>${esc(sale.branch?.name || "—")}</td>
+                <td>${formatLabel(sale.status)}</td>
+                <td>${fmtPrice(sale.grand_total || 0)}</td>
+                <td>${fmtPrice(sale.amount_paid || 0)}</td>
+                <td>${fmtPrice(sale.balance_due || 0)}</td>
+                <td>${paymentText}</td>
+                <td>${formatDateTime(sale.sale_date)}</td>
+                <td><button class="btn-ghost" onclick="openBackOfficeSaleDetail('${sale.id}')">View</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function openBackOfficeSaleDetail(saleId) {
+    if (!saleId || !els.backofficeSaleDetailModal) return;
+    const detail = await apiFetch(`/sales/backoffice/sales/${saleId}/`);
+    if (!detail) {
+        toast("Failed to load sale details", "error");
+        return;
+    }
+    renderBackOfficeSaleDetail(detail);
+    openOverlay(els.backofficeSaleDetailModal, { closeOthers: false });
+}
+
+function closeBackOfficeSaleDetail() {
+    if (!els.backofficeSaleDetailModal) return;
+    closeOverlay(els.backofficeSaleDetailModal);
+}
+
+function renderBackOfficeSaleDetail(detail) {
+    if (!els.backofficeSaleDetailBody) return;
+    const paymentsHtml = renderPaymentHistoryList(detail.payments || [], { compact: true });
+    const itemsHtml = (detail.items || []).map(item => `
+        <div class="detail-item">
+            <div>
+                <div><strong>${esc(item.product_name || "Item")}</strong></div>
+                <div class="muted">${esc(item.unit_name || "Unit")} ${item.unit_code ? `(${esc(item.unit_code)})` : ""}</div>
+            </div>
+            <div>${item.quantity}x</div>
+            <div>${fmtPrice(item.total_price || 0)}</div>
+        </div>
+    `).join("");
+
+    els.backofficeSaleDetailBody.innerHTML = `
+        <div class="detail-grid">
+            <div class="detail-card">
+                <div class="detail-row"><span>Sale</span><strong>#${shortOrderId(detail.id)}</strong></div>
+                <div class="detail-row"><span>Status</span><strong>${formatLabel(detail.status)}</strong></div>
+                <div class="detail-row"><span>Sale Type</span><strong>${formatLabel(detail.sale_type)}</strong></div>
+                <div class="detail-row"><span>Payment Status</span><strong>${formatLabel(detail.payment_status)}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Customer</span><strong>${esc(detail.customer?.name || "—")}</strong></div>
+                <div class="detail-row"><span>Branch</span><strong>${esc(detail.branch?.name || "—")}</strong></div>
+                <div class="detail-row"><span>Completed By</span><strong>${esc(detail.completed_by?.display_name || "—")}</strong></div>
+                <div class="detail-row"><span>Assigned To</span><strong>${esc(detail.assigned_to?.display_name || "—")}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Total</span><strong>${fmtPrice(detail.grand_total || 0)}</strong></div>
+                <div class="detail-row"><span>Paid</span><strong>${fmtPrice(detail.amount_paid || 0)}</strong></div>
+                <div class="detail-row"><span>Balance Due</span><strong>${fmtPrice(detail.balance_due || 0)}</strong></div>
+                <div class="detail-row"><span>Payment Mode</span><strong>${formatPaymentMode(detail.payment_mode)}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Created</span><strong>${formatDateTime(detail.sale_date)}</strong></div>
+                <div class="detail-row"><span>Completed</span><strong>${formatDateTime(detail.completed_at)}</strong></div>
+                <div class="detail-row"><span>Due Date</span><strong>${detail.due_date || "—"}</strong></div>
+            </div>
+        </div>
+        <div class="detail-section">
+            <h4>Items</h4>
+            <div class="detail-list">${itemsHtml || `<div class="muted">No items.</div>`}</div>
+        </div>
+        <div class="detail-section">
+            <h4>Payments</h4>
+            <div class="payment-history">${paymentsHtml}</div>
+        </div>
+    `;
+}
+
+async function loadBackOfficeOrders() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await Promise.all([
+            loadBackOfficeBranches(),
+            loadBackOfficeRoutes(),
+        ]);
+        const endpoint = withParams("/sales/customer-orders/", {
+            limit: backOfficeOrdersLimit,
+            offset: backOfficeOrdersOffset,
+            q: backOfficeOrdersQuery,
+            branch: els.backofficeOrdersBranch?.value || "",
+            route: els.backofficeOrdersRoute?.value || "",
+            status: els.backofficeOrdersStatus?.value || "",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficeOrdersPage = page;
+        backOfficeOrders = ensureArray(page, "backOfficeOrders");
+        renderBackOfficeOrders();
+        updatePager({
+            prevEl: els.backofficeOrdersPrev,
+            nextEl: els.backofficeOrdersNext,
+            pageEl: els.backofficeOrdersPage,
+            offset: backOfficeOrdersOffset,
+            limit: backOfficeOrdersLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        if (els.backofficeOrdersTable) {
+            const tbody = els.backofficeOrdersTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="9">Failed to load orders</td></tr>`;
+            }
+        }
+    }
+}
+
+function exportBackOfficeOrders() {
+    if (!canAccessBackOffice()) return;
+    downloadCsv("/sales/customer-orders/export/", "backoffice-orders.csv", {
+        limit: backOfficeOrdersLimit,
+        offset: backOfficeOrdersOffset,
+        q: backOfficeOrdersQuery,
+        branch: els.backofficeOrdersBranch?.value || "",
+        route: els.backofficeOrdersRoute?.value || "",
+        status: els.backofficeOrdersStatus?.value || "",
+    });
+}
+
+function renderBackOfficeOrders() {
+    if (!els.backofficeOrdersTable) return;
+    const tbody = els.backofficeOrdersTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeOrders;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="9">No orders found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(order => {
+        const total = order.sale?.grand_total || "0.00";
+        const assigned = order.assigned_to?.display_name || "Unassigned";
+        return `
+            <tr>
+                <td>#${shortOrderId(order.id)}</td>
+                <td>${esc(order.customer?.name || "—")}</td>
+                <td>${esc(order.branch?.name || "—")}</td>
+                <td>${esc(order.route?.name || "—")}</td>
+                <td>${formatLabel(order.status)}</td>
+                <td>${fmtPrice(total)}</td>
+                <td>${esc(assigned)}</td>
+                <td>${formatDateTime(order.created_at)}</td>
+                <td><button class="btn-ghost" onclick="openBackOfficeOrderDetail('${order.id}')">View</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function openBackOfficeOrderDetail(orderId) {
+    if (!orderId || !els.backofficeOrderDetailModal) return;
+    const detail = await apiFetch(`/sales/customer-orders/${orderId}/`);
+    if (!detail) {
+        toast("Failed to load order details", "error");
+        return;
+    }
+    renderBackOfficeOrderDetail(detail);
+    openOverlay(els.backofficeOrderDetailModal, { closeOthers: false });
+}
+
+function closeBackOfficeOrderDetail() {
+    if (!els.backofficeOrderDetailModal) return;
+    closeOverlay(els.backofficeOrderDetailModal);
+}
+
+function renderBackOfficeOrderDetail(order) {
+    if (!els.backofficeOrderDetailBody) return;
+    const itemsHtml = (order.items || []).map(item => `
+        <div class="detail-item">
+            <div>
+                <div><strong>${esc(item.product_name || "Item")}</strong></div>
+                <div class="muted">${esc(item.unit_name || "Unit")} ${item.unit_code ? `(${esc(item.unit_code)})` : ""}</div>
+            </div>
+            <div>${item.quantity}x</div>
+            <div>${fmtPrice(item.total_price || 0)}</div>
+        </div>
+    `).join("");
+    const paymentsHtml = renderPaymentHistoryList(order.payments || [], { compact: true });
+
+    els.backofficeOrderDetailBody.innerHTML = `
+        <div class="detail-grid">
+            <div class="detail-card">
+                <div class="detail-row"><span>Order</span><strong>#${shortOrderId(order.id)}</strong></div>
+                <div class="detail-row"><span>Status</span><strong>${formatLabel(order.status)}</strong></div>
+                <div class="detail-row"><span>Credit</span><strong>${formatLabel(order.credit_approval_status || "not_requested")}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Customer</span><strong>${esc(order.customer?.name || "—")}</strong></div>
+                <div class="detail-row"><span>Branch</span><strong>${esc(order.branch?.name || "—")}</strong></div>
+                <div class="detail-row"><span>Route</span><strong>${esc(order.route?.name || "—")}</strong></div>
+                <div class="detail-row"><span>Assigned</span><strong>${esc(order.assigned_to?.display_name || "Unassigned")}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Sale</span><strong>#${shortOrderId(order.sale?.id)}</strong></div>
+                <div class="detail-row"><span>Total</span><strong>${fmtPrice(order.sale?.grand_total || 0)}</strong></div>
+                <div class="detail-row"><span>Paid</span><strong>${fmtPrice(order.sale?.amount_paid || 0)}</strong></div>
+                <div class="detail-row"><span>Balance</span><strong>${fmtPrice(order.sale?.balance_due || 0)}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Created</span><strong>${formatDateTime(order.created_at)}</strong></div>
+                <div class="detail-row"><span>Updated</span><strong>${formatDateTime(order.updated_at)}</strong></div>
+            </div>
+        </div>
+        <div class="detail-section">
+            <h4>Items</h4>
+            <div class="detail-list">${itemsHtml || `<div class="muted">No items.</div>`}</div>
+        </div>
+        <div class="detail-section">
+            <h4>Payments</h4>
+            <div class="payment-history">${paymentsHtml}</div>
+        </div>
+    `;
+}
+
+async function loadBackOfficePayments() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await loadBackOfficeBranches();
+        const endpoint = withParams("/payments/backoffice/", {
+            limit: backOfficePaymentsLimit,
+            offset: backOfficePaymentsOffset,
+            q: backOfficePaymentsQuery,
+            branch: els.backofficePaymentsBranch?.value || "",
+            method: els.backofficePaymentsMethod?.value || "",
+            status: els.backofficePaymentsStatus?.value || "",
+            date_from: els.backofficePaymentsFrom?.value || "",
+            date_to: els.backofficePaymentsTo?.value || "",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficePaymentsPage = page;
+        backOfficePayments = ensureArray(page, "backOfficePayments");
+        renderBackOfficePayments();
+        updatePager({
+            prevEl: els.backofficePaymentsPrev,
+            nextEl: els.backofficePaymentsNext,
+            pageEl: els.backofficePaymentsPage,
+            offset: backOfficePaymentsOffset,
+            limit: backOfficePaymentsLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        console.error("Failed to load payments", err);
+        if (els.backofficePaymentsTable) {
+            const tbody = els.backofficePaymentsTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="11">Failed to load payments.</td></tr>`;
+            }
+        }
+    }
+}
+
+function exportBackOfficePayments() {
+    if (!canAccessBackOffice()) return;
+    downloadCsv("/payments/backoffice/export/", "backoffice-payments.csv", {
+        limit: backOfficePaymentsLimit,
+        offset: backOfficePaymentsOffset,
+        q: backOfficePaymentsQuery,
+        branch: els.backofficePaymentsBranch?.value || "",
+        method: els.backofficePaymentsMethod?.value || "",
+        status: els.backofficePaymentsStatus?.value || "",
+        date_from: els.backofficePaymentsFrom?.value || "",
+        date_to: els.backofficePaymentsTo?.value || "",
+    });
+}
+
+function renderBackOfficePayments() {
+    if (!els.backofficePaymentsTable) return;
+    const tbody = els.backofficePaymentsTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficePayments;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="11">No payments found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(payment => {
+        const paymentId = shortOrderId(payment.id);
+        const saleId = shortOrderId(payment.sale_id);
+        const customerName = payment.customer?.name || "—";
+        const branchName = payment.branch?.name || "—";
+        const methodLabel = formatPaymentMethod(payment.method);
+        const statusBadge = renderStatusBadge(payment.status);
+        const refValue = payment.reference || payment.provider_checkout_id || payment.provider_request_id || "—";
+        const phoneValue = payment.phone_number || "—";
+        return `
+            <tr>
+                <td>${paymentId}</td>
+                <td>${saleId}</td>
+                <td>${esc(customerName)}</td>
+                <td>${esc(branchName)}</td>
+                <td>${methodLabel}</td>
+                <td>${statusBadge}</td>
+                <td>${fmtPrice(payment.amount || 0)}</td>
+                <td><span class="payment-ref">${esc(refValue)}</span></td>
+                <td>${esc(phoneValue)}</td>
+                <td>${formatDateTime(payment.payment_date)}</td>
+                <td><button class="btn-ghost" onclick="openBackOfficePaymentDetail('${payment.id}')">View</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function openBackOfficePaymentDetail(paymentId) {
+    if (!paymentId || !els.backofficePaymentDetailModal) return;
+    const detail = await apiFetch(`/payments/backoffice/${paymentId}/`);
+    if (!detail) {
+        toast("Failed to load payment details", "error");
+        return;
+    }
+    renderBackOfficePaymentDetail(detail);
+    openOverlay(els.backofficePaymentDetailModal, { closeOthers: false });
+}
+
+function closeBackOfficePaymentDetail() {
+    if (!els.backofficePaymentDetailModal) return;
+    closeOverlay(els.backofficePaymentDetailModal);
+}
+
+function renderBackOfficePaymentDetail(payment) {
+    if (!els.backofficePaymentDetailBody) return;
+    if (!payment) {
+        els.backofficePaymentDetailBody.innerHTML = `<div class="muted">Payment not found.</div>`;
+        return;
+    }
+    const methodLabel = formatPaymentMethod(payment.method);
+    const statusBadge = renderStatusBadge(payment.status);
+    const refValue = payment.reference || payment.provider_checkout_id || payment.provider_request_id || "—";
+    const sale = payment.sale || {};
+    const customerName = payment.customer?.name || "—";
+    const branchName = payment.branch?.name || "—";
+    const receivedBy = payment.received_by?.name || "—";
+    const verifiedBy = payment.verified_by?.name || "—";
+    const metadataJson = payment.provider_metadata ? JSON.stringify(payment.provider_metadata, null, 2) : "";
+    const metadataBlock = metadataJson
+        ? `<pre class="detail-json">${esc(metadataJson)}</pre>`
+        : `<div class="muted">No provider metadata.</div>`;
+
+    const saleAction = sale.id
+        ? `<div class="detail-actions"><button class="btn-secondary" onclick="openBackOfficeSaleDetail('${sale.id}')">View Sale</button></div>`
+        : "";
+
+    els.backofficePaymentDetailBody.innerHTML = `
+        <div class="detail-grid">
+            <div class="detail-card">
+                <div class="detail-row"><span>Amount</span><strong>${fmtPrice(payment.amount || 0)}</strong></div>
+                <div class="detail-row"><span>Method</span><strong>${methodLabel}</strong></div>
+                <div class="detail-row"><span>Status</span><strong>${statusBadge}</strong></div>
+                <div class="detail-row"><span>Reference</span><strong><span class="payment-ref">${esc(refValue)}</span></strong></div>
+                <div class="detail-row"><span>Phone</span><strong>${esc(payment.phone_number || "—")}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Payment ID</span><strong>${esc(payment.id)}</strong></div>
+                <div class="detail-row"><span>Payment Date</span><strong>${formatDateTime(payment.payment_date)}</strong></div>
+                <div class="detail-row"><span>Created</span><strong>${formatDateTime(payment.created_at)}</strong></div>
+                <div class="detail-row"><span>Received By</span><strong>${esc(receivedBy)}</strong></div>
+                <div class="detail-row"><span>Verified By</span><strong>${esc(verifiedBy)}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Sale</span><strong>${sale.id ? esc(sale.id) : "—"}</strong></div>
+                <div class="detail-row"><span>Sale Status</span><strong>${sale.status ? formatLabel(sale.status) : "—"}</strong></div>
+                <div class="detail-row"><span>Payment Status</span><strong>${sale.payment_status ? renderStatusBadge(sale.payment_status) : "—"}</strong></div>
+                <div class="detail-row"><span>Customer</span><strong>${esc(customerName)}</strong></div>
+                <div class="detail-row"><span>Branch</span><strong>${esc(branchName)}</strong></div>
+            </div>
+        </div>
+        ${saleAction}
+        <div class="detail-section">
+            <h4>Sale Totals</h4>
+            <div class="detail-list">
+                <div class="detail-item"><span>Total</span><strong>${sale.grand_total ? fmtPrice(sale.grand_total) : "—"}</strong></div>
+                <div class="detail-item"><span>Paid</span><strong>${sale.amount_paid ? fmtPrice(sale.amount_paid) : "—"}</strong></div>
+                <div class="detail-item"><span>Balance Due</span><strong>${sale.balance_due ? fmtPrice(sale.balance_due) : "—"}</strong></div>
+            </div>
+        </div>
+        <div class="detail-section">
+            <h4>Provider Metadata</h4>
+            <div class="detail-list">
+                <div class="detail-item"><span>Provider</span><strong>${esc(payment.provider || "—")}</strong></div>
+                <div class="detail-item"><span>Checkout ID</span><strong>${esc(payment.provider_checkout_id || "—")}</strong></div>
+                <div class="detail-item"><span>Request ID</span><strong>${esc(payment.provider_request_id || "—")}</strong></div>
+                <div class="detail-item"><span>Result Code</span><strong>${esc(payment.provider_result_code || "—")}</strong></div>
+                <div class="detail-item"><span>Result Description</span><strong>${esc(payment.provider_result_desc || "—")}</strong></div>
+                <div class="detail-item"><span>Verified At</span><strong>${formatDateTime(payment.verified_at)}</strong></div>
+                <div class="detail-item"><span>Applied At</span><strong>${formatDateTime(payment.applied_at)}</strong></div>
+            </div>
+        </div>
+        <div class="detail-section">
+            <h4>Provider Payload</h4>
+            ${metadataBlock}
+        </div>
+    `;
+}
+
+async function loadSetupBranches() {
+    const data = await apiFetch(withParams("/business/branches/", {
+        include_inactive: "1",
+        search: backOfficeSetupBranchQuery,
+    }));
+    backOfficeBranchesList = ensureArray(data, "backOfficeBranchesList");
+    return backOfficeBranchesList;
+}
+
+async function loadBackOfficeBranchesSetup() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await loadSetupBranches();
+        renderBackOfficeBranchesSetup();
+    } catch (err) {
+        if (els.setupBranchTable) {
+            const tbody = els.setupBranchTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="5">Failed to load branches</td></tr>`;
+            }
+        }
+    }
+}
+
+function renderBackOfficeBranchesSetup() {
+    if (!els.setupBranchTable) return;
+    const tbody = els.setupBranchTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeBranchesList;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="5">No branches found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(branch => {
+        const statusClass = branch.is_active ? "active" : "inactive";
+        const statusLabel = branch.is_active ? "Active" : "Inactive";
+        return `
+            <tr>
+                <td>${esc(branch.name)}</td>
+                <td>${esc(branch.location || "—")}</td>
+                <td>${esc(branch.business || "—")}</td>
+                <td><span class="status-pill ${statusClass}">${statusLabel}</span></td>
+                <td><button class="btn-ghost" onclick="openBranchForm('${branch.id}')">Edit</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function loadBackOfficeRoutesSetup() {
+    if (!canAccessBackOffice()) return;
+    try {
+        const data = await apiFetch(withParams("/routes/", {
+            include_inactive: "1",
+            search: backOfficeSetupRouteQuery,
+        }));
+        backOfficeRoutesSetup = ensureArray(data, "backOfficeRoutesSetup");
+        renderBackOfficeRoutesSetup();
+    } catch (err) {
+        if (els.setupRouteTable) {
+            const tbody = els.setupRouteTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="5">Failed to load routes</td></tr>`;
+            }
+        }
+    }
+}
+
+function renderBackOfficeRoutesSetup() {
+    if (!els.setupRouteTable) return;
+    const tbody = els.setupRouteTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeRoutesSetup;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="5">No routes found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(route => {
+        const statusClass = route.is_active ? "active" : "inactive";
+        const statusLabel = route.is_active ? "Active" : "Inactive";
+        return `
+            <tr>
+                <td>${esc(route.name)}</td>
+                <td>${esc(route.code || "—")}</td>
+                <td>${esc(route.branch_name || "—")}</td>
+                <td><span class="status-pill ${statusClass}">${statusLabel}</span></td>
+                <td><button class="btn-ghost" onclick="openRouteForm('${route.id}')">Edit</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function loadBackOfficeCategoriesSetup() {
+    if (!canAccessBackOffice()) return;
+    try {
+        const data = await apiFetch(withParams("/inventory/categories/", {
+            include_inactive: "1",
+            search: backOfficeSetupCategoryQuery,
+        }));
+        backOfficeCategoriesSetup = ensureArray(data, "backOfficeCategoriesSetup");
+        renderBackOfficeCategoriesSetup();
+    } catch (err) {
+        if (els.setupCategoryTable) {
+            const tbody = els.setupCategoryTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="3">Failed to load categories</td></tr>`;
+            }
+        }
+    }
+}
+
+function renderBackOfficeCategoriesSetup() {
+    if (!els.setupCategoryTable) return;
+    const tbody = els.setupCategoryTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeCategoriesSetup;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="3">No categories found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(category => {
+        const statusClass = category.is_active ? "active" : "inactive";
+        const statusLabel = category.is_active ? "Active" : "Inactive";
+        return `
+            <tr>
+                <td>${esc(category.name)}</td>
+                <td><span class="status-pill ${statusClass}">${statusLabel}</span></td>
+                <td><button class="btn-ghost" onclick="openCategoryForm('${category.id}')">Edit</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function initInventoryAdjustments() {
+    await loadBackOfficeBranches();
+    if (els.inventoryAdjustBranch) {
+        els.inventoryAdjustBranch.innerHTML = `
+            <option value="">Select branch</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+    }
+    loadInventoryAdjustProducts(els.inventoryAdjustSearch?.value || "");
+    loadInventoryAdjustments();
+}
+
+async function loadInventoryAdjustProducts(query = "") {
+    if (!canAccessBackOffice()) return;
+    const endpoint = withParams("/inventory/products/", {
+        limit: 20,
+        offset: 0,
+        search: query,
+        branch: els.inventoryAdjustBranch?.value || "",
+    });
+    const data = await apiFetch(endpoint);
+    const page = normalizePaginated(data);
+    inventoryAdjustProducts = ensureArray(page, "inventoryAdjustProducts");
+    if (els.inventoryAdjustProduct) {
+        const options = [`<option value="">Select product</option>`].concat(
+            inventoryAdjustProducts.map(p => `<option value="${p.id}">${esc(p.name)} (${esc(p.sku)})</option>`)
+        );
+        const current = els.inventoryAdjustProduct.value || "";
+        els.inventoryAdjustProduct.innerHTML = options.join("");
+        if (current) {
+            els.inventoryAdjustProduct.value = current;
+        }
+    }
+    updateInventoryAdjustStock();
+}
+
+async function updateInventoryAdjustStock() {
+    if (!els.inventoryAdjustStock) return;
+    const productId = els.inventoryAdjustProduct?.value || "";
+    const branchId = els.inventoryAdjustBranch?.value || "";
+    if (!productId || !branchId) {
+        els.inventoryAdjustStock.textContent = "—";
+        return;
+    }
+    try {
+        const data = await apiFetch(withParams("/inventory/stock/lookup/", {
+            product: productId,
+            branch: branchId,
+        }));
+        const qty = data?.quantity ?? data?.stock ?? 0;
+        els.inventoryAdjustStock.textContent = qty.toString();
+    } catch (err) {
+        els.inventoryAdjustStock.textContent = "—";
+    }
+}
+
+async function submitInventoryAdjustment() {
+    if (!canAccessBackOffice()) return;
+    const productId = els.inventoryAdjustProduct?.value || "";
+    const branchId = els.inventoryAdjustBranch?.value || "";
+    const type = els.inventoryAdjustType?.value || "increase";
+    const qty = Number(els.inventoryAdjustQty?.value || 0);
+    const reason = els.inventoryAdjustReason?.value?.trim() || "";
+    const note = els.inventoryAdjustNote?.value?.trim() || "";
+
+    if (!productId || !branchId) {
+        const message = "Product and branch are required.";
+        if (els.inventoryAdjustError) els.inventoryAdjustError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+    if (!qty || qty <= 0) {
+        const message = "Quantity must be greater than zero.";
+        if (els.inventoryAdjustError) els.inventoryAdjustError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+    if (!reason) {
+        const message = "Reason is required.";
+        if (els.inventoryAdjustError) els.inventoryAdjustError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+
+    if (els.inventoryAdjustSubmit) {
+        els.inventoryAdjustSubmit.disabled = true;
+        els.inventoryAdjustSubmit.textContent = "Saving...";
+    }
+    if (els.inventoryAdjustError) els.inventoryAdjustError.textContent = "";
+
+    const payload = {
+        product_id: productId,
+        branch_id: branchId,
+        adjustment_type: type,
+        quantity: qty,
+        reason,
+        note,
+    };
+
+    try {
+        await apiRequest("/inventory/adjustments/create/", { method: "POST", body: payload });
+        toast("Inventory adjusted", "success");
+        if (els.inventoryAdjustQty) els.inventoryAdjustQty.value = "";
+        if (els.inventoryAdjustReason) els.inventoryAdjustReason.value = "";
+        if (els.inventoryAdjustNote) els.inventoryAdjustNote.value = "";
+        await updateInventoryAdjustStock();
+        inventoryAdjustOffset = 0;
+        await loadInventoryAdjustments();
+    } catch (err) {
+        if (els.inventoryAdjustError) {
+            els.inventoryAdjustError.textContent = err.message || "Adjustment failed.";
+        }
+        toast(`Adjustment failed: ${err.message}`, "error");
+    } finally {
+        if (els.inventoryAdjustSubmit) {
+            els.inventoryAdjustSubmit.disabled = false;
+            els.inventoryAdjustSubmit.textContent = "Save Adjustment";
+        }
+    }
+}
+
+async function loadInventoryAdjustments() {
+    if (!canAccessBackOffice()) return;
+    const endpoint = withParams("/inventory/adjustments/", {
+        limit: inventoryAdjustLimit,
+        offset: inventoryAdjustOffset,
+        branch: els.inventoryAdjustBranch?.value || "",
+        product: els.inventoryAdjustProduct?.value || "",
+    });
+    const data = await apiFetch(endpoint);
+    const page = normalizePaginated(data);
+    inventoryAdjustPage = page;
+    inventoryAdjustments = ensureArray(page, "inventoryAdjustments");
+    renderInventoryAdjustments();
+    updatePager({
+        prevEl: els.inventoryAdjustPrev,
+        nextEl: els.inventoryAdjustNext,
+        pageEl: els.inventoryAdjustPage,
+        offset: inventoryAdjustOffset,
+        limit: inventoryAdjustLimit,
+        pageData: page,
+    });
+}
+
+function renderInventoryAdjustments() {
+    if (!els.inventoryAdjustTable) return;
+    const tbody = els.inventoryAdjustTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = inventoryAdjustments;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7">No adjustments found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(adj => {
+        const typeLabel = adj.adjustment_type === "decrease" ? "Decrease" : "Increase";
+        return `
+            <tr>
+                <td>${formatDateTime(adj.created_at)}</td>
+                <td>${esc(adj.product_name || "—")} ${adj.product_sku ? `(${esc(adj.product_sku)})` : ""}</td>
+                <td>${esc(adj.branch_name || "—")}</td>
+                <td>${typeLabel}</td>
+                <td>${adj.quantity ?? "—"}</td>
+                <td>${esc(adj.reason || "—")}</td>
+                <td>${esc(adj.created_by_name || "—")}</td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function loadBackOfficeCategories() {
+    const data = await apiFetch("/inventory/categories/");
+    backOfficeCategories = ensureArray(data, "backOfficeCategories");
+    if (!els.productCategory) return;
+    if (!backOfficeCategories.length) {
+        els.productCategory.innerHTML = `<option value="">No categories found</option>`;
+        return;
+    }
+    els.productCategory.innerHTML = `
+        <option value="">Select category</option>
+        ${backOfficeCategories.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join("")}
+    `;
+}
+
+async function loadBackOfficeBranches() {
+    const data = await apiFetch("/business/branches/");
+    branches = ensureArray(data, "branches");
+    const currentCustomerBranch = els.backofficeCustomerBranch?.value || "";
+    const currentSalesBranch = els.backofficeSalesBranch?.value || "";
+    const currentOrdersBranch = els.backofficeOrdersBranch?.value || "";
+    const currentPaymentsBranch = els.backofficePaymentsBranch?.value || "";
+    if (!els.productBranch) return;
+    els.productBranch.innerHTML = `
+        <option value="">Select branch (optional)</option>
+        ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+    `;
+
+    if (els.backofficeCustomerBranch) {
+        els.backofficeCustomerBranch.innerHTML = `
+            <option value="">All branches</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+        if (currentCustomerBranch) {
+            els.backofficeCustomerBranch.value = currentCustomerBranch;
+        }
+    }
+
+    if (els.backofficeSalesBranch) {
+        els.backofficeSalesBranch.innerHTML = `
+            <option value="">All branches</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+        if (currentSalesBranch) {
+            els.backofficeSalesBranch.value = currentSalesBranch;
+        }
+    }
+
+    if (els.backofficeOrdersBranch) {
+        els.backofficeOrdersBranch.innerHTML = `
+            <option value="">All branches</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+        if (currentOrdersBranch) {
+            els.backofficeOrdersBranch.value = currentOrdersBranch;
+        }
+    }
+
+    if (els.backofficePaymentsBranch) {
+        els.backofficePaymentsBranch.innerHTML = `
+            <option value="">All branches</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+        if (currentPaymentsBranch) {
+            els.backofficePaymentsBranch.value = currentPaymentsBranch;
+        }
+    }
+
+    if (els.staffBranch) {
+        els.staffBranch.innerHTML = `
+            <option value="">Select branch (optional)</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+    }
+}
+
+function renderBackOfficeProducts() {
+    if (!els.backofficeProductTable) return;
+    const tbody = els.backofficeProductTable.querySelector("tbody");
+    if (!tbody) return;
+    const query = (backOfficeQuery || "").toLowerCase().trim();
+    let rows = backOfficeProducts;
+    if (query) {
+        rows = rows.filter(p =>
+            p.name.toLowerCase().includes(query) ||
+            p.sku.toLowerCase().includes(query)
+        );
+    }
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="8">No products found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(product => {
+        const statusClass = product.is_active ? "active" : "inactive";
+        const statusLabel = product.is_active ? "Active" : "Inactive";
+        return `
+            <tr>
+                <td>${esc(product.sku)}</td>
+                <td>${esc(product.name)}</td>
+                <td>${esc(product.category || "—")}</td>
+                <td>${fmtPrice(product.selling_price || 0)}</td>
+                <td>${product.wholesale_price ? fmtPrice(product.wholesale_price) : "—"}</td>
+                <td>${product.stock ?? 0}</td>
+                <td><span class="status-pill ${statusClass}">${statusLabel}</span></td>
+                <td><button class="btn-ghost" onclick="openProductForm('${product.id}')">Edit</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function openProductForm(productId = null) {
+    if (!els.productFormModal) return;
+    editingProductId = productId;
+    if (els.productFormError) els.productFormError.textContent = "";
+    if (!productId) {
+        if (els.productFormTitle) els.productFormTitle.textContent = "Add Product";
+        if (els.productForm) els.productForm.reset();
+        if (els.productActive) els.productActive.checked = true;
+        if (els.productCategory) els.productCategory.value = "";
+        if (els.productBranch) els.productBranch.value = "";
+        if (els.productUnit) els.productUnit.value = "Base Unit";
+    } else {
+        const product = backOfficeProducts.find(p => p.id === productId);
+        if (!product) return;
+        if (els.productFormTitle) els.productFormTitle.textContent = "Edit Product";
+        if (els.productSku) els.productSku.value = product.sku || "";
+        if (els.productName) els.productName.value = product.name || "";
+        if (els.productCategory) els.productCategory.value = product.category || "";
+        if (els.productUnit) els.productUnit.value = product.units?.[0]?.unit_name || "Base Unit";
+        if (els.productCost) els.productCost.value = product.cost_price || "";
+        if (els.productSelling) els.productSelling.value = product.selling_price || "";
+        if (els.productRetail) els.productRetail.value = product.retail_price || "";
+        if (els.productWholesale) els.productWholesale.value = product.wholesale_price || "";
+        if (els.productThreshold) els.productThreshold.value = product.wholesale_threshold || "";
+        if (els.productActive) els.productActive.checked = product.is_active !== false;
+        if (els.productBranch) els.productBranch.value = "";
+        if (els.productStock) els.productStock.value = "";
+    }
+    openOverlay(els.productFormModal);
+}
+
+function closeProductForm() {
+    if (!els.productFormModal) return;
+    closeOverlay(els.productFormModal);
+    editingProductId = null;
+}
+
+async function saveProductForm() {
+    if (!canAccessBackOffice()) return;
+    if (!payloadFieldCheck()) return;
+    if (els.productFormSave) {
+        els.productFormSave.disabled = true;
+        els.productFormSave.textContent = "Saving...";
+    }
+    const payload = {
+        sku: els.productSku?.value?.trim() || "",
+        name: els.productName?.value?.trim() || "",
+        category: els.productCategory?.value || "",
+        unit: els.productUnit?.value || "",
+        cost_price: els.productCost?.value || "",
+        selling_price: els.productSelling?.value || "",
+        retail_price: els.productRetail?.value || "",
+        wholesale_price: els.productWholesale?.value || "",
+        wholesale_threshold: els.productThreshold?.value || "",
+        branch: els.productBranch?.value || "",
+        stock_quantity: els.productStock?.value || "",
+        is_active: els.productActive?.checked ?? true,
+    };
+
+    if (els.productFormError) els.productFormError.textContent = "";
+    try {
+        if (editingProductId) {
+            await apiRequest(`/inventory/products/${editingProductId}/`, { method: "PUT", body: payload });
+            toast("Product updated", "success");
+        } else {
+            await apiRequest(`/inventory/products/create/`, { method: "POST", body: payload });
+            toast("Product created", "success");
+        }
+        closeProductForm();
+        await loadBackOfficeProducts();
+        await loadProducts();
+    } catch (err) {
+        if (els.productFormError) {
+            els.productFormError.textContent = err.message || "Save failed.";
+        }
+        toast(`Save failed: ${err.message}`, "error");
+    } finally {
+        if (els.productFormSave) {
+            els.productFormSave.disabled = false;
+            els.productFormSave.textContent = "Save Product";
+        }
+    }
+}
+
+function payloadFieldCheck() {
+    const required = [
+        { field: "SKU", value: els.productSku?.value },
+        { field: "Name", value: els.productName?.value },
+        { field: "Category", value: els.productCategory?.value },
+        { field: "Cost Price", value: els.productCost?.value },
+        { field: "Selling Price", value: els.productSelling?.value },
+    ];
+    const missing = required.filter(item => !item.value || !item.value.toString().trim());
+    if (missing.length) {
+        const message = `Missing required fields: ${missing.map(m => m.field).join(", ")}`;
+        if (els.productFormError) els.productFormError.textContent = message;
+        toast(message, "error");
+        return false;
+    }
+    if ((els.productStock?.value || "").toString().trim() && !(els.productBranch?.value || "").toString().trim()) {
+        const message = "Branch is required when stock quantity is provided.";
+        if (els.productFormError) els.productFormError.textContent = message;
+        toast(message, "error");
+        return false;
+    }
+    return true;
+}
+
+function openCustomerForm(customerId = null) {
+    if (!els.customerFormModal) return;
+    editingCustomerId = customerId;
+    if (els.customerFormError) els.customerFormError.textContent = "";
+    if (!customerId) {
+        if (els.customerFormTitle) els.customerFormTitle.textContent = "Add Customer";
+        if (els.customerForm) els.customerForm.reset();
+        if (els.customerActive) els.customerActive.checked = true;
+        if (els.customerWholesale) els.customerWholesale.checked = false;
+        if (els.customerBalance) els.customerBalance.checked = false;
+        if (els.customerRoute) els.customerRoute.value = "";
+    } else {
+        const customer = backOfficeCustomers.find(c => c.id === customerId);
+        if (!customer) return;
+        if (els.customerFormTitle) els.customerFormTitle.textContent = "Edit Customer";
+        if (els.customerName) els.customerName.value = customer.name || "";
+        if (els.customerRoute) els.customerRoute.value = customer.route_id || "";
+        if (els.customerWholesale) els.customerWholesale.checked = !!customer.is_wholesale_customer;
+        if (els.customerActive) els.customerActive.checked = customer.is_active !== false;
+        if (els.customerBalance) els.customerBalance.checked = !!customer.can_view_balance;
+    }
+    openOverlay(els.customerFormModal);
+}
+
+function closeCustomerForm() {
+    if (!els.customerFormModal) return;
+    closeOverlay(els.customerFormModal);
+    editingCustomerId = null;
+}
+
+async function saveCustomerForm() {
+    if (!canAccessBackOffice()) return;
+    const name = els.customerName?.value?.trim() || "";
+    if (!name) {
+        if (els.customerFormError) els.customerFormError.textContent = "Name is required.";
+        toast("Name is required.", "error");
+        return;
+    }
+    if (els.customerFormSave) {
+        els.customerFormSave.disabled = true;
+        els.customerFormSave.textContent = "Saving...";
+    }
+    const payload = {
+        name,
+        route_id: els.customerRoute?.value || "",
+        is_wholesale_customer: !!els.customerWholesale?.checked,
+        is_active: !!els.customerActive?.checked,
+        can_view_balance: !!els.customerBalance?.checked,
+    };
+    try {
+        if (editingCustomerId) {
+            await apiRequest(`/customers/${editingCustomerId}/`, { method: "PUT", body: payload });
+            toast("Customer updated", "success");
+        } else {
+            await apiRequest(`/customers/create/`, { method: "POST", body: payload });
+            toast("Customer created", "success");
+        }
+        closeCustomerForm();
+        await loadBackOfficeCustomers();
+    } catch (err) {
+        if (els.customerFormError) {
+            els.customerFormError.textContent = err.message || "Save failed.";
+        }
+        toast(`Save failed: ${err.message}`, "error");
+    } finally {
+        if (els.customerFormSave) {
+            els.customerFormSave.disabled = false;
+            els.customerFormSave.textContent = "Save Customer";
+        }
+    }
+}
+
+async function openStaffForm(userId = null) {
+    if (!els.staffFormModal) return;
+    editingStaffId = userId;
+    if (els.staffFormError) els.staffFormError.textContent = "";
+    await loadBackOfficeBranches();
+    renderStaffRoleOptions();
+
+    if (!userId) {
+        if (els.staffFormTitle) els.staffFormTitle.textContent = "Add User";
+        if (els.staffForm) els.staffForm.reset();
+        if (els.staffActive) els.staffActive.checked = true;
+        if (els.staffRole) els.staffRole.value = "";
+        if (els.staffBranch) els.staffBranch.value = "";
+        if (els.staffPasswordRequired) els.staffPasswordRequired.classList.remove("hidden");
+        if (els.staffPassword) {
+            els.staffPassword.required = true;
+            els.staffPassword.value = "";
+        }
+        if (els.staffPasswordHint) els.staffPasswordHint.textContent = "Required for new users.";
+    } else {
+        const staff = backOfficeStaff.find(u => u.id === userId);
+        if (!staff) return;
+        if (els.staffFormTitle) els.staffFormTitle.textContent = "Edit User";
+        if (els.staffUsername) els.staffUsername.value = staff.username || "";
+        if (els.staffEmail) els.staffEmail.value = staff.email || "";
+        if (els.staffFirst) els.staffFirst.value = staff.first_name || "";
+        if (els.staffMiddle) els.staffMiddle.value = staff.middle_name || "";
+        if (els.staffLast) els.staffLast.value = staff.last_name || "";
+        if (els.staffPhone) els.staffPhone.value = staff.phone || "";
+        if (els.staffRole) els.staffRole.value = staff.role || "";
+        if (els.staffBranch) els.staffBranch.value = staff.branch_id || "";
+        if (els.staffActive) els.staffActive.checked = staff.is_active !== false;
+        if (els.staffPasswordRequired) els.staffPasswordRequired.classList.add("hidden");
+        if (els.staffPassword) {
+            els.staffPassword.required = false;
+            els.staffPassword.value = "";
+        }
+        if (els.staffPasswordHint) els.staffPasswordHint.textContent = "Leave blank to keep current password.";
+    }
+    openOverlay(els.staffFormModal);
+}
+
+function closeStaffForm() {
+    if (!els.staffFormModal) return;
+    closeOverlay(els.staffFormModal);
+    editingStaffId = null;
+}
+
+async function saveStaffForm() {
+    if (!canAccessBackOffice()) return;
+    const username = els.staffUsername?.value?.trim() || "";
+    const email = els.staffEmail?.value?.trim() || "";
+    const firstName = els.staffFirst?.value?.trim() || "";
+    const lastName = els.staffLast?.value?.trim() || "";
+    const role = els.staffRole?.value || "";
+    const password = els.staffPassword?.value || "";
+
+    if (!username || !email || !firstName || !lastName || !role) {
+        const message = "Please fill in all required fields.";
+        if (els.staffFormError) els.staffFormError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+
+    if (!editingStaffId && !password) {
+        const message = "Password is required for new users.";
+        if (els.staffFormError) els.staffFormError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+
+    if (els.staffFormSave) {
+        els.staffFormSave.disabled = true;
+        els.staffFormSave.textContent = "Saving...";
+    }
+
+    const payload = {
+        username,
+        email,
+        first_name: firstName,
+        middle_name: els.staffMiddle?.value?.trim() || "",
+        last_name: lastName,
+        phone: els.staffPhone?.value?.trim() || "",
+        role,
+        branch_id: els.staffBranch?.value || "",
+        is_active: !!els.staffActive?.checked,
+    };
+    if (password) {
+        payload.password = password;
+    }
+
+    if (els.staffFormError) els.staffFormError.textContent = "";
+    try {
+        if (editingStaffId) {
+            await apiRequest(`/accounts/users/${editingStaffId}/`, { method: "PUT", body: payload });
+            toast("User updated", "success");
+        } else {
+            await apiRequest(`/accounts/users/create/`, { method: "POST", body: payload });
+            toast("User created", "success");
+        }
+        closeStaffForm();
+        await loadBackOfficeStaff();
+    } catch (err) {
+        if (els.staffFormError) {
+            els.staffFormError.textContent = err.message || "Save failed.";
+        }
+        toast(`Save failed: ${err.message}`, "error");
+    } finally {
+        if (els.staffFormSave) {
+            els.staffFormSave.disabled = false;
+            els.staffFormSave.textContent = "Save User";
+        }
+    }
+}
+
+function openBranchForm(branchId = null) {
+    if (!els.branchFormModal) return;
+    editingBranchId = branchId;
+    if (els.branchFormError) els.branchFormError.textContent = "";
+    if (!branchId) {
+        if (els.branchFormTitle) els.branchFormTitle.textContent = "Add Branch";
+        if (els.branchForm) els.branchForm.reset();
+        if (els.branchActive) els.branchActive.checked = true;
+    } else {
+        const branch = backOfficeBranchesList.find(b => b.id === branchId);
+        if (!branch) return;
+        if (els.branchFormTitle) els.branchFormTitle.textContent = "Edit Branch";
+        if (els.branchName) els.branchName.value = branch.name || "";
+        if (els.branchLocation) els.branchLocation.value = branch.location || "";
+        if (els.branchActive) els.branchActive.checked = branch.is_active !== false;
+    }
+    openOverlay(els.branchFormModal);
+}
+
+function closeBranchForm() {
+    if (!els.branchFormModal) return;
+    closeOverlay(els.branchFormModal);
+    editingBranchId = null;
+}
+
+async function saveBranchForm() {
+    if (!canAccessBackOffice()) return;
+    const name = els.branchName?.value?.trim() || "";
+    const location = els.branchLocation?.value?.trim() || "";
+    if (!name || !location) {
+        const message = "Branch name and location are required.";
+        if (els.branchFormError) els.branchFormError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+    if (els.branchFormSave) {
+        els.branchFormSave.disabled = true;
+        els.branchFormSave.textContent = "Saving...";
+    }
+    const payload = {
+        branch_name: name,
+        location,
+        is_active: !!els.branchActive?.checked,
+    };
+    try {
+        if (editingBranchId) {
+            await apiRequest(`/business/branches/${editingBranchId}/`, { method: "PUT", body: payload });
+            toast("Branch updated", "success");
+        } else {
+            await apiRequest(`/business/branches/create/`, { method: "POST", body: payload });
+            toast("Branch created", "success");
+        }
+        closeBranchForm();
+        await loadBackOfficeBranchesSetup();
+        await loadBackOfficeBranches();
+    } catch (err) {
+        if (els.branchFormError) {
+            els.branchFormError.textContent = err.message || "Save failed.";
+        }
+        toast(`Save failed: ${err.message}`, "error");
+    } finally {
+        if (els.branchFormSave) {
+            els.branchFormSave.disabled = false;
+            els.branchFormSave.textContent = "Save Branch";
+        }
+    }
+}
+
+async function openRouteForm(routeId = null) {
+    if (!els.routeFormModal) return;
+    editingRouteId = routeId;
+    if (els.routeFormError) els.routeFormError.textContent = "";
+    await loadSetupBranches();
+    if (els.routeBranch) {
+        els.routeBranch.innerHTML = `
+            <option value="">Select branch (optional)</option>
+            ${backOfficeBranchesList.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+    }
+    if (!routeId) {
+        if (els.routeFormTitle) els.routeFormTitle.textContent = "Add Route";
+        if (els.routeForm) els.routeForm.reset();
+        if (els.routeActive) els.routeActive.checked = true;
+    } else {
+        const route = backOfficeRoutesSetup.find(r => r.id === routeId);
+        if (!route) return;
+        if (els.routeFormTitle) els.routeFormTitle.textContent = "Edit Route";
+        if (els.routeName) els.routeName.value = route.name || "";
+        if (els.routeCode) els.routeCode.value = route.code || "";
+        if (els.routeBranch) els.routeBranch.value = route.branch_id || "";
+        if (els.routeActive) els.routeActive.checked = route.is_active !== false;
+    }
+    openOverlay(els.routeFormModal);
+}
+
+function closeRouteForm() {
+    if (!els.routeFormModal) return;
+    closeOverlay(els.routeFormModal);
+    editingRouteId = null;
+}
+
+async function saveRouteForm() {
+    if (!canAccessBackOffice()) return;
+    const name = els.routeName?.value?.trim() || "";
+    if (!name) {
+        const message = "Route name is required.";
+        if (els.routeFormError) els.routeFormError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+    if (els.routeFormSave) {
+        els.routeFormSave.disabled = true;
+        els.routeFormSave.textContent = "Saving...";
+    }
+    const payload = {
+        name,
+        code: els.routeCode?.value?.trim() || "",
+        branch_id: els.routeBranch?.value || "",
+        is_active: !!els.routeActive?.checked,
+    };
+    try {
+        if (editingRouteId) {
+            await apiRequest(`/routes/${editingRouteId}/`, { method: "PUT", body: payload });
+            toast("Route updated", "success");
+        } else {
+            await apiRequest(`/routes/create/`, { method: "POST", body: payload });
+            toast("Route created", "success");
+        }
+        closeRouteForm();
+        await loadBackOfficeRoutesSetup();
+        await loadBackOfficeRoutes();
+    } catch (err) {
+        if (els.routeFormError) {
+            els.routeFormError.textContent = err.message || "Save failed.";
+        }
+        toast(`Save failed: ${err.message}`, "error");
+    } finally {
+        if (els.routeFormSave) {
+            els.routeFormSave.disabled = false;
+            els.routeFormSave.textContent = "Save Route";
+        }
+    }
+}
+
+function openCategoryForm(categoryId = null) {
+    if (!els.categoryFormModal) return;
+    editingCategoryId = categoryId;
+    if (els.categoryFormError) els.categoryFormError.textContent = "";
+    if (!categoryId) {
+        if (els.categoryFormTitle) els.categoryFormTitle.textContent = "Add Category";
+        if (els.categoryForm) els.categoryForm.reset();
+        if (els.categoryActive) els.categoryActive.checked = true;
+    } else {
+        const category = backOfficeCategoriesSetup.find(c => c.id === categoryId);
+        if (!category) return;
+        if (els.categoryFormTitle) els.categoryFormTitle.textContent = "Edit Category";
+        if (els.categoryName) els.categoryName.value = category.name || "";
+        if (els.categoryActive) els.categoryActive.checked = category.is_active !== false;
+    }
+    openOverlay(els.categoryFormModal);
+}
+
+function closeCategoryForm() {
+    if (!els.categoryFormModal) return;
+    closeOverlay(els.categoryFormModal);
+    editingCategoryId = null;
+}
+
+async function saveCategoryForm() {
+    if (!canAccessBackOffice()) return;
+    const name = els.categoryName?.value?.trim() || "";
+    if (!name) {
+        const message = "Category name is required.";
+        if (els.categoryFormError) els.categoryFormError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+    if (els.categoryFormSave) {
+        els.categoryFormSave.disabled = true;
+        els.categoryFormSave.textContent = "Saving...";
+    }
+    const payload = {
+        name,
+        is_active: !!els.categoryActive?.checked,
+    };
+    try {
+        if (editingCategoryId) {
+            await apiRequest(`/inventory/categories/${editingCategoryId}/`, { method: "PUT", body: payload });
+            toast("Category updated", "success");
+        } else {
+            await apiRequest(`/inventory/categories/create/`, { method: "POST", body: payload });
+            toast("Category created", "success");
+        }
+        closeCategoryForm();
+        await loadBackOfficeCategoriesSetup();
+        await loadBackOfficeCategories();
+    } catch (err) {
+        if (els.categoryFormError) {
+            els.categoryFormError.textContent = err.message || "Save failed.";
+        }
+        toast(`Save failed: ${err.message}`, "error");
+    } finally {
+        if (els.categoryFormSave) {
+            els.categoryFormSave.disabled = false;
+            els.categoryFormSave.textContent = "Save Category";
+        }
+    }
 }
 
 // ——— Categories ———
@@ -3737,6 +6221,14 @@ function formatStatus(status) {
     return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+function formatLabel(value) {
+    if (!value) return "—";
+    return value
+        .toString()
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function renderStatusBadge(status) {
     const normalized = (status || "unpaid").toString().toLowerCase();
     const label = formatStatus(normalized);
@@ -3747,6 +6239,17 @@ function formatPaymentMethod(method) {
     const normalized = (method || "cash").toString().toLowerCase();
     if (normalized === "mpesa") return "M-Pesa";
     return "Cash";
+}
+
+function formatPaymentMode(mode) {
+    if (!mode) return "—";
+    const normalized = mode.toString().toLowerCase();
+    if (normalized === "mpesa") return "M-Pesa";
+    if (normalized === "mobile_money") return "Mobile Money";
+    if (normalized === "bank") return "Bank Transfer";
+    if (normalized === "credit") return "Credit";
+    if (normalized === "card") return "Card";
+    return formatStatus(normalized);
 }
 
 function renderPaymentHistoryList(payments, { compact = false } = {}) {
@@ -4155,8 +6658,21 @@ function applyRoleUI() {
         els.ledgerBtn.classList.toggle("hidden", !canView);
         els.ledgerBtn.setAttribute("aria-disabled", canView ? "false" : "true");
     }
+    if (els.backofficeBtn) {
+        const canBackOffice = canAccessBackOffice();
+        els.backofficeBtn.classList.toggle("hidden", !canBackOffice);
+        els.backofficeBtn.setAttribute("aria-disabled", canBackOffice ? "false" : "true");
+    }
+    if (els.productImportTools) {
+        const canImport = canImportProducts();
+        els.productImportTools.classList.toggle("hidden", !canImport);
+    }
 }
 
 function normalizeRole(role) {
     return (role || "").toString().trim().toLowerCase();
+}
+
+function canImportProducts() {
+    return ["supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }

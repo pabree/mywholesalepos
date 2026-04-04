@@ -139,6 +139,8 @@ function bindEvents() {
 
 function registerServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") return;
     navigator.serviceWorker.register("/customer/sw.js", { scope: "/customer/" }).catch(() => {
         // Silent fail: app still works without offline shell cache.
     });

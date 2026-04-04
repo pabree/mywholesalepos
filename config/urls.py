@@ -20,7 +20,14 @@ from django.urls import path, include
 from django.views.generic import TemplateView
 from django.conf import settings
 from pathlib import Path
-from accounts.views import CustomAuthToken, CurrentUserView, AssignableUsersView
+from accounts.views import (
+    CustomAuthToken,
+    CurrentUserView,
+    AssignableUsersView,
+    UserListView,
+    UserCreateView,
+    UserUpdateView,
+)
 from sales.ledger_views import FinanceExportView
 
 
@@ -37,15 +44,26 @@ def staff_service_worker(request):
         raise Http404("Service worker not found")
     return FileResponse(open(sw_path, "rb"), content_type="application/javascript")
 
+
+def staff_manifest(request):
+    manifest_path = Path(settings.BASE_DIR) / "frontend" / "manifest.json"
+    if not manifest_path.exists():
+        raise Http404("Manifest not found")
+    return FileResponse(open(manifest_path, "rb"), content_type="application/manifest+json")
+
 urlpatterns = [
     path("", TemplateView.as_view(template_name="index.html"), name="home"),
     path("customer/", TemplateView.as_view(template_name="customer.html"), name="customer-app"),
     path("sw.js", staff_service_worker, name="staff-sw"),
+    path("manifest.json", staff_manifest, name="staff-manifest"),
     path("customer/sw.js", customer_service_worker, name="customer-sw"),
     path('admin/', admin.site.urls),
     path("api/auth/token/", CustomAuthToken.as_view(), name="api-token"),
     path("api/auth/me/", CurrentUserView.as_view(), name="api-me"),
     path("api/accounts/assignable/", AssignableUsersView.as_view(), name="api-assignable-users"),
+    path("api/accounts/users/", UserListView.as_view(), name="api-users"),
+    path("api/accounts/users/create/", UserCreateView.as_view(), name="api-users-create"),
+    path("api/accounts/users/<uuid:user_id>/", UserUpdateView.as_view(), name="api-users-update"),
     path("api/ledger/", include("sales.ledger_urls")),
     path("api/finance/export/", FinanceExportView.as_view(), name="finance-export"),
     path("api/finance/performance/", include("sales.performance_urls")),

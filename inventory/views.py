@@ -2,8 +2,15 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Sum, Q
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
+from django.db import transaction
+from decimal import Decimal, InvalidOperation
+from openpyxl import load_workbook, Workbook
+from openpyxl.utils import get_column_letter
 from accounts.permissions import RolePermission
-from .models import Product
+from .models import Product, Category, ProductUnit, Inventory, StockMovement
+from business.models import Branch
 from core.pagination import StandardLimitOffsetPagination
 
 
@@ -26,6 +33,86 @@ class ProductBySkuView(APIView):
         )
 
 
+class CategoryListView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
+
+    def get(self, request):
+        query = (request.query_params.get("search") or "").strip()
+        include_inactive = request.query_params.get("include_inactive") == "1"
+        user = request.user
+        role = (getattr(user, "role", "") or "").strip().lower()
+        can_view_inactive = getattr(user, "is_superuser", False) or role in ("admin", "supervisor")
+
+        categories = Category.objects.order_by("name")
+        if not (include_inactive and can_view_inactive):
+            categories = categories.filter(is_active=True)
+        if query:
+            categories = categories.filter(name__icontains=query)
+        data = [
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "is_active": c.is_active,
+            }
+            for c in categories
+        ]
+        return Response(data)
+
+
+class CategoryCreateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def post(self, request):
+        data = request.data or {}
+        errors = {}
+
+        name = str(data.get("name") or "").strip()
+        if not name:
+            errors["name"] = "Category name is required."
+        if name and Category.objects.filter(name__iexact=name).exists():
+            errors["name"] = "Category already exists."
+
+        is_active = _parse_bool(data.get("is_active"))
+
+        if errors:
+            return Response(errors, status=400)
+
+        category = Category.objects.create(
+            name=name,
+            is_active=True if is_active is None else is_active,
+        )
+        return Response({"id": str(category.id)}, status=201)
+
+
+class CategoryUpdateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def put(self, request, category_id):
+        category = get_object_or_404(Category, id=category_id)
+        data = request.data or {}
+        errors = {}
+
+        name = str(data.get("name") or "").strip()
+        if not name:
+            errors["name"] = "Category name is required."
+        elif Category.objects.filter(name__iexact=name).exclude(id=category.id).exists():
+            errors["name"] = "Category already exists."
+
+        is_active = _parse_bool(data.get("is_active"))
+
+        if errors:
+            return Response(errors, status=400)
+
+        category.name = name
+        if is_active is not None:
+            category.is_active = is_active
+        category.save()
+        return Response({"id": str(category.id)}, status=200)
+
+
 class ProductListView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
     allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
@@ -33,6 +120,7 @@ class ProductListView(APIView):
     def get(self, request):
         """List all active products with their category, prices, and current stock."""
         branch_id = request.query_params.get("branch")
+        query = (request.query_params.get("search") or "").strip()
         products = Product.objects.select_related("category").prefetch_related("units")
 
         if branch_id:
@@ -41,6 +129,11 @@ class ProductListView(APIView):
             )
         else:
             products = products.annotate(stock=Sum("inventory__quantity"))
+
+        if query:
+            products = products.filter(
+                Q(name__icontains=query) | Q(sku__icontains=query)
+            )
 
         products = products.order_by("name", "sku")
 
@@ -62,6 +155,7 @@ class ProductListView(APIView):
                 "retail_price": str(product.retail_price or product.selling_price),
                 "wholesale_price": str(product.wholesale_price) if product.wholesale_price is not None else None,
                 "wholesale_threshold": product.wholesale_threshold,
+                "is_active": product.is_active,
                 "units": [
                     {
                         "id": str(u.id),
@@ -81,3 +175,661 @@ class ProductListView(APIView):
         if page is not products:
             return paginator.get_paginated_response(data)
         return Response(data)
+
+
+def _get_branch_from_value(value):
+    if value is None or str(value).strip() == "":
+        return None
+    branch_str = str(value).strip()
+    if len(branch_str) >= 32:
+        branch = Branch.objects.filter(id=branch_str).first()
+        if branch:
+            return branch
+    return Branch.objects.filter(branch_name__iexact=branch_str).first()
+
+
+def _ensure_base_unit(product, *, unit_name, retail_price, wholesale_price, wholesale_threshold):
+    base_unit = product.units.filter(is_base_unit=True).first()
+    if not base_unit:
+        unit_code = (unit_name or "base").lower().replace(" ", "_")[:32]
+        ProductUnit.objects.create(
+            product=product,
+            unit_name=unit_name or "Base Unit",
+            unit_code=unit_code,
+            conversion_to_base_unit=1,
+            is_base_unit=True,
+            retail_price=retail_price,
+            wholesale_price=wholesale_price,
+            wholesale_threshold=wholesale_threshold,
+            is_active=True,
+        )
+        return
+    if unit_name:
+        base_unit.unit_name = unit_name
+        base_unit.unit_code = unit_name.lower().replace(" ", "_")[:32]
+    if retail_price is not None:
+        base_unit.retail_price = retail_price
+    if wholesale_price is not None:
+        base_unit.wholesale_price = wholesale_price
+    if wholesale_threshold is not None:
+        base_unit.wholesale_threshold = wholesale_threshold
+    base_unit.save()
+
+
+class ProductCreateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def post(self, request):
+        data = request.data or {}
+        errors = {}
+
+        sku = str(data.get("sku") or "").strip()
+        name = str(data.get("name") or "").strip()
+        category_name = str(data.get("category") or "").strip()
+        unit_name = str(data.get("unit") or "").strip()
+        is_active = _parse_bool(data.get("is_active"))
+
+        if not sku:
+            errors["sku"] = "SKU is required."
+        if not name:
+            errors["name"] = "Name is required."
+        if not category_name:
+            errors["category"] = "Category is required."
+
+        try:
+            cost_price = _parse_decimal(data.get("cost_price"), field="cost_price")
+        except ValueError as exc:
+            cost_price = None
+            errors["cost_price"] = str(exc)
+        try:
+            selling_price = _parse_decimal(data.get("selling_price"), field="selling_price")
+        except ValueError as exc:
+            selling_price = None
+            errors["selling_price"] = str(exc)
+        try:
+            retail_price = _parse_decimal(data.get("retail_price"), field="retail_price")
+        except ValueError as exc:
+            retail_price = None
+            errors["retail_price"] = str(exc)
+        try:
+            wholesale_price = _parse_decimal(data.get("wholesale_price"), field="wholesale_price")
+        except ValueError as exc:
+            wholesale_price = None
+            errors["wholesale_price"] = str(exc)
+        try:
+            wholesale_threshold = _parse_int(data.get("wholesale_threshold"), field="wholesale_threshold")
+        except ValueError as exc:
+            wholesale_threshold = None
+            errors["wholesale_threshold"] = str(exc)
+        try:
+            stock_quantity = _parse_int(data.get("stock_quantity"), field="stock_quantity")
+        except ValueError as exc:
+            stock_quantity = None
+            errors["stock_quantity"] = str(exc)
+
+        branch = _get_branch_from_value(data.get("branch"))
+        if stock_quantity is not None and not branch:
+            errors["branch"] = "Branch is required when stock_quantity is provided."
+
+        if cost_price is None:
+            errors["cost_price"] = errors.get("cost_price") or "Cost price is required."
+        if selling_price is None:
+            errors["selling_price"] = errors.get("selling_price") or "Selling price is required."
+
+        if sku and Product.objects.filter(sku=sku).exists():
+            errors["sku"] = "SKU already exists."
+
+        if errors:
+            return Response(errors, status=400)
+
+        with transaction.atomic():
+            category, _ = Category.objects.get_or_create(name=category_name)
+            product = Product.objects.create(
+                sku=sku,
+                name=name,
+                category=category,
+                cost_price=cost_price,
+                selling_price=selling_price,
+                retail_price=retail_price,
+                wholesale_price=wholesale_price,
+                wholesale_threshold=wholesale_threshold,
+                is_active=True if is_active is None else is_active,
+            )
+            _ensure_base_unit(
+                product,
+                unit_name=unit_name,
+                retail_price=retail_price or selling_price,
+                wholesale_price=wholesale_price,
+                wholesale_threshold=wholesale_threshold,
+            )
+            if branch and stock_quantity is not None:
+                Inventory.objects.update_or_create(
+                    branch=branch,
+                    product=product,
+                    defaults={"quantity": stock_quantity},
+                )
+
+        return Response({"id": str(product.id)}, status=201)
+
+
+class ProductUpdateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def put(self, request, product_id):
+        product = get_object_or_404(Product, id=product_id)
+        data = request.data or {}
+        errors = {}
+
+        sku = str(data.get("sku") or product.sku).strip()
+        name = str(data.get("name") or product.name).strip()
+        category_name = str(data.get("category") or product.category.name).strip()
+        unit_name = str(data.get("unit") or "").strip()
+        is_active = _parse_bool(data.get("is_active"))
+
+        if not sku:
+            errors["sku"] = "SKU is required."
+        if not name:
+            errors["name"] = "Name is required."
+        if not category_name:
+            errors["category"] = "Category is required."
+
+        try:
+            cost_price = _parse_decimal(data.get("cost_price"), field="cost_price")
+        except ValueError as exc:
+            cost_price = None
+            errors["cost_price"] = str(exc)
+        try:
+            selling_price = _parse_decimal(data.get("selling_price"), field="selling_price")
+        except ValueError as exc:
+            selling_price = None
+            errors["selling_price"] = str(exc)
+        try:
+            retail_price = _parse_decimal(data.get("retail_price"), field="retail_price")
+        except ValueError as exc:
+            retail_price = None
+            errors["retail_price"] = str(exc)
+        try:
+            wholesale_price = _parse_decimal(data.get("wholesale_price"), field="wholesale_price")
+        except ValueError as exc:
+            wholesale_price = None
+            errors["wholesale_price"] = str(exc)
+        try:
+            wholesale_threshold = _parse_int(data.get("wholesale_threshold"), field="wholesale_threshold")
+        except ValueError as exc:
+            wholesale_threshold = None
+            errors["wholesale_threshold"] = str(exc)
+        try:
+            stock_quantity = _parse_int(data.get("stock_quantity"), field="stock_quantity")
+        except ValueError as exc:
+            stock_quantity = None
+            errors["stock_quantity"] = str(exc)
+
+        branch = _get_branch_from_value(data.get("branch"))
+        if stock_quantity is not None and not branch:
+            errors["branch"] = "Branch is required when stock_quantity is provided."
+
+        if cost_price is None:
+            errors["cost_price"] = errors.get("cost_price") or "Cost price is required."
+        if selling_price is None:
+            errors["selling_price"] = errors.get("selling_price") or "Selling price is required."
+
+        if sku and Product.objects.filter(sku=sku).exclude(id=product.id).exists():
+            errors["sku"] = "SKU already exists."
+
+        if errors:
+            return Response(errors, status=400)
+
+        with transaction.atomic():
+            category, _ = Category.objects.get_or_create(name=category_name)
+            product.sku = sku
+            product.name = name
+            product.category = category
+            product.cost_price = cost_price
+            product.selling_price = selling_price
+            product.retail_price = retail_price
+            product.wholesale_price = wholesale_price
+            product.wholesale_threshold = wholesale_threshold
+            if is_active is not None:
+                product.is_active = is_active
+            product.save()
+
+            _ensure_base_unit(
+                product,
+                unit_name=unit_name,
+                retail_price=retail_price or selling_price,
+                wholesale_price=wholesale_price,
+                wholesale_threshold=wholesale_threshold,
+            )
+
+            if branch and stock_quantity is not None:
+                Inventory.objects.update_or_create(
+                    branch=branch,
+                    product=product,
+                    defaults={"quantity": stock_quantity},
+                )
+
+        return Response({"id": str(product.id)}, status=200)
+
+
+def _normalize_header(value):
+    return (str(value).strip().lower() if value is not None else "")
+
+
+def _parse_decimal(value, *, field):
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValueError(f"Invalid {field}")
+
+
+def _parse_int(value, *, field):
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return int(Decimal(str(value).strip()))
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValueError(f"Invalid {field}")
+
+
+def _parse_bool(value):
+    if value is None or str(value).strip() == "":
+        return None
+    val = str(value).strip().lower()
+    if val in ("1", "true", "yes", "y", "on"):
+        return True
+    if val in ("0", "false", "no", "n", "off"):
+        return False
+    return None
+
+
+class ProductImportTemplateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        headers = [
+            "sku",
+            "name",
+            "category",
+            "cost_price",
+            "selling_price",
+            "retail_price",
+            "wholesale_price",
+            "wholesale_threshold",
+            "unit",
+            "stock_quantity",
+            "branch",
+            "is_active",
+        ]
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Products"
+        ws.append(headers)
+        for idx, header in enumerate(headers, start=1):
+            ws.column_dimensions[get_column_letter(idx)].width = max(14, len(header) + 2)
+
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        response["Content-Disposition"] = 'attachment; filename="product-import-template.xlsx"'
+        wb.save(response)
+        return response
+
+
+class ProductImportView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def post(self, request):
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "No file uploaded."}, status=400)
+        if not upload.name.lower().endswith(".xlsx"):
+            return Response({"detail": "Only .xlsx files are supported."}, status=400)
+
+        try:
+            wb = load_workbook(upload, data_only=True)
+        except Exception:
+            return Response({"detail": "Invalid Excel file."}, status=400)
+
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return Response({"detail": "Excel sheet is empty."}, status=400)
+
+        headers = [_normalize_header(h) for h in rows[0]]
+        header_map = {name: idx for idx, name in enumerate(headers) if name}
+
+        required_fields = ["sku", "name", "category", "cost_price", "selling_price"]
+        missing_headers = [h for h in required_fields if h not in header_map]
+        if missing_headers:
+            return Response(
+                {"detail": f"Missing required headers: {', '.join(missing_headers)}"},
+                status=400,
+            )
+
+        created_count = 0
+        updated_count = 0
+        failed_count = 0
+        errors = []
+
+        for row_index, row in enumerate(rows[1:], start=2):
+            if not any(cell is not None and str(cell).strip() != "" for cell in row):
+                continue
+
+            row_errors = []
+
+            def add_error(field, message):
+                row_errors.append({"row": row_index, "field": field, "error": message})
+
+            def cell_value(field):
+                idx = header_map.get(field)
+                if idx is None or idx >= len(row):
+                    return None
+                return row[idx]
+
+            sku = str(cell_value("sku") or "").strip()
+            name = str(cell_value("name") or "").strip()
+            category_name = str(cell_value("category") or "").strip()
+
+            if not sku:
+                add_error("sku", "Missing SKU")
+            if not name:
+                add_error("name", "Missing name")
+            if not category_name:
+                add_error("category", "Missing category")
+
+            try:
+                cost_price = _parse_decimal(cell_value("cost_price"), field="cost_price")
+            except ValueError as exc:
+                cost_price = None
+                add_error("cost_price", str(exc))
+
+            try:
+                selling_price = _parse_decimal(cell_value("selling_price"), field="selling_price")
+            except ValueError as exc:
+                selling_price = None
+                add_error("selling_price", str(exc))
+
+            try:
+                retail_price = _parse_decimal(cell_value("retail_price"), field="retail_price")
+            except ValueError as exc:
+                retail_price = None
+                add_error("retail_price", str(exc))
+
+            try:
+                wholesale_price = _parse_decimal(cell_value("wholesale_price"), field="wholesale_price")
+            except ValueError as exc:
+                wholesale_price = None
+                add_error("wholesale_price", str(exc))
+
+            try:
+                wholesale_threshold = _parse_int(cell_value("wholesale_threshold"), field="wholesale_threshold")
+            except ValueError as exc:
+                wholesale_threshold = None
+                add_error("wholesale_threshold", str(exc))
+
+            try:
+                stock_quantity = _parse_int(cell_value("stock_quantity"), field="stock_quantity")
+            except ValueError as exc:
+                stock_quantity = None
+                add_error("stock_quantity", str(exc))
+
+            unit_name = str(cell_value("unit") or "").strip()
+            is_active = _parse_bool(cell_value("is_active"))
+
+            branch_value = cell_value("branch")
+            branch = None
+            if branch_value is not None and str(branch_value).strip() != "":
+                branch_str = str(branch_value).strip()
+                if len(branch_str) >= 32:
+                    branch = Branch.objects.filter(id=branch_str).first()
+                if branch is None:
+                    branch = Branch.objects.filter(branch_name__iexact=branch_str).first()
+                if branch is None:
+                    add_error("branch", "Branch not found")
+            elif stock_quantity is not None:
+                add_error("branch", "Branch is required when stock_quantity is provided")
+
+            if cost_price is None:
+                add_error("cost_price", "Missing cost_price")
+            if selling_price is None:
+                add_error("selling_price", "Missing selling_price")
+
+            if row_errors:
+                errors.extend(row_errors)
+                failed_count += 1
+                continue
+
+            with transaction.atomic():
+                category, _ = Category.objects.get_or_create(name=category_name)
+                product, created = Product.objects.get_or_create(
+                    sku=sku,
+                    defaults={
+                        "name": name,
+                        "category": category,
+                        "cost_price": cost_price,
+                        "selling_price": selling_price,
+                        "retail_price": retail_price,
+                        "wholesale_price": wholesale_price,
+                        "wholesale_threshold": wholesale_threshold,
+                        "is_active": True if is_active is None else is_active,
+                    },
+                )
+
+                if created:
+                    created_count += 1
+                else:
+                    product.name = name
+                    product.category = category
+                    if cost_price is not None:
+                        product.cost_price = cost_price
+                    if selling_price is not None:
+                        product.selling_price = selling_price
+                    if retail_price is not None:
+                        product.retail_price = retail_price
+                    if wholesale_price is not None:
+                        product.wholesale_price = wholesale_price
+                    if wholesale_threshold is not None:
+                        product.wholesale_threshold = wholesale_threshold
+                    if is_active is not None:
+                        product.is_active = is_active
+                    product.save()
+                    updated_count += 1
+
+                base_unit = product.units.filter(is_base_unit=True).first()
+                if not base_unit:
+                    unit_code = unit_name.lower().replace(" ", "_")[:32] if unit_name else "base"
+                    unit_label = unit_name or "Base Unit"
+                    ProductUnit.objects.create(
+                        product=product,
+                        unit_name=unit_label,
+                        unit_code=unit_code,
+                        conversion_to_base_unit=1,
+                        is_base_unit=True,
+                        retail_price=retail_price or selling_price,
+                        wholesale_price=wholesale_price,
+                        wholesale_threshold=wholesale_threshold,
+                        is_active=True,
+                    )
+                else:
+                    if unit_name:
+                        base_unit.unit_name = unit_name
+                        base_unit.unit_code = unit_name.lower().replace(" ", "_")[:32]
+                    if retail_price is not None:
+                        base_unit.retail_price = retail_price
+                    if wholesale_price is not None:
+                        base_unit.wholesale_price = wholesale_price
+                    if wholesale_threshold is not None:
+                        base_unit.wholesale_threshold = wholesale_threshold
+                    base_unit.save()
+
+                if branch and stock_quantity is not None:
+                    inventory, inv_created = Inventory.objects.get_or_create(
+                        branch=branch,
+                        product=product,
+                        defaults={"quantity": stock_quantity},
+                    )
+                    if not inv_created:
+                        inventory.quantity = stock_quantity
+                        inventory.save()
+
+        return Response(
+            {
+                "created_count": created_count,
+                "updated_count": updated_count,
+                "failed_count": failed_count,
+                "errors": errors,
+            }
+        )
+
+
+class InventoryStockLookupView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        product_id = request.query_params.get("product") or request.query_params.get("product_id")
+        branch_id = request.query_params.get("branch") or request.query_params.get("branch_id")
+        if not product_id or not branch_id:
+            return Response({"detail": "Product and branch are required."}, status=400)
+
+        inventory = Inventory.objects.filter(product_id=product_id, branch_id=branch_id).first()
+        qty = inventory.quantity if inventory else 0
+        return Response({"quantity": qty})
+
+
+class InventoryAdjustmentListView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        branch_id = request.query_params.get("branch")
+        product_id = request.query_params.get("product")
+
+        qs = StockMovement.objects.filter(movement_type="adjustment").select_related(
+            "product",
+            "branch",
+            "created_by",
+        )
+        if branch_id:
+            qs = qs.filter(branch_id=branch_id)
+        if product_id:
+            qs = qs.filter(product_id=product_id)
+
+        qs = qs.order_by("-created_at")
+
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+
+        data = [
+            {
+                "id": str(entry.id),
+                "created_at": entry.created_at,
+                "product_id": str(entry.product_id) if entry.product_id else None,
+                "product_name": entry.product.name if entry.product else None,
+                "product_sku": entry.product.sku if entry.product else None,
+                "branch_id": str(entry.branch_id) if entry.branch_id else None,
+                "branch_name": entry.branch.branch_name if entry.branch else None,
+                "adjustment_type": "increase" if entry.quantity_change >= 0 else "decrease",
+                "quantity": abs(entry.quantity_change),
+                "previous_quantity": entry.previous_quantity,
+                "new_quantity": entry.new_quantity,
+                "reason": entry.reference or "",
+                "note": entry.notes or "",
+                "created_by_name": f"{entry.created_by.first_name} {entry.created_by.last_name}".strip()
+                if entry.created_by
+                else None,
+            }
+            for entry in page
+        ]
+
+        if page is not qs:
+            return paginator.get_paginated_response(data)
+        return Response(data)
+
+
+class InventoryAdjustmentCreateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def post(self, request):
+        data = request.data or {}
+        errors = {}
+
+        product_id = data.get("product_id") or data.get("product")
+        branch_id = data.get("branch_id") or data.get("branch")
+        adj_type = (data.get("adjustment_type") or "").strip().lower()
+        reason = str(data.get("reason") or "").strip()
+        note = str(data.get("note") or "").strip()
+
+        if not product_id:
+            errors["product"] = "Product is required."
+        if not branch_id:
+            errors["branch"] = "Branch is required."
+        if adj_type not in ("increase", "decrease"):
+            errors["adjustment_type"] = "Adjustment type must be increase or decrease."
+        if not reason:
+            errors["reason"] = "Reason is required."
+
+        try:
+            quantity = _parse_int(data.get("quantity"), field="quantity")
+        except ValueError as exc:
+            quantity = None
+            errors["quantity"] = str(exc)
+        if quantity is None or quantity <= 0:
+            errors["quantity"] = "Quantity must be greater than zero."
+
+        product = Product.objects.filter(id=product_id).first() if product_id else None
+        if product_id and not product:
+            errors["product"] = "Product not found."
+        branch = Branch.objects.filter(id=branch_id).first() if branch_id else None
+        if branch_id and not branch:
+            errors["branch"] = "Branch not found."
+
+        if errors:
+            return Response(errors, status=400)
+
+        with transaction.atomic():
+            inventory, _ = Inventory.objects.get_or_create(
+                product=product,
+                branch=branch,
+                defaults={"quantity": 0},
+            )
+            previous_qty = inventory.quantity
+            delta = quantity if adj_type == "increase" else -quantity
+            new_qty = previous_qty + delta
+            if new_qty < 0:
+                return Response({"detail": "Insufficient stock for this decrease."}, status=400)
+
+            inventory.quantity = new_qty
+            inventory.save()
+
+            movement = StockMovement.objects.create(
+                inventory=inventory,
+                product=product,
+                branch=branch,
+                movement_type="adjustment",
+                quantity_change=delta,
+                previous_quantity=previous_qty,
+                new_quantity=new_qty,
+                reference=reason[:100],
+                notes=note or "",
+                is_active=True,
+            )
+
+        return Response(
+            {
+                "id": str(movement.id),
+                "product_id": str(product.id),
+                "branch_id": str(branch.id),
+                "previous_quantity": previous_qty,
+                "new_quantity": new_qty,
+            },
+            status=201,
+        )

@@ -4,9 +4,15 @@ from .payment_views import (
     MpesaCallbackView,
     PaymentStatusView,
     MpesaStatusByCheckoutView,
+    BackOfficePaymentsListView,
+    BackOfficePaymentsExportView,
+    BackOfficePaymentDetailView,
 )
 
 urlpatterns = [
+    path("backoffice/export/", BackOfficePaymentsExportView.as_view(), name="backoffice-payments-export"),
+    path("backoffice/", BackOfficePaymentsListView.as_view(), name="backoffice-payments-list"),
+    path("backoffice/<uuid:payment_id>/", BackOfficePaymentDetailView.as_view(), name="backoffice-payments-detail"),
     path("mpesa/stk-push/", MpesaStkPushView.as_view(), name="mpesa-stk-push"),
     path("mpesa/callback/", MpesaCallbackView.as_view(), name="mpesa-callback"),
     path("mpesa/status/<uuid:payment_id>/", PaymentStatusView.as_view(), name="payment-status"),

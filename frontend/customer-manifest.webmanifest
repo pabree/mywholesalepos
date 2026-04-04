@@ -1,15 +1,15 @@
 {
-  "name": "WholesalePOS Customer",
-  "short_name": "WholesalePOS",
-  "description": "Wholesale ordering and delivery tracking for WholesalePOS customers.",
+  "name": "Stery Wholesalers",
+  "short_name": "Stery Orders",
+  "description": "Stery Wholesalers customer ordering portal.",
   "id": "/customer/",
   "start_url": "/customer/",
   "scope": "/customer/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
-  "background_color": "#0b2b2c",
-  "theme_color": "#0b2b2c",
+  "background_color": "#fafaf9",
+  "theme_color": "#fef3c7",
   "icons": [
     {
       "src": "customer-icon-192.png",

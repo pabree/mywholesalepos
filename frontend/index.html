@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#fef3c7">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>Stery Wholesalers — Wholesale POS</title>
@@ -13,11 +13,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="manifest" href="{% static 'staff-manifest.webmanifest' %}">
+    <link rel="manifest" href="/manifest.json">
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-03.1">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-04.2">
 </head>
 <body>
     <!-- Top Bar -->
@@ -61,6 +61,7 @@
             <button id="customer-orders-btn" type="button" class="btn-ghost" title="Customer Orders">Customer Orders</button>
             <button id="ledger-btn" type="button" class="btn-ghost" title="Financial Overview">Finance</button>
             <button id="returns-btn" type="button" class="btn-ghost" title="Returns / Refunds">Returns</button>
+            <button id="backoffice-btn" type="button" class="btn-ghost" title="Back Office">Back Office</button>
             <button id="install-pos-btn" type="button" class="btn-ghost install-btn hidden" title="Install POS">Install App</button>
             <div class="clock" id="clock"></div>
         </div>
@@ -635,9 +636,716 @@
         </div>
     </div>
 
+    <div id="backoffice-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content backoffice-modal">
+            <div class="modal-header">
+                <h3>Back Office</h3>
+                <button id="backoffice-close-btn" class="btn-ghost">✕</button>
+            </div>
+            <div class="backoffice-body">
+                <aside class="backoffice-nav">
+                    <button class="backoffice-tab active" data-section="products">Products</button>
+                    <button class="backoffice-tab" data-section="customers">Customers</button>
+                    <button class="backoffice-tab" data-section="sales">Sales</button>
+                    <button class="backoffice-tab" data-section="orders">Orders</button>
+                    <button class="backoffice-tab" data-section="payments">Payments</button>
+                    <button class="backoffice-tab" data-section="staff">Staff</button>
+                    <button class="backoffice-tab" data-section="inventory">Inventory</button>
+                    <button class="backoffice-tab" data-section="setup">Setup</button>
+                    <button class="backoffice-tab" data-section="imports" disabled>Imports</button>
+                </aside>
+                <section class="backoffice-content">
+                    <div id="backoffice-products" class="backoffice-section">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-product-search" class="summary-input" placeholder="Search SKU or name">
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-product-add" class="btn-primary">Add Product</button>
+                                <button id="backoffice-product-template" class="btn-ghost">Download Template</button>
+                                <button id="backoffice-product-import" class="btn-secondary">Import Excel</button>
+                                <input type="file" id="backoffice-product-file" accept=".xlsx" hidden>
+                            </div>
+                        </div>
+                        <div id="backoffice-product-result" class="import-result hidden"></div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-product-table">
+                                <thead>
+                                    <tr>
+                                        <th>SKU</th>
+                                        <th>Name</th>
+                                        <th>Category</th>
+                                        <th>Selling</th>
+                                        <th>Wholesale</th>
+                                        <th>Stock</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="8" class="muted">Loading products...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div id="backoffice-customers" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-customer-search" class="summary-input" placeholder="Search name">
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-customer-add" class="btn-primary">Add Customer</button>
+                            </div>
+                        </div>
+                        <div class="backoffice-filters">
+                            <select id="backoffice-customer-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                            <select id="backoffice-customer-route" class="summary-select">
+                                <option value="">All routes</option>
+                            </select>
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-customer-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Route</th>
+                                        <th>Branch</th>
+                                        <th>Wholesale</th>
+                                        <th>Active</th>
+                                        <th>Balance Access</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="7" class="muted">Loading customers...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="backoffice-customer-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="backoffice-customer-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="backoffice-customer-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-staff" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-staff-search" class="summary-input" placeholder="Search name or username">
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-staff-add" class="btn-primary">Add User</button>
+                            </div>
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-staff-table">
+                                <thead>
+                                    <tr>
+                                        <th>Username</th>
+                                        <th>Name</th>
+                                        <th>Role</th>
+                                        <th>Branch</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="6" class="muted">Loading users...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="backoffice-staff-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="backoffice-staff-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="backoffice-staff-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-sales" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-sales-search" class="summary-input" placeholder="Search sale ID or customer">
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-sales-export" class="btn-secondary">Export CSV</button>
+                            </div>
+                        </div>
+                        <div class="backoffice-filters">
+                            <select id="backoffice-sales-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                            <select id="backoffice-sales-status" class="summary-select">
+                                <option value="">All statuses</option>
+                                <option value="draft">Draft</option>
+                                <option value="held">Held</option>
+                                <option value="completed">Completed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                            <input type="date" id="backoffice-sales-from" class="summary-input">
+                            <input type="date" id="backoffice-sales-to" class="summary-input">
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-sales-table">
+                                <thead>
+                                    <tr>
+                                        <th>Sale</th>
+                                        <th>Customer</th>
+                                        <th>Branch</th>
+                                        <th>Status</th>
+                                        <th>Total</th>
+                                        <th>Paid</th>
+                                        <th>Balance</th>
+                                        <th>Payment</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="10" class="muted">Loading sales...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="backoffice-sales-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="backoffice-sales-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="backoffice-sales-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-orders" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-orders-search" class="summary-input" placeholder="Search order ID or customer">
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-orders-export" class="btn-secondary">Export CSV</button>
+                            </div>
+                        </div>
+                        <div class="backoffice-filters">
+                            <select id="backoffice-orders-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                            <select id="backoffice-orders-route" class="summary-select">
+                                <option value="">All routes</option>
+                            </select>
+                            <select id="backoffice-orders-status" class="summary-select">
+                                <option value="">All statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="pending_credit_approval">Pending credit approval</option>
+                                <option value="confirmed">Confirmed</option>
+                                <option value="processing">Processing</option>
+                                <option value="out_for_delivery">Out for delivery</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-orders-table">
+                                <thead>
+                                    <tr>
+                                        <th>Order</th>
+                                        <th>Customer</th>
+                                        <th>Branch</th>
+                                        <th>Route</th>
+                                        <th>Status</th>
+                                        <th>Total</th>
+                                        <th>Assigned</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="9" class="muted">Loading orders...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="backoffice-orders-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="backoffice-orders-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="backoffice-orders-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-payments" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-payments-search" class="summary-input" placeholder="Search reference, phone, or sale ID">
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-payments-export" class="btn-secondary">Export CSV</button>
+                            </div>
+                        </div>
+                        <div class="backoffice-filters">
+                            <select id="backoffice-payments-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                            <select id="backoffice-payments-method" class="summary-select">
+                                <option value="">All methods</option>
+                                <option value="cash">Cash</option>
+                                <option value="mpesa">M-Pesa</option>
+                            </select>
+                            <select id="backoffice-payments-status" class="summary-select">
+                                <option value="">All statuses</option>
+                                <option value="completed">Completed</option>
+                                <option value="pending">Pending</option>
+                                <option value="failed">Failed</option>
+                            </select>
+                            <input type="date" id="backoffice-payments-from" class="summary-input">
+                            <input type="date" id="backoffice-payments-to" class="summary-input">
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-payments-table">
+                                <thead>
+                                    <tr>
+                                        <th>Payment</th>
+                                        <th>Sale</th>
+                                        <th>Customer</th>
+                                        <th>Branch</th>
+                                        <th>Method</th>
+                                        <th>Status</th>
+                                        <th>Amount</th>
+                                        <th>Reference</th>
+                                        <th>Phone</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="11" class="muted">Loading payments...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="backoffice-payments-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="backoffice-payments-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="backoffice-payments-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-inventory" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="inventory-adjust-search" class="summary-input" placeholder="Search product by name or SKU">
+                            </div>
+                        </div>
+                        <div class="backoffice-filters">
+                            <select id="inventory-adjust-branch" class="summary-select">
+                                <option value="">Select branch</option>
+                            </select>
+                            <select id="inventory-adjust-product" class="summary-select">
+                                <option value="">Select product</option>
+                            </select>
+                            <div class="inventory-stock-meta">
+                                Current Stock: <strong id="inventory-adjust-stock">—</strong>
+                            </div>
+                        </div>
+                        <div class="inventory-adjust-card">
+                            <div class="form-grid">
+                                <label>Adjustment Type<span class="required">*</span>
+                                    <select id="inventory-adjust-type" class="summary-select" required>
+                                        <option value="increase">Increase</option>
+                                        <option value="decrease">Decrease</option>
+                                    </select>
+                                </label>
+                                <label>Quantity<span class="required">*</span>
+                                    <input id="inventory-adjust-qty" type="number" min="1" class="summary-input" required>
+                                </label>
+                                <label>Reason<span class="required">*</span>
+                                    <input id="inventory-adjust-reason" class="summary-input" required>
+                                </label>
+                                <label>Note
+                                    <input id="inventory-adjust-note" class="summary-input">
+                                </label>
+                            </div>
+                            <div id="inventory-adjust-error" class="form-error"></div>
+                            <div class="form-actions">
+                                <button id="inventory-adjust-submit" class="btn-primary">Save Adjustment</button>
+                            </div>
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="inventory-adjust-history">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Product</th>
+                                        <th>Branch</th>
+                                        <th>Type</th>
+                                        <th>Qty</th>
+                                        <th>Reason</th>
+                                        <th>User</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="7" class="muted">Loading adjustments...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="inventory-adjust-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="inventory-adjust-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="inventory-adjust-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-setup" class="backoffice-section hidden">
+                        <div class="backoffice-subnav">
+                            <button class="backoffice-subtab active" data-setup="branches">Branches</button>
+                            <button class="backoffice-subtab" data-setup="routes">Routes</button>
+                            <button class="backoffice-subtab" data-setup="categories">Categories</button>
+                        </div>
+                        <div id="setup-branches" class="setup-section">
+                            <div class="backoffice-toolbar">
+                                <div class="backoffice-search">
+                                    <input type="text" id="setup-branch-search" class="summary-input" placeholder="Search branch">
+                                </div>
+                                <div class="backoffice-actions">
+                                    <button id="setup-branch-add" class="btn-primary">Add Branch</button>
+                                </div>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="setup-branch-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Location</th>
+                                            <th>Business</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="5" class="muted">Loading branches...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="setup-routes" class="setup-section hidden">
+                            <div class="backoffice-toolbar">
+                                <div class="backoffice-search">
+                                    <input type="text" id="setup-route-search" class="summary-input" placeholder="Search route">
+                                </div>
+                                <div class="backoffice-actions">
+                                    <button id="setup-route-add" class="btn-primary">Add Route</button>
+                                </div>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="setup-route-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Code</th>
+                                            <th>Branch</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="5" class="muted">Loading routes...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="setup-categories" class="setup-section hidden">
+                            <div class="backoffice-toolbar">
+                                <div class="backoffice-search">
+                                    <input type="text" id="setup-category-search" class="summary-input" placeholder="Search category">
+                                </div>
+                                <div class="backoffice-actions">
+                                    <button id="setup-category-add" class="btn-primary">Add Category</button>
+                                </div>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="setup-category-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="3" class="muted">Loading categories...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <div id="backoffice-sale-detail-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content sale-detail-modal">
+            <div class="modal-header">
+                <h3>Sale Details</h3>
+                <button id="backoffice-sale-detail-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll" id="backoffice-sale-detail-body">
+                <div class="muted">Select a sale to view details.</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="backoffice-order-detail-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content sale-detail-modal">
+            <div class="modal-header">
+                <h3>Order Details</h3>
+                <button id="backoffice-order-detail-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll" id="backoffice-order-detail-body">
+                <div class="muted">Select an order to view details.</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="backoffice-payment-detail-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content sale-detail-modal">
+            <div class="modal-header">
+                <h3>Payment Details</h3>
+                <button id="backoffice-payment-detail-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll" id="backoffice-payment-detail-body">
+                <div class="muted">Select a payment to view details.</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="product-form-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content product-form-modal">
+            <div class="modal-header">
+                <h3 id="product-form-title">Add Product</h3>
+                <button id="product-form-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <form id="product-form" class="product-form">
+                    <div class="form-grid">
+                        <label>SKU<span class="required">*</span><input id="product-sku" class="summary-input" required></label>
+                        <label>Name<span class="required">*</span><input id="product-name" class="summary-input" required></label>
+                        <label>Category<span class="required">*</span>
+                            <select id="product-category" class="summary-select" required>
+                                <option value="">Loading categories...</option>
+                            </select>
+                        </label>
+                        <label>Unit
+                            <select id="product-unit" class="summary-select">
+                                <option value="Base Unit">Base Unit</option>
+                                <option value="Piece">Piece</option>
+                                <option value="Pack">Pack</option>
+                                <option value="Box">Box</option>
+                                <option value="Carton">Carton</option>
+                                <option value="Bag">Bag</option>
+                            </select>
+                        </label>
+                        <label>Cost Price<span class="required">*</span><input id="product-cost" type="number" class="summary-input" step="0.01" required></label>
+                        <label>Selling Price<span class="required">*</span><input id="product-selling" type="number" class="summary-input" step="0.01" required></label>
+                        <label>Retail Price<input id="product-retail" type="number" class="summary-input" step="0.01"></label>
+                        <label>Wholesale Price<input id="product-wholesale" type="number" class="summary-input" step="0.01"></label>
+                        <label>Wholesale Threshold<input id="product-threshold" type="number" class="summary-input"></label>
+                        <label>Branch
+                            <select id="product-branch" class="summary-select">
+                                <option value="">Select branch (optional)</option>
+                            </select>
+                        </label>
+                        <label>Stock Quantity<input id="product-stock" type="number" class="summary-input" min="0"></label>
+                        <label class="checkbox-row">
+                            <input id="product-active" type="checkbox" checked>
+                            Active
+                        </label>
+                    </div>
+                    <div id="product-form-error" class="form-error"></div>
+                    <div class="form-actions">
+                        <button type="button" id="product-form-cancel" class="btn-ghost">Cancel</button>
+                        <button type="submit" id="product-form-save" class="btn-primary">Save Product</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="customer-form-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content product-form-modal">
+            <div class="modal-header">
+                <h3 id="customer-form-title">Add Customer</h3>
+                <button id="customer-form-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <form id="customer-form" class="product-form">
+                    <div class="form-grid">
+                        <label>Name<span class="required">*</span><input id="customer-name" class="summary-input" required></label>
+                        <label>Route
+                            <select id="customer-route" class="summary-select">
+                                <option value="">Select route (optional)</option>
+                            </select>
+                        </label>
+                        <label class="checkbox-row">
+                            <input id="customer-wholesale" type="checkbox">
+                            Wholesale Customer
+                        </label>
+                        <label class="checkbox-row">
+                            <input id="customer-active" type="checkbox" checked>
+                            Active
+                        </label>
+                        <label class="checkbox-row">
+                            <input id="customer-balance" type="checkbox">
+                            Can View Balance
+                        </label>
+                    </div>
+                    <div id="customer-form-error" class="form-error"></div>
+                    <div class="form-actions">
+                        <button type="button" id="customer-form-cancel" class="btn-ghost">Cancel</button>
+                        <button type="submit" id="customer-form-save" class="btn-primary">Save Customer</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="staff-form-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content product-form-modal">
+            <div class="modal-header">
+                <h3 id="staff-form-title">Add User</h3>
+                <button id="staff-form-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <form id="staff-form" class="product-form">
+                    <div class="form-grid">
+                        <label>Username<span class="required">*</span><input id="staff-username" class="summary-input" required></label>
+                        <label>Email<span class="required">*</span><input id="staff-email" type="email" class="summary-input" required></label>
+                        <label>First Name<span class="required">*</span><input id="staff-first" class="summary-input" required></label>
+                        <label>Middle Name<input id="staff-middle" class="summary-input"></label>
+                        <label>Last Name<span class="required">*</span><input id="staff-last" class="summary-input" required></label>
+                        <label>Phone<input id="staff-phone" class="summary-input"></label>
+                        <label>Role<span class="required">*</span>
+                            <select id="staff-role" class="summary-select" required>
+                                <option value="">Select role</option>
+                            </select>
+                        </label>
+                        <label>Branch
+                            <select id="staff-branch" class="summary-select">
+                                <option value="">Select branch (optional)</option>
+                            </select>
+                        </label>
+                        <label>Password<span class="required" id="staff-password-required">*</span>
+                            <input id="staff-password" type="password" class="summary-input" autocomplete="new-password">
+                            <small id="staff-password-hint" class="muted form-hint">Required for new users.</small>
+                        </label>
+                        <label class="checkbox-row">
+                            <input id="staff-active" type="checkbox" checked>
+                            Active
+                        </label>
+                    </div>
+                    <div id="staff-form-error" class="form-error"></div>
+                    <div class="form-actions">
+                        <button type="button" id="staff-form-cancel" class="btn-ghost">Cancel</button>
+                        <button type="submit" id="staff-form-save" class="btn-primary">Save User</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="branch-form-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content product-form-modal">
+            <div class="modal-header">
+                <h3 id="branch-form-title">Add Branch</h3>
+                <button id="branch-form-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <form id="branch-form" class="product-form">
+                    <div class="form-grid">
+                        <label>Branch Name<span class="required">*</span><input id="branch-name" class="summary-input" required></label>
+                        <label>Location<span class="required">*</span><input id="branch-location" class="summary-input" required></label>
+                        <label class="checkbox-row">
+                            <input id="branch-active" type="checkbox" checked>
+                            Active
+                        </label>
+                    </div>
+                    <div id="branch-form-error" class="form-error"></div>
+                    <div class="form-actions">
+                        <button type="button" id="branch-form-cancel" class="btn-ghost">Cancel</button>
+                        <button type="submit" id="branch-form-save" class="btn-primary">Save Branch</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="route-form-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content product-form-modal">
+            <div class="modal-header">
+                <h3 id="route-form-title">Add Route</h3>
+                <button id="route-form-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <form id="route-form" class="product-form">
+                    <div class="form-grid">
+                        <label>Route Name<span class="required">*</span><input id="route-name" class="summary-input" required></label>
+                        <label>Code<input id="route-code" class="summary-input"></label>
+                        <label>Branch
+                            <select id="route-branch" class="summary-select">
+                                <option value="">Select branch (optional)</option>
+                            </select>
+                        </label>
+                        <label class="checkbox-row">
+                            <input id="route-active" type="checkbox" checked>
+                            Active
+                        </label>
+                    </div>
+                    <div id="route-form-error" class="form-error"></div>
+                    <div class="form-actions">
+                        <button type="button" id="route-form-cancel" class="btn-ghost">Cancel</button>
+                        <button type="submit" id="route-form-save" class="btn-primary">Save Route</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="category-form-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content product-form-modal">
+            <div class="modal-header">
+                <h3 id="category-form-title">Add Category</h3>
+                <button id="category-form-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <form id="category-form" class="product-form">
+                    <div class="form-grid">
+                        <label>Name<span class="required">*</span><input id="category-name" class="summary-input" required></label>
+                        <label class="checkbox-row">
+                            <input id="category-active" type="checkbox" checked>
+                            Active
+                        </label>
+                    </div>
+                    <div id="category-form-error" class="form-error"></div>
+                    <div class="form-actions">
+                        <button type="button" id="category-form-cancel" class="btn-ghost">Cancel</button>
+                        <button type="submit" id="category-form-save" class="btn-primary">Save Category</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-03.1"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-04.2"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -12,6 +13,81 @@ from rest_framework import status, serializers
 from accounts.permissions import RolePermission
 from .models import Sale, SalePayment
 from .serializers import SalePaymentSerializer
+from core.pagination import StandardLimitOffsetPagination
+from django.http import HttpResponse
+import csv
+
+
+def _display_user(user):
+    if not user:
+        return ""
+    display = getattr(user, "display_name", "") or ""
+    if display:
+        return display
+    if hasattr(user, "get_full_name"):
+        full_name = user.get_full_name()
+        if full_name:
+            return full_name
+    return getattr(user, "username", "") or ""
+
+
+def _format_dt(value):
+    if not value:
+        return ""
+    try:
+        return value.isoformat(sep=" ", timespec="seconds")
+    except TypeError:
+        return str(value)
+
+
+def _backoffice_payments_queryset(request):
+    query = (request.query_params.get("q") or "").strip()
+    reference = (request.query_params.get("reference") or "").strip()
+    phone = (request.query_params.get("phone") or "").strip()
+    sale_param = (request.query_params.get("sale") or "").strip()
+    customer_id = request.query_params.get("customer")
+    branch_id = request.query_params.get("branch")
+    method = request.query_params.get("method")
+    status_filter = request.query_params.get("status")
+    date_from = parse_date(request.query_params.get("date_from") or "")
+    date_to = parse_date(request.query_params.get("date_to") or "")
+
+    qs = SalePayment.objects.select_related(
+        "sale",
+        "sale__branch",
+        "customer",
+        "received_by",
+    )
+
+    if method:
+        qs = qs.filter(method=method)
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    if branch_id:
+        qs = qs.filter(sale__branch_id=branch_id)
+    if customer_id:
+        qs = qs.filter(customer_id=customer_id)
+    if reference:
+        qs = qs.filter(reference__icontains=reference)
+    if phone:
+        qs = qs.filter(phone_number__icontains=phone)
+    if sale_param:
+        qs = qs.filter(sale_id__icontains=sale_param)
+    if query:
+        qs = qs.filter(
+            Q(reference__icontains=query)
+            | Q(phone_number__icontains=query)
+            | Q(provider_checkout_id__icontains=query)
+            | Q(provider_request_id__icontains=query)
+            | Q(sale_id__icontains=query)
+            | Q(customer__name__icontains=query)
+        )
+    if date_from:
+        qs = qs.filter(payment_date__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(payment_date__date__lte=date_to)
+
+    return qs.order_by("-payment_date", "-created_at")
 from .services import money
 from . import mpesa
 
@@ -255,6 +331,179 @@ class MpesaCallbackView(APIView):
                 ])
 
         return Response({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+
+class BackOfficePaymentsListView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        qs = _backoffice_payments_queryset(request)
+
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+
+        data = []
+        for payment in page:
+            sale = payment.sale
+            branch = sale.branch if sale else None
+            customer = payment.customer
+            data.append(
+                {
+                    "id": str(payment.id),
+                    "sale_id": str(payment.sale_id) if payment.sale_id else None,
+                    "sale_status": sale.status if sale else None,
+                    "sale_total": str(sale.grand_total) if sale else None,
+                    "sale_amount_paid": str(sale.amount_paid) if sale else None,
+                    "sale_balance_due": str(sale.balance_due) if sale else None,
+                    "customer": {
+                        "id": str(customer.id) if customer else None,
+                        "name": customer.name if customer else None,
+                    },
+                    "branch": {
+                        "id": str(branch.id) if branch else None,
+                        "name": branch.branch_name if branch else None,
+                        "location": branch.location if branch else None,
+                    },
+                    "amount": str(payment.amount),
+                    "method": payment.method,
+                    "status": payment.status,
+                    "reference": payment.reference,
+                    "phone_number": payment.phone_number,
+                    "provider_checkout_id": payment.provider_checkout_id,
+                    "provider_request_id": payment.provider_request_id,
+                    "received_by": {
+                        "id": str(payment.received_by_id),
+                        "name": _display_user(payment.received_by),
+                    } if payment.received_by_id else None,
+                    "payment_date": payment.payment_date,
+                    "created_at": payment.created_at,
+                }
+            )
+
+        if page is not qs:
+            return paginator.get_paginated_response(data)
+        return Response(data)
+
+
+class BackOfficePaymentsExportView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        qs = _backoffice_payments_queryset(request)
+        limit = request.query_params.get("limit")
+        offset = request.query_params.get("offset")
+        if limit is not None or offset is not None:
+            paginator = StandardLimitOffsetPagination()
+            page = paginator.paginate_queryset(qs, request, view=self)
+            qs = page if page is not None else qs
+
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="backoffice-payments.csv"'
+        writer = csv.writer(response)
+        writer.writerow([
+            "payment_id",
+            "sale_id",
+            "customer",
+            "branch",
+            "amount",
+            "method",
+            "status",
+            "reference",
+            "phone",
+            "payment_date",
+            "received_by",
+        ])
+        for payment in qs:
+            sale = payment.sale
+            branch = sale.branch if sale else None
+            customer = payment.customer
+            reference = payment.reference or payment.provider_checkout_id or payment.provider_request_id or ""
+            writer.writerow([
+                str(payment.id),
+                str(payment.sale_id) if payment.sale_id else "",
+                customer.name if customer else "",
+                branch.branch_name if branch else "",
+                str(payment.amount),
+                payment.method,
+                payment.status,
+                reference,
+                payment.phone_number or "",
+                _format_dt(payment.payment_date),
+                _display_user(payment.received_by),
+            ])
+        return response
+
+
+class BackOfficePaymentDetailView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request, payment_id):
+        payment = get_object_or_404(
+            SalePayment.objects.select_related(
+                "sale",
+                "sale__branch",
+                "customer",
+                "received_by",
+                "verified_by",
+            ),
+            id=payment_id,
+        )
+        sale = payment.sale
+        branch = sale.branch if sale else None
+        customer = payment.customer
+
+        data = {
+            "id": str(payment.id),
+            "amount": str(payment.amount),
+            "method": payment.method,
+            "status": payment.status,
+            "reference": payment.reference,
+            "phone_number": payment.phone_number,
+            "note": payment.note,
+            "payment_date": payment.payment_date,
+            "created_at": payment.created_at,
+            "verified_at": payment.verified_at,
+            "applied_at": payment.applied_at,
+            "provider": payment.provider,
+            "provider_request_id": payment.provider_request_id,
+            "provider_checkout_id": payment.provider_checkout_id,
+            "provider_result_code": payment.provider_result_code,
+            "provider_result_desc": payment.provider_result_desc,
+            "provider_metadata": payment.provider_metadata,
+            "received_by": {
+                "id": str(payment.received_by_id),
+                "name": _display_user(payment.received_by),
+            } if payment.received_by_id else None,
+            "verified_by": {
+                "id": str(payment.verified_by_id),
+                "name": _display_user(payment.verified_by),
+            } if payment.verified_by_id else None,
+            "sale": {
+                "id": str(sale.id) if sale else None,
+                "status": sale.status if sale else None,
+                "payment_status": sale.payment_status if sale else None,
+                "payment_mode": sale.payment_mode if sale else None,
+                "sale_type": sale.sale_type if sale else None,
+                "grand_total": str(sale.grand_total) if sale else None,
+                "amount_paid": str(sale.amount_paid) if sale else None,
+                "balance_due": str(sale.balance_due) if sale else None,
+                "sale_date": sale.sale_date if sale else None,
+            },
+            "customer": {
+                "id": str(customer.id) if customer else None,
+                "name": customer.name if customer else None,
+            },
+            "branch": {
+                "id": str(branch.id) if branch else None,
+                "name": branch.branch_name if branch else None,
+                "location": branch.location if branch else None,
+            },
+        }
+        return Response(data)
 
 
 class PaymentStatusView(APIView):
