@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-05.4";
+const APP_BUILD = "2026-04-05.7";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -122,6 +122,10 @@ let customerOrdersPage = { count: 0, next: null, previous: null, results: [] };
 let ledgerPage = { count: 0, next: null, previous: null, results: [] };
 let expensesPage = { count: 0, next: null, previous: null, results: [] };
 let lastFilteredProducts = [];
+let searchResults = [];
+let searchResultsOpen = false;
+let searchResultIndex = -1;
+let activeSaleRowId = null;
 let mpesaPendingPayment = null;
 let mpesaPollTimer = null;
 let mpesaPollAttempts = 0;
@@ -161,8 +165,8 @@ const els = {
     saleTypeSelect:  document.getElementById("sale-type-select"),
     clock:           document.getElementById("clock"),
     productSearch:   document.getElementById("product-search"),
+    productSearchResults: document.getElementById("product-search-results"),
     categoryFilters: document.getElementById("category-filters"),
-    productsGrid:    document.getElementById("products-grid"),
     productImportTools: document.getElementById("product-import-tools"),
     productImportTemplate: document.getElementById("download-product-template"),
     productImportFile: document.getElementById("product-import-file"),
@@ -681,13 +685,62 @@ document.addEventListener("DOMContentLoaded", () => {
     renderExpenseCategoryOptions();
     setupOverlayInteractions();
 
-    els.productSearch.addEventListener("input", renderProducts);
+    els.productSearch.addEventListener("input", () => {
+        searchResultIndex = -1;
+        updateSearchResults();
+    });
     els.productSearch.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown") {
+            if (!searchResultsOpen) {
+                updateSearchResults({ forceOpen: true });
+            }
+            if (!searchResults.length) return;
+            event.preventDefault();
+            searchResultIndex = Math.min(searchResults.length - 1, searchResultIndex + 1);
+            updateSearchResults({ keepOpen: true });
+            return;
+        }
+        if (event.key === "ArrowUp") {
+            if (!searchResultsOpen) return;
+            event.preventDefault();
+            searchResultIndex = Math.max(0, searchResultIndex - 1);
+            updateSearchResults({ keepOpen: true });
+            return;
+        }
+        if (event.key === "Escape") {
+            hideSearchResults();
+            return;
+        }
         if (event.key !== "Enter") return;
         event.preventDefault();
-        const first = ensureArray(lastFilteredProducts, "lastFilteredProducts")[0];
-        if (first) addToCart(first.id);
+        const query = (els.productSearch.value || "").trim();
+        if (!query) return;
+        const exact = findExactSkuMatch(query);
+        if (exact) {
+            addToCart(exact.id);
+            clearSearchInput();
+            hideSearchResults();
+            return;
+        }
+        if (searchResults.length) {
+            const selected = searchResultIndex >= 0 ? searchResults[searchResultIndex] : searchResults[0];
+            if (selected) {
+                addToCart(selected.id);
+                clearSearchInput();
+                hideSearchResults();
+            }
+            return;
+        }
+        updateSearchResults({ forceOpen: true });
     });
+    document.addEventListener("click", (event) => {
+        if (!els.productSearchResults || !els.productSearch) return;
+        const wrapper = els.productSearchResults.closest(".search-wrapper");
+        if (wrapper && !wrapper.contains(event.target)) {
+            hideSearchResults();
+        }
+    });
+    focusSearchInput();
     if (els.backofficeCloseBtn) {
         els.backofficeCloseBtn.addEventListener("click", closeBackOffice);
     }
@@ -1593,12 +1646,6 @@ async function loadAssignableUsers() {
 }
 
 async function loadProducts() {
-    els.productsGrid.innerHTML = `
-        <div class="loading-state">
-            <div class="spinner"></div>
-            <p>Loading products...</p>
-        </div>`;
-
     const products = await apiFetchAll("/inventory/products/");
     allProducts = ensureArray(products, "allProducts");
     buildCategoryFilters();
@@ -3473,6 +3520,7 @@ async function saveCategoryForm() {
 
 // ——— Categories ———
 function buildCategoryFilters() {
+    if (!els.categoryFilters) return;
     const products = ensureArray(allProducts, "allProducts");
     const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
     activeCategory = "all";
@@ -3492,13 +3540,14 @@ function buildCategoryFilters() {
 
 // ——— Render Products ———
 function renderProducts() {
+    updateSearchResults();
+}
+
+function updateSearchResults({ forceOpen = false, keepOpen = false } = {}) {
+    if (!els.productSearchResults || !els.productSearch) return;
     const products = ensureArray(allProducts, "allProducts");
     const query = els.productSearch.value.toLowerCase().trim();
     let filtered = products;
-
-    if (activeCategory !== "all") {
-        filtered = filtered.filter(p => p.category === activeCategory);
-    }
 
     if (query) {
         filtered = filtered.filter(p =>
@@ -3508,22 +3557,78 @@ function renderProducts() {
     }
 
     lastFilteredProducts = filtered;
-    if (filtered.length === 0) {
-        els.productsGrid.innerHTML = `<div class="no-results">No products found</div>`;
+    searchResults = filtered.slice(0, 20);
+    if (searchResultIndex >= searchResults.length) {
+        searchResultIndex = searchResults.length ? searchResults.length - 1 : -1;
+    }
+
+    const shouldOpen = forceOpen || keepOpen || (!!query && filtered.length > 0);
+    searchResultsOpen = shouldOpen;
+
+    if (!shouldOpen || !query) {
+        hideSearchResults();
         return;
     }
 
-    els.productsGrid.innerHTML = filtered.map(p => {
+    if (!searchResults.length) {
+        els.productSearchResults.innerHTML = `<div class="search-result-empty">No matches</div>`;
+        els.productSearchResults.classList.remove("hidden");
+        return;
+    }
+
+    els.productSearchResults.innerHTML = searchResults.map((p, idx) => {
         const stockClass = p.stock <= 0 ? "stock-out" : p.stock <= 10 ? "stock-low" : "stock-ok";
         const stockLabel = p.stock <= 0 ? "Out of stock" : `${p.stock} in stock`;
+        const active = idx === searchResultIndex ? "active" : "";
         return `
-            <div class="product-card compact" data-id="${p.id}" onclick="addToCart('${p.id}')">
+            <div class="search-result-row ${active}" onclick="selectSearchResult('${p.id}')">
+                <div class="search-result-main">
+                    <span class="product-name">${esc(p.name)}</span>
+                    <span class="product-sku">SKU: ${esc(p.sku)}</span>
+                </div>
                 <span class="product-stock ${stockClass}">${stockLabel}</span>
-                <span class="product-name">${esc(p.name)}</span>
-                <span class="product-sku">SKU: ${esc(p.sku)}</span>
                 <span class="product-price">${fmtPrice(p.selling_price)}</span>
-            </div>`;
+                <span class="search-result-action">Enter to add</span>
+            </div>
+        `;
     }).join("");
+    els.productSearchResults.classList.remove("hidden");
+}
+
+function hideSearchResults() {
+    searchResultsOpen = false;
+    searchResultIndex = -1;
+    if (els.productSearchResults) {
+        els.productSearchResults.classList.add("hidden");
+        els.productSearchResults.innerHTML = "";
+    }
+}
+
+function clearSearchInput() {
+    if (!els.productSearch) return;
+    els.productSearch.value = "";
+}
+
+function focusSearchInput() {
+    if (!els.productSearch) return;
+    requestAnimationFrame(() => {
+        els.productSearch.focus();
+        els.productSearch.select();
+    });
+}
+
+function findExactSkuMatch(query) {
+    const products = ensureArray(allProducts, "allProducts");
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return null;
+    return products.find(p => (p.sku || "").toLowerCase() === normalized) || null;
+}
+
+function selectSearchResult(productId) {
+    if (!productId) return;
+    addToCart(productId);
+    clearSearchInput();
+    hideSearchResults();
 }
 
 // ——— Cart ———
@@ -3552,10 +3657,12 @@ function addToCart(productId) {
         cart.push({ product, unit: baseUnit, qty: 1 });
     }
 
+    setActiveSaleRow(productId);
     renderCart();
     updateTotals();
     scheduleReprice();
     toast(`${product.name} added`, "success");
+    focusSearchInput();
 }
 
 function updateQty(productId, delta) {
@@ -3570,13 +3677,18 @@ function updateQty(productId, delta) {
         toast("Maximum stock reached", "warning");
     }
 
+    setActiveSaleRow(productId);
     renderCart();
     updateTotals();
     scheduleReprice();
+    focusSearchInput();
 }
 
 function removeFromCart(productId) {
     cart = cart.filter(i => i.product.id !== productId);
+    if (activeSaleRowId === productId) {
+        activeSaleRowId = null;
+    }
     renderCart();
     updateTotals();
     scheduleReprice();
@@ -3610,11 +3722,9 @@ async function clearCart() {
 function renderCart() {
     if (cart.length === 0) {
         els.cartItems.innerHTML = `
-            <div class="empty-cart">
-                <span class="empty-icon">🛒</span>
-                <p>No items yet</p>
-                <p class="hint">Click a product to add it</p>
-            </div>`;
+            <tr class="sale-entry-empty">
+                <td colspan="7">No items yet. Use search to add products.</td>
+            </tr>`;
         return;
     }
 
@@ -3623,24 +3733,26 @@ function renderCart() {
         const total = getItemLineTotal(item, unitPrice);
         const priceType = item.price_type_used ? item.price_type_used : "";
         const priceReason = item.pricing_reason ? item.pricing_reason : "";
+        const rowClass = activeSaleRowId === item.product.id ? "sale-entry-row active" : "sale-entry-row";
         return `
-            <div class="cart-item">
-                <div class="cart-item-info">
-                    <div class="cart-item-name">${esc(item.product.name)}</div>
-                    <div class="cart-item-price">${fmtPrice(unitPrice)} each</div>
-                    <div class="cart-item-unit">
-                        ${renderUnitSelect(item)}
-                        ${priceType ? `<span class="price-badge ${priceType}" title="${esc(priceReason)}">${priceType}</span>` : ""}
-                    </div>
-                </div>
-                <div class="cart-item-qty">
-                    <button class="qty-btn" onclick="updateQty('${item.product.id}', -1)">−</button>
+            <tr class="${rowClass}" onclick="activateSaleRow('${item.product.id}')">
+                <td class="sale-entry-item">
+                    <div class="sale-entry-name">${esc(item.product.name)}</div>
+                    ${priceType ? `<span class="price-badge ${priceType}" title="${esc(priceReason)}">${priceType}</span>` : ""}
+                </td>
+                <td class="sale-entry-sku">${esc(item.product.sku || "—")}</td>
+                <td class="sale-entry-unit">${renderUnitSelect(item)}</td>
+                <td class="sale-entry-qty">
+                    <button class="qty-btn" onclick="event.stopPropagation(); updateQty('${item.product.id}', -1)">−</button>
                     <span class="qty-value">${item.qty}</span>
-                    <button class="qty-btn" onclick="updateQty('${item.product.id}', 1)">+</button>
-                </div>
-                <span class="cart-item-total">${fmtPrice(total)}</span>
-                <button class="cart-item-remove" onclick="removeFromCart('${item.product.id}')" title="Remove">✕</button>
-            </div>`;
+                    <button class="qty-btn" onclick="event.stopPropagation(); updateQty('${item.product.id}', 1)">+</button>
+                </td>
+                <td class="sale-entry-price">${fmtPrice(unitPrice)}</td>
+                <td class="sale-entry-total">${fmtPrice(total)}</td>
+                <td class="sale-entry-action">
+                    <button class="cart-item-remove" onclick="event.stopPropagation(); removeFromCart('${item.product.id}')" title="Remove">✕</button>
+                </td>
+            </tr>`;
     }).join("");
 }
 
@@ -6485,9 +6597,20 @@ function setItemUnit(productId, unitId) {
     item.unit_price_snapshot = null;
     item.total_price_snapshot = null;
     item.price_type_used = null;
+    setActiveSaleRow(productId);
     renderCart();
     updateTotals();
     scheduleReprice();
+    focusSearchInput();
+}
+
+function setActiveSaleRow(productId) {
+    activeSaleRowId = productId || null;
+}
+
+function activateSaleRow(productId) {
+    setActiveSaleRow(productId);
+    renderCart();
 }
 
 function applySaleDetailToCart(sale) {

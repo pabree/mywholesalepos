@@ -6,6 +6,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 from accounts.permissions import RolePermission
 from accounts.models import User
@@ -53,8 +55,10 @@ class CustomerProfileView(APIView):
         )
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class CustomerSignupView(APIView):
-    permission_classes = [AllowAny]
+    authentication_classes = []
+    permission_classes = []
 
     def post(self, request):
         data = request.data or {}

@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-05.4">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-05.7">
 </head>
 <body>
     <!-- Top Bar -->
@@ -69,23 +69,38 @@
 
     <!-- Main Content -->
     <main id="app">
-        <!-- LEFT: Products Panel -->
-        <section id="products-panel">
+        <!-- LEFT: Sale Entry Panel -->
+        <section id="products-panel" class="sale-entry-panel">
             <div class="panel-header">
-                <h1>Product Search</h1>
+                <div class="panel-title">
+                    <h1>Sale Entry</h1>
+                    <p class="panel-subtitle">Review and confirm line items before payment.</p>
+                </div>
                 <div class="search-wrapper">
                     <span class="search-icon">⌕</span>
-                    <input type="text" id="product-search" placeholder="Search by name or SKU..." autocomplete="off">
+                    <input type="text" id="product-search" placeholder="Scan barcode or search product..." autocomplete="off">
+                    <div id="product-search-results" class="search-results hidden"></div>
                 </div>
             </div>
-            <div class="category-filters secondary" id="category-filters">
-                <button class="cat-btn active" data-category="all">All</button>
-            </div>
-            <div id="products-grid" class="products-grid compact">
-                <div class="loading-state">
-                    <div class="spinner"></div>
-                    <p>Loading products...</p>
-                </div>
+            <div class="sale-entry-table-wrap">
+                <table class="sale-entry-table" id="sale-entry-table">
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>SKU</th>
+                            <th>Unit</th>
+                            <th>Qty</th>
+                            <th>Unit Price</th>
+                            <th>Total</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="cart-items">
+                        <tr class="sale-entry-empty">
+                            <td colspan="7">No items yet. Use search to add products.</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </section>
 
@@ -94,14 +109,6 @@
             <div class="panel-header">
                 <h2>Current Sale</h2>
                 <button id="clear-cart-btn" class="btn-ghost" title="Clear cart">✕ Clear</button>
-            </div>
-
-            <div id="cart-items" class="cart-items">
-                <div class="empty-cart">
-                    <span class="empty-icon">🛒</span>
-                    <p>No items yet</p>
-                    <p class="hint">Click a product to add it</p>
-                </div>
             </div>
 
             <div class="cart-summary">
@@ -1347,6 +1354,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-05.4"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-05.7"></script>
 </body>
 </html>
