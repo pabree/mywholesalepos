@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from accounts.permissions import RolePermission
+from accounts.models import User
 from .models import Customer
 from logistics.models import Route
 from core.pagination import StandardLimitOffsetPagination
@@ -49,6 +50,9 @@ class CustomerListView(APIView):
                 "route_name": c.route.name if c.route else None,
                 "route_code": c.route.code if c.route else None,
                 "branch_name": c.route.branch.branch_name if c.route and c.route.branch else None,
+                "user_id": str(c.user_id) if c.user_id else None,
+                "user_username": c.user.username if c.user else None,
+                "user_email": c.user.email if c.user else None,
             }
             for c in page
         ]
@@ -142,3 +146,50 @@ class CustomerUpdateView(APIView):
             customer.is_active = is_active
         customer.save()
         return Response({"id": str(customer.id)}, status=200)
+
+
+class CustomerApproveView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def post(self, request, customer_id):
+        customer = get_object_or_404(Customer.all_objects, id=customer_id)
+        customer.is_active = True
+        customer.deleted_at = None
+        customer.save(update_fields=["is_active", "deleted_at", "updated_at"])
+        return Response({"id": str(customer.id), "approved": True}, status=200)
+
+
+class CustomerLinkView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def post(self, request, customer_id):
+        customer = get_object_or_404(Customer.all_objects, id=customer_id)
+        data = request.data or {}
+        identifier = str(data.get("user_identifier") or data.get("username") or data.get("email") or data.get("phone") or "").strip()
+        user_id = data.get("user_id")
+
+        user = None
+        if user_id:
+            user = User.objects.filter(id=user_id).first()
+        if not user and identifier:
+            user = (
+                User.objects.filter(username=identifier).first()
+                or User.objects.filter(email=identifier).first()
+                or User.objects.filter(phone=identifier).first()
+            )
+
+        if not user:
+            return Response({"user": "User not found."}, status=404)
+        if user.role != "customer":
+            return Response({"user": "Only customer accounts can be linked."}, status=400)
+        if customer.user and customer.user_id != user.id:
+            return Response({"customer": "Customer already linked to another account."}, status=400)
+        existing_link = getattr(user, "customer_profile", None)
+        if existing_link and existing_link.id != customer.id:
+            return Response({"user": "This account is already linked to another customer."}, status=400)
+
+        customer.user = user
+        customer.save(update_fields=["user", "updated_at"])
+        return Response({"id": str(customer.id), "user_id": str(user.id)}, status=200)

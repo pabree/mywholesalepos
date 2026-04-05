@@ -18,7 +18,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'customer-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'customer-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'customer-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'customer.css' %}?v=2026-04-03.1">
+    <link rel="stylesheet" href="{% static 'customer.css' %}?v=2026-04-05.4">
 </head>
 <body>
     <div class="install-banner hidden" id="install-banner">
@@ -50,6 +50,10 @@
             <div class="card auth-card">
                 <h1>Welcome back</h1>
                 <p class="muted">Sign in to browse the catalog and manage your orders.</p>
+                <div class="auth-tabs">
+                    <button class="auth-tab active" id="auth-tab-login">Sign in</button>
+                    <button class="auth-tab" id="auth-tab-signup">Create account</button>
+                </div>
                 <div class="account-info hidden" id="account-info">
                     <div class="detail-card">
                         <div>Signed in as <strong id="account-name">Customer</strong></div>
@@ -57,16 +61,44 @@
                     </div>
                     <button class="btn ghost" id="switch-account">Use different account</button>
                 </div>
-                <label class="field">
-                    <span>Username</span>
-                    <input type="text" id="login-username" autocomplete="username" placeholder="your username">
-                </label>
-                <label class="field">
-                    <span>Password</span>
-                    <input type="password" id="login-password" autocomplete="current-password" placeholder="********">
-                </label>
-                <button class="btn primary" id="login-btn">Sign in</button>
-                <div class="status" id="login-status">Not signed in</div>
+                <div id="login-panel">
+                    <label class="field">
+                        <span>Username</span>
+                        <input type="text" id="login-username" autocomplete="username" placeholder="your username">
+                    </label>
+                    <label class="field">
+                        <span>Password</span>
+                        <input type="password" id="login-password" autocomplete="current-password" placeholder="********">
+                    </label>
+                    <button class="btn primary" id="login-btn">Sign in</button>
+                    <div class="status" id="login-status">Not signed in</div>
+                    <div class="status hidden" id="approval-status"></div>
+                    <button class="btn ghost hidden" id="check-approval-btn">Check approval status</button>
+                </div>
+                <div id="signup-panel" class="hidden">
+                    <label class="field">
+                        <span>Full name</span>
+                        <input type="text" id="signup-name" autocomplete="name" placeholder="Your name">
+                    </label>
+                    <label class="field">
+                        <span>Email</span>
+                        <input type="email" id="signup-email" autocomplete="email" placeholder="you@example.com">
+                    </label>
+                    <label class="field">
+                        <span>Phone (optional)</span>
+                        <input type="tel" id="signup-phone" autocomplete="tel" placeholder="+2547...">
+                    </label>
+                    <label class="field">
+                        <span>Username (optional)</span>
+                        <input type="text" id="signup-username" autocomplete="username" placeholder="your username">
+                    </label>
+                    <label class="field">
+                        <span>Password</span>
+                        <input type="password" id="signup-password" autocomplete="new-password" placeholder="********">
+                    </label>
+                    <button class="btn primary" id="signup-btn">Create account</button>
+                    <div class="status" id="signup-status">Create an account to start ordering.</div>
+                </div>
             </div>
         </section>
 
@@ -157,6 +189,6 @@
 
     <div id="toast-container"></div>
 
-    <script src="{% static 'customer.js' %}?v=2026-04-03.1"></script>
+    <script src="{% static 'customer.js' %}?v=2026-04-05.4"></script>
 </body>
 </html>

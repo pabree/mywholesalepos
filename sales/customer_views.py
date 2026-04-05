@@ -5,9 +5,10 @@ from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from accounts.permissions import RolePermission
+from accounts.models import User
 from customers.models import Customer
 from inventory.models import Product
 from sales.pricing import get_unit_price
@@ -22,32 +23,106 @@ from core.pagination import StandardLimitOffsetPagination
 def _get_customer_or_denied(user):
     if not user or not user.is_authenticated:
         raise PermissionDenied("Authentication required.")
-    customer = Customer.objects.filter(user=user).first()
-    if customer:
-        return customer
-
-    # If a profile exists but was soft-deleted, restore it.
-    customer = Customer.all_objects.filter(user=user).first()
-    if customer:
-        if not customer.is_active or customer.deleted_at:
-            customer.is_active = True
-            customer.deleted_at = None
-            customer.save(update_fields=["is_active", "deleted_at", "updated_at"])
-        return customer
-
-    role = (getattr(user, "role", "") or "").strip().lower()
-    if role != "customer":
+    customer = Customer.all_objects.select_related("route", "route__branch").filter(user=user).first()
+    if not customer:
         raise PermissionDenied("Customer profile not linked to this user.")
+    if not customer.is_active or customer.deleted_at:
+        raise PermissionDenied("Customer account pending approval.")
+    return customer
 
-    display_name = f"{user.first_name} {user.last_name}".strip()
-    if not display_name:
-        display_name = user.username or user.email or "Customer"
-    return Customer.objects.create(
-        name=display_name,
-        user=user,
-        is_wholesale_customer=False,
-        can_view_balance=False,
-    )
+
+class CustomerProfileView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"customer"}
+
+    def get(self, request):
+        customer = Customer.all_objects.select_related("route", "route__branch").filter(user=request.user).first()
+        if not customer:
+            return Response({"linked": False, "approved": False}, status=200)
+        return Response(
+            {
+                "linked": True,
+                "approved": bool(customer.is_active) and not customer.deleted_at,
+                "customer_id": str(customer.id),
+                "name": customer.name,
+                "route_id": str(customer.route_id) if customer.route_id else None,
+                "route_name": customer.route.name if customer.route else None,
+                "branch_name": customer.route.branch.branch_name if customer.route and customer.route.branch else None,
+                "can_view_balance": customer.can_view_balance,
+            }
+        )
+
+
+class CustomerSignupView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        data = request.data or {}
+        errors = {}
+
+        name = str(data.get("name") or "").strip()
+        email = str(data.get("email") or "").strip().lower()
+        phone = str(data.get("phone") or "").strip()
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+
+        if not name:
+            errors["name"] = "Name is required."
+        if not email:
+            errors["email"] = "Email is required."
+        if not password or len(password) < 6:
+            errors["password"] = "Password must be at least 6 characters."
+
+        if not username:
+            if phone:
+                username = phone
+            elif email:
+                username = email.split("@")[0]
+
+        if not username:
+            errors["username"] = "Username is required."
+
+        if username and User.objects.filter(username=username).exists():
+            errors["username"] = "Username already exists."
+        if email and User.objects.filter(email=email).exists():
+            errors["email"] = "Email already exists."
+        if phone and User.objects.filter(phone=phone).exists():
+            errors["phone"] = "Phone number already exists."
+
+        if errors:
+            return Response(errors, status=400)
+
+        name_parts = name.split()
+        first_name = name_parts[0] if name_parts else "Customer"
+        last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else "Customer"
+
+        user = User.objects.create_user(
+            username=username,
+            password=password,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            phone=phone or None,
+            role="customer",
+            is_active=True,
+        )
+
+        customer = Customer.objects.create(
+            name=name,
+            user=user,
+            is_wholesale_customer=False,
+            can_view_balance=False,
+            is_active=False,
+        )
+
+        return Response(
+            {
+                "message": "Account created. Pending approval.",
+                "customer_id": str(customer.id),
+                "approved": False,
+            },
+            status=201,
+        )
 
 
 class CustomerCatalogView(APIView):

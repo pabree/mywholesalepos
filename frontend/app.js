@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-05.3";
+const APP_BUILD = "2026-04-05.4";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -1866,7 +1866,7 @@ async function loadBackOfficeCustomers() {
         if (els.backofficeCustomerTable) {
             const tbody = els.backofficeCustomerTable.querySelector("tbody");
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="7">Failed to load customers</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8">Failed to load customers</td></tr>`;
             }
         }
     }
@@ -1948,13 +1948,23 @@ function renderBackOfficeCustomers() {
     if (!tbody) return;
     const rows = backOfficeCustomers;
     if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="7">No customers found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8">No customers found</td></tr>`;
         return;
     }
     tbody.innerHTML = rows.map(customer => {
         const wholesale = customer.is_wholesale_customer ? "Yes" : "No";
         const active = customer.is_active ? "Active" : "Inactive";
         const balance = customer.can_view_balance ? "Yes" : "No";
+        const linked = Boolean(customer.user_id);
+        const accountLabel = linked
+            ? `${customer.user_username || customer.user_email || "Linked"} • ${customer.is_active ? "Approved" : "Pending"}`
+            : "Unlinked";
+        const approveBtn = linked && !customer.is_active
+            ? `<button class="btn-ghost" onclick="approveCustomerAccount('${customer.id}')">Approve</button>`
+            : "";
+        const linkBtn = !linked
+            ? `<button class="btn-ghost" onclick="linkCustomerAccount('${customer.id}')">Link</button>`
+            : "";
         return `
             <tr>
                 <td>${esc(customer.name)}</td>
@@ -1963,7 +1973,12 @@ function renderBackOfficeCustomers() {
                 <td>${wholesale}</td>
                 <td>${active}</td>
                 <td>${balance}</td>
-                <td><button class="btn-ghost" onclick="openCustomerForm('${customer.id}')">Edit</button></td>
+                <td>${esc(accountLabel)}</td>
+                <td>
+                    <button class="btn-ghost" onclick="openCustomerForm('${customer.id}')">Edit</button>
+                    ${approveBtn}
+                    ${linkBtn}
+                </td>
             </tr>
         `;
     }).join("");
@@ -3092,6 +3107,43 @@ async function saveCustomerForm() {
             els.customerFormSave.disabled = false;
             els.customerFormSave.textContent = "Save Customer";
         }
+    }
+}
+
+async function approveCustomerAccount(customerId) {
+    if (!canAccessBackOffice()) {
+        toast("You do not have permission to approve customers", "error");
+        return;
+    }
+    if (!customerId) return;
+    const confirmed = window.confirm("Approve this customer account?");
+    if (!confirmed) return;
+    try {
+        await apiRequest(`/customers/${customerId}/approve/`, { method: "POST" });
+        toast("Customer approved", "success");
+        await loadBackOfficeCustomers();
+    } catch (err) {
+        toast(`Approval failed: ${err.message}`, "error");
+    }
+}
+
+async function linkCustomerAccount(customerId) {
+    if (!canAccessBackOffice()) {
+        toast("You do not have permission to link customers", "error");
+        return;
+    }
+    if (!customerId) return;
+    const identifier = window.prompt("Enter the customer's username or email to link:");
+    if (!identifier || !identifier.trim()) return;
+    try {
+        await apiRequest(`/customers/${customerId}/link/`, {
+            method: "POST",
+            body: { user_identifier: identifier.trim() },
+        });
+        toast("Customer linked", "success");
+        await loadBackOfficeCustomers();
+    } catch (err) {
+        toast(`Link failed: ${err.message}`, "error");
     }
 }
 

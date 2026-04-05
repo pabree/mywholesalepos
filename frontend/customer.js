@@ -19,6 +19,8 @@ let ordersLoadFailed = false;
 let deferredInstallPrompt = null;
 let ordersOffset = 0;
 let ordersPage = { count: 0, next: null, previous: null, results: [] };
+let approvalPending = false;
+let authMode = "login";
 
 const ORDERS_LIMIT = 20;
 const BULK_FETCH_LIMIT = 100;
@@ -49,6 +51,19 @@ const els = {
     loginPassword: document.getElementById("login-password"),
     loginBtn: document.getElementById("login-btn"),
     loginStatus: document.getElementById("login-status"),
+    approvalStatus: document.getElementById("approval-status"),
+    checkApprovalBtn: document.getElementById("check-approval-btn"),
+    authTabLogin: document.getElementById("auth-tab-login"),
+    authTabSignup: document.getElementById("auth-tab-signup"),
+    loginPanel: document.getElementById("login-panel"),
+    signupPanel: document.getElementById("signup-panel"),
+    signupName: document.getElementById("signup-name"),
+    signupEmail: document.getElementById("signup-email"),
+    signupPhone: document.getElementById("signup-phone"),
+    signupUsername: document.getElementById("signup-username"),
+    signupPassword: document.getElementById("signup-password"),
+    signupBtn: document.getElementById("signup-btn"),
+    signupStatus: document.getElementById("signup-status"),
     logoutBtn: document.getElementById("logout-btn"),
     branchSelect: document.getElementById("branch-select"),
     branchPill: document.getElementById("branch-pill"),
@@ -102,6 +117,10 @@ function init() {
 
 function bindEvents() {
     els.loginBtn.addEventListener("click", login);
+    els.signupBtn?.addEventListener("click", signup);
+    els.authTabLogin?.addEventListener("click", () => setAuthMode("login"));
+    els.authTabSignup?.addEventListener("click", () => setAuthMode("signup"));
+    els.checkApprovalBtn?.addEventListener("click", () => checkApprovalStatus({ notify: true }));
     els.logoutBtn.addEventListener("click", logout);
     els.switchAccount?.addEventListener("click", switchAccount);
     els.branchSelect.addEventListener("change", handleBranchChange);
@@ -135,6 +154,14 @@ function bindEvents() {
         }
         navigate(target);
     }));
+}
+
+function setAuthMode(mode) {
+    authMode = mode;
+    if (els.authTabLogin) els.authTabLogin.classList.toggle("active", mode === "login");
+    if (els.authTabSignup) els.authTabSignup.classList.toggle("active", mode === "signup");
+    if (els.loginPanel) els.loginPanel.classList.toggle("hidden", mode !== "login");
+    if (els.signupPanel) els.signupPanel.classList.toggle("hidden", mode !== "signup");
 }
 
 function registerServiceWorker() {
@@ -272,7 +299,28 @@ function setNavActive(name) {
 }
 
 function isAuthenticated() {
-    return Boolean(apiToken && currentUser && currentUser.role === "customer");
+    return Boolean(apiToken && currentUser && currentUser.role === "customer" && !approvalPending);
+}
+
+function formatApiError(error, fallback = "Request failed.") {
+    if (!error) return fallback;
+    const message = error.message || "";
+    if (message) {
+        try {
+            const parsed = JSON.parse(message);
+            if (parsed && typeof parsed === "object") {
+                const key = Object.keys(parsed)[0];
+                const value = parsed[key];
+                if (Array.isArray(value)) return value[0] || fallback;
+                if (typeof value === "string") return value;
+                return `${key}: ${String(value)}`;
+            }
+        } catch (_) {
+            // not JSON
+        }
+        return message;
+    }
+    return fallback;
 }
 
 async function apiRequest(endpoint, { method = "GET", body = null, auth = true } = {}) {
@@ -388,7 +436,10 @@ async function bootstrapAuth() {
             throw new Error("Not a customer account");
         }
         setCurrentUser(user);
-        await loadInitialData();
+        const approved = await checkApprovalStatus();
+        if (approved) {
+            await loadInitialData();
+        }
     } catch (err) {
         clearAuth();
     } finally {
@@ -405,6 +456,10 @@ async function login() {
         return;
     }
 
+    if (els.loginBtn) {
+        els.loginBtn.disabled = true;
+        els.loginBtn.textContent = "Signing in...";
+    }
     els.loginStatus.textContent = "Signing in...";
     try {
         const data = await apiRequest("/auth/token/", {
@@ -426,12 +481,22 @@ async function login() {
             role: data.role,
             display_name: data.display_name,
         });
-        await loadInitialData();
-        toast("Signed in", "success");
-        navigate("catalog");
+        const approved = await checkApprovalStatus();
+        if (approved) {
+            await loadInitialData();
+            toast("Signed in", "success");
+            navigate("catalog");
+        } else {
+            toast("Account pending approval", "info");
+            navigate("login");
+        }
     } catch (err) {
-        toast(err.message || "Login failed", "error");
+        toast(formatApiError(err, "Login failed"), "error");
     } finally {
+        if (els.loginBtn) {
+            els.loginBtn.disabled = false;
+            els.loginBtn.textContent = "Sign in";
+        }
         renderAccount();
     }
 }
@@ -479,17 +544,106 @@ function renderAccount() {
         els.loginUsername.closest("label").classList.add("hidden");
         els.loginPassword.closest("label").classList.add("hidden");
         els.loginBtn.classList.add("hidden");
-        els.loginStatus.textContent = "Signed in";
+        els.loginStatus.textContent = approvalPending ? "Pending approval" : "Signed in";
         els.logoutBtn.classList.remove("hidden");
         els.branchPill.classList.remove("hidden");
+        if (els.approvalStatus) {
+            els.approvalStatus.classList.toggle("hidden", !approvalPending);
+            if (approvalPending) {
+                els.approvalStatus.textContent = "Your account is pending approval by the business.";
+            }
+        }
+        if (els.checkApprovalBtn) {
+            els.checkApprovalBtn.classList.toggle("hidden", !approvalPending);
+        }
     } else {
         els.accountInfo.classList.add("hidden");
         els.loginUsername.closest("label").classList.remove("hidden");
         els.loginPassword.closest("label").classList.remove("hidden");
         els.loginBtn.classList.remove("hidden");
         els.loginStatus.textContent = "Not signed in";
+        if (els.approvalStatus) {
+            els.approvalStatus.classList.add("hidden");
+        }
+        if (els.checkApprovalBtn) {
+            els.checkApprovalBtn.classList.add("hidden");
+        }
         els.logoutBtn.classList.add("hidden");
         els.branchPill.classList.add("hidden");
+    }
+}
+
+async function checkApprovalStatus({ notify = false } = {}) {
+    if (!apiToken) return false;
+    const wasPending = approvalPending;
+    try {
+        const profile = await apiRequest("/customer/profile/");
+        if (!profile.linked) {
+            approvalPending = true;
+            if (notify) toast("Account not linked to a customer profile.", "error");
+            return false;
+        }
+        approvalPending = !profile.approved;
+        if (approvalPending && notify) {
+            toast("Account pending approval", "info");
+        }
+        if (!approvalPending && wasPending) {
+            await loadInitialData();
+            if (notify) toast("Account approved. Welcome!", "success");
+        }
+        return profile.approved;
+    } catch (err) {
+        approvalPending = true;
+        if (notify) toast("Unable to verify approval status.", "error");
+        return false;
+    } finally {
+        renderAccount();
+        route();
+    }
+}
+
+async function signup() {
+    const name = els.signupName?.value.trim() || "";
+    const email = els.signupEmail?.value.trim() || "";
+    const phone = els.signupPhone?.value.trim() || "";
+    const username = els.signupUsername?.value.trim() || "";
+    const password = els.signupPassword?.value || "";
+    if (!name || !email || !password) {
+        if (els.signupStatus) els.signupStatus.textContent = "Name, email, and password are required.";
+        toast("Name, email, and password are required.", "error");
+        return;
+    }
+
+    if (els.signupStatus) els.signupStatus.textContent = "Creating account...";
+    if (els.signupBtn) {
+        els.signupBtn.disabled = true;
+        els.signupBtn.textContent = "Creating...";
+    }
+    try {
+        const data = await apiRequest("/customer/signup/", {
+            method: "POST",
+            body: { name, email, phone, username, password },
+            auth: false,
+        });
+        if (els.signupStatus) {
+            els.signupStatus.textContent = data.message || "Account created. Pending approval.";
+        }
+        toast("Account created. Pending approval.", "success");
+        if (els.loginUsername) {
+            els.loginUsername.value = username || (email ? email.split("@")[0] : "");
+        }
+        setAuthMode("login");
+    } catch (err) {
+        const message = formatApiError(err, "Signup failed.");
+        if (els.signupStatus) {
+            els.signupStatus.textContent = message;
+        }
+        toast(message, "error");
+    } finally {
+        if (els.signupBtn) {
+            els.signupBtn.disabled = false;
+            els.signupBtn.textContent = "Create account";
+        }
     }
 }
 
