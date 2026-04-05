@@ -26,6 +26,9 @@ from .order_views import (
     CustomerOrderAssignmentUpdateView,
     CustomerOrderCreditApproveView,
     CustomerOrderCreditRejectView,
+    BackOfficeOrderListView,
+    BackOfficeOrderDetailView,
+    BackOfficeOrderExportView,
 )
 
 urlpatterns = [
@@ -38,6 +41,9 @@ urlpatterns = [
     path("backoffice/sales/export/", BackOfficeSalesExportView.as_view(), name="backoffice-sales-export"),
     path("backoffice/sales/", BackOfficeSalesListView.as_view(), name="backoffice-sales-list"),
     path("backoffice/sales/<uuid:sale_id>/", BackOfficeSaleDetailView.as_view(), name="backoffice-sales-detail"),
+    path("backoffice/orders/export/", BackOfficeOrderExportView.as_view(), name="backoffice-orders-export"),
+    path("backoffice/orders/", BackOfficeOrderListView.as_view(), name="backoffice-orders-list"),
+    path("backoffice/orders/<uuid:order_id>/", BackOfficeOrderDetailView.as_view(), name="backoffice-orders-detail"),
     path("customer-orders/export/", CustomerOrderStaffExportView.as_view(), name="customer-order-staff-export"),
     path("customer-orders/", CustomerOrderStaffListView.as_view(), name="customer-order-staff-list"),
     path("customer-orders/<uuid:order_id>/", CustomerOrderStaffDetailView.as_view(), name="customer-order-staff-detail"),

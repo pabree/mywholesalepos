@@ -3,7 +3,8 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-04.3";
+const APP_BUILD = "2026-04-05.3";
+const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
 const customerOrdersLog = (...args) => {
@@ -2110,6 +2111,9 @@ function closeBackOfficeSaleDetail() {
 function renderBackOfficeSaleDetail(detail) {
     if (!els.backofficeSaleDetailBody) return;
     const paymentsHtml = renderPaymentHistoryList(detail.payments || [], { compact: true });
+    const saleTotal = parseFloat(detail.grand_total || 0);
+    const saleIncludedTax = saleTotal * TAX_RATE / (1 + TAX_RATE);
+    const saleNet = Math.max(0, saleTotal - saleIncludedTax);
     const itemsHtml = (detail.items || []).map(item => `
         <div class="detail-item">
             <div>
@@ -2152,6 +2156,15 @@ function renderBackOfficeSaleDetail(detail) {
             <div class="detail-list">${itemsHtml || `<div class="muted">No items.</div>`}</div>
         </div>
         <div class="detail-section">
+            <h4>Totals</h4>
+            <div class="detail-list">
+                <div class="detail-item"><span>Subtotal</span><strong>${fmtPrice(detail.total_amount || 0)}</strong></div>
+                <div class="detail-item"><span>VAT (included)</span><strong>${fmtPrice(detail.tax ?? saleIncludedTax)}</strong></div>
+                <div class="detail-item"><span>Net (ex VAT)</span><strong>${fmtPrice(saleNet)}</strong></div>
+                <div class="detail-item"><span>Total</span><strong>${fmtPrice(detail.grand_total || 0)}</strong></div>
+            </div>
+        </div>
+        <div class="detail-section">
             <h4>Payments</h4>
             <div class="payment-history">${paymentsHtml}</div>
         </div>
@@ -2165,7 +2178,7 @@ async function loadBackOfficeOrders() {
             loadBackOfficeBranches(),
             loadBackOfficeRoutes(),
         ]);
-        const endpoint = withParams("/sales/customer-orders/", {
+        const endpoint = withParams("/sales/backoffice/orders/", {
             limit: backOfficeOrdersLimit,
             offset: backOfficeOrdersOffset,
             q: backOfficeOrdersQuery,
@@ -2198,7 +2211,7 @@ async function loadBackOfficeOrders() {
 
 function exportBackOfficeOrders() {
     if (!canAccessBackOffice()) return;
-    downloadCsv("/sales/customer-orders/export/", "backoffice-orders.csv", {
+    downloadCsv("/sales/backoffice/orders/export/", "backoffice-orders.csv", {
         limit: backOfficeOrdersLimit,
         offset: backOfficeOrdersOffset,
         q: backOfficeOrdersQuery,
@@ -2238,7 +2251,7 @@ function renderBackOfficeOrders() {
 
 async function openBackOfficeOrderDetail(orderId) {
     if (!orderId || !els.backofficeOrderDetailModal) return;
-    const detail = await apiFetch(`/sales/customer-orders/${orderId}/`);
+    const detail = await apiFetch(`/sales/backoffice/orders/${orderId}/`);
     if (!detail) {
         toast("Failed to load order details", "error");
         return;
@@ -2265,6 +2278,9 @@ function renderBackOfficeOrderDetail(order) {
         </div>
     `).join("");
     const paymentsHtml = renderPaymentHistoryList(order.payments || [], { compact: true });
+    const orderTotal = parseFloat(order.sale?.grand_total || 0);
+    const orderIncludedTax = orderTotal * TAX_RATE / (1 + TAX_RATE);
+    const orderNet = Math.max(0, orderTotal - orderIncludedTax);
 
     els.backofficeOrderDetailBody.innerHTML = `
         <div class="detail-grid">
@@ -2293,6 +2309,15 @@ function renderBackOfficeOrderDetail(order) {
         <div class="detail-section">
             <h4>Items</h4>
             <div class="detail-list">${itemsHtml || `<div class="muted">No items.</div>`}</div>
+        </div>
+        <div class="detail-section">
+            <h4>Totals</h4>
+            <div class="detail-list">
+                <div class="detail-item"><span>Subtotal</span><strong>${fmtPrice(order.sale?.total_amount || 0)}</strong></div>
+                <div class="detail-item"><span>VAT (included)</span><strong>${fmtPrice(order.sale?.tax ?? orderIncludedTax)}</strong></div>
+                <div class="detail-item"><span>Net (ex VAT)</span><strong>${fmtPrice(orderNet)}</strong></div>
+                <div class="detail-item"><span>Total</span><strong>${fmtPrice(order.sale?.grand_total || 0)}</strong></div>
+            </div>
         </div>
         <div class="detail-section">
             <h4>Payments</h4>
@@ -3692,9 +3717,9 @@ function updateCreditSummary() {
 // ——— Totals ———
 function updateTotals() {
     const subtotal = cart.reduce((sum, item) => sum + parseFloat(getItemLineTotal(item, getItemUnitPrice(item))), 0);
-    const tax = subtotal * 0.16;
     const discount = parseFloat(els.discountInput.value) || 0;
-    const grandTotal = Math.max(0, subtotal + tax - discount);
+    const grandTotal = Math.max(0, subtotal - discount);
+    const tax = grandTotal * TAX_RATE / (1 + TAX_RATE);
     const amountPaid = parseFloat(els.amountPaid.value) || 0;
     const change = amountPaid - grandTotal;
 
@@ -4424,6 +4449,10 @@ async function showReceipt(saleId) {
         </div>
     ` : "";
 
+    const receiptTotal = receipt.total ?? 0;
+    const receiptTax = receipt.tax ?? (receiptTotal * TAX_RATE / (1 + TAX_RATE));
+    const receiptNet = Math.max(0, receiptTotal - receiptTax);
+
     els.receiptContent.innerHTML = `
         <div class="receipt-success">✅</div>
         <div class="receipt-header">
@@ -4435,9 +4464,21 @@ async function showReceipt(saleId) {
         <div class="receipt-items">${itemsHtml}</div>
         <hr class="receipt-divider">
         <div class="receipt-totals">
+            <div class="receipt-total-row">
+                <span>Subtotal</span>
+                <span>${fmtPrice(receipt.subtotal ?? receipt.total ?? 0)}</span>
+            </div>
+            <div class="receipt-total-row">
+                <span>VAT (included)</span>
+                <span>${fmtPrice(receiptTax)}</span>
+            </div>
+            <div class="receipt-total-row">
+                <span>Net (ex VAT)</span>
+                <span>${fmtPrice(receiptNet)}</span>
+            </div>
             <div class="receipt-total-row receipt-grand">
                 <span>Total</span>
-                <span>${fmtPrice(receipt.total)}</span>
+                <span>${fmtPrice(receiptTotal)}</span>
             </div>
             <div class="receipt-total-row receipt-paid">
                 <span>Paid</span>
@@ -4757,7 +4798,7 @@ function renderCustomerOrderDetail(order) {
         <div class="order-detail-card">
             <div class="order-totals">
                 <div><span>Subtotal</span><strong>${fmtPrice(sale.total_amount ?? 0)}</strong></div>
-                <div><span>Tax</span><strong>${fmtPrice(sale.tax ?? 0)}</strong></div>
+                <div><span>VAT (included)</span><strong>${fmtPrice(sale.tax ?? 0)}</strong></div>
                 <div class="grand"><span>Total</span><strong>${fmtPrice(sale.grand_total ?? 0)}</strong></div>
                 <div><span>Payment</span><strong>${formatStatus(sale.payment_status || "unpaid")}</strong></div>
                 <div><span>Balance</span><strong>${fmtPrice(sale.balance_due ?? 0)}</strong></div>

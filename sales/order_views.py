@@ -78,6 +78,39 @@ def _display_user(user):
     return getattr(user, "username", "") or ""
 
 
+def _orders_export_response(qs, filename):
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow([
+        "order_id",
+        "customer",
+        "branch",
+        "route",
+        "status",
+        "total",
+        "assigned",
+        "created_at",
+    ])
+    for order in qs:
+        sale = order.sale
+        branch = sale.branch if sale else None
+        customer = sale.customer if sale else None
+        route = customer.route if customer else None
+        assigned_to = sale.assigned_to if sale else None
+        writer.writerow([
+            str(order.id),
+            customer.name if customer else "",
+            branch.branch_name if branch else "",
+            route.name if route else "",
+            order.status,
+            str(sale.grand_total) if sale else "",
+            _display_user(assigned_to),
+            _format_dt(order.created_at),
+        ])
+    return response
+
+
 class CustomerOrderStaffListView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
     allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person"}
@@ -106,37 +139,60 @@ class CustomerOrderStaffExportView(APIView):
             paginator = StandardLimitOffsetPagination()
             page = paginator.paginate_queryset(qs, request, view=self)
             qs = page if page is not None else qs
+        return _orders_export_response(qs, "backoffice-orders.csv")
 
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="backoffice-orders.csv"'
-        writer = csv.writer(response)
-        writer.writerow([
-            "order_id",
-            "customer",
-            "branch",
-            "route",
-            "status",
-            "total",
-            "assigned",
-            "created_at",
-        ])
-        for order in qs:
-            sale = order.sale
-            branch = sale.branch if sale else None
-            customer = sale.customer if sale else None
-            route = customer.route if customer else None
-            assigned_to = sale.assigned_to if sale else None
-            writer.writerow([
-                str(order.id),
-                customer.name if customer else "",
-                branch.branch_name if branch else "",
-                route.name if route else "",
-                order.status,
-                str(sale.grand_total) if sale else "",
-                _display_user(assigned_to),
-                _format_dt(order.created_at),
-            ])
-        return response
+
+class BackOfficeOrderListView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        qs = _backoffice_orders_queryset(request)
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+        serializer = StaffCustomerOrderListSerializer(page, many=True)
+        if page is not qs:
+            return paginator.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+
+class BackOfficeOrderDetailView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request, order_id):
+        order = get_object_or_404(
+            CustomerOrder.objects.select_related(
+                "sale",
+                "sale__branch",
+                "sale__customer",
+                "sale__assigned_to",
+            ).prefetch_related(
+                "sale__items",
+                "sale__items__product",
+                "sale__items__product_unit",
+                "sale__payments",
+            ),
+            id=order_id,
+        )
+        serializer = StaffCustomerOrderDetailSerializer(order)
+        return Response(serializer.data)
+
+
+class BackOfficeOrderExportView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        qs = _backoffice_orders_queryset(request)
+        limit = request.query_params.get("limit")
+        offset = request.query_params.get("offset")
+        if limit is not None or offset is not None:
+            paginator = StandardLimitOffsetPagination()
+            page = paginator.paginate_queryset(qs, request, view=self)
+            qs = page if page is not None else qs
+        return _orders_export_response(qs, "backoffice-orders.csv")
 
 
 class CustomerOrderStaffDetailView(APIView):

@@ -508,6 +508,8 @@ class SaleReceiptView(APIView):
             "sale_id": sale.id,
             "date": sale.sale_date,
             "items": items,
+            "subtotal": sale.total_amount,
+            "tax": sale.tax,
             "total": sale.grand_total,
             "paid": sale.amount_paid,
             "balance": sale.balance,
