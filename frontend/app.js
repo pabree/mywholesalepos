@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-05.7";
+const APP_BUILD = "2026-04-06.1";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
