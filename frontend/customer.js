@@ -44,6 +44,8 @@ const ORDER_STATUS_META = {
     cancelled: { label: "Cancelled", badge: "badge-red" },
 };
 
+const TAX_RATE = 0.16;
+
 const els = {
     screens: document.querySelectorAll("[data-screen]"),
     navButtons: document.querySelectorAll(".nav-btn"),
@@ -74,6 +76,8 @@ const els = {
     cartItems: document.getElementById("cart-items"),
     cartEmpty: document.getElementById("cart-empty"),
     cartTotal: document.getElementById("cart-total"),
+    cartSubtotal: document.getElementById("cart-subtotal"),
+    cartVat: document.getElementById("cart-vat"),
     cartCount: document.getElementById("cart-count"),
     clearCart: document.getElementById("clear-cart"),
     placeOrder: document.getElementById("place-order"),
@@ -792,20 +796,21 @@ function addToCart(productId) {
         });
     }
     persistCart();
-    renderCart();
+    renderCart({ flashKey: key });
     toast("Added to cart", "success");
+    flashButtonFeedback(productId);
 }
 
-function renderCart() {
+function renderCart({ flashKey = "" } = {}) {
     if (!cart.length) {
         els.cartItems.innerHTML = "";
         els.cartEmpty.classList.remove("hidden");
-        els.cartTotal.textContent = formatMoney(0);
+        updateCartSummary(0);
         return;
     }
     els.cartEmpty.classList.add("hidden");
     els.cartItems.innerHTML = cart.map(item => `
-        <div class="list-item">
+        <div class="list-item ${flashKey === item.key ? "flash" : ""}" data-key="${item.key}">
             <div class="meta">
                 <div class="title">${escapeHtml(item.product_name)}</div>
                 <div class="sub">${escapeHtml(item.unit_name)} (${escapeHtml(item.unit_code)})</div>
@@ -822,20 +827,24 @@ function renderCart() {
     els.cartItems.querySelectorAll("button[data-qty]").forEach(btn => {
         btn.addEventListener("click", () => updateQuantity(btn.dataset.key, btn.dataset.qty));
     });
-    els.cartTotal.textContent = formatMoney(estimateTotal());
+    updateCartSummary(estimateTotal());
     updateCartCount();
 }
 
 function updateQuantity(key, action) {
     const item = cart.find(i => i.key === key);
     if (!item) return;
+    const previous = item.quantity;
     if (action === "inc") item.quantity += 1;
     if (action === "dec") item.quantity -= 1;
     if (item.quantity <= 0) {
         cart = cart.filter(i => i.key !== key);
     }
     persistCart();
-    renderCart();
+    renderCart({ flashKey: key });
+    if (item.quantity > previous) {
+        toast("Quantity updated", "success");
+    }
 }
 
 function clearCart() {
@@ -845,6 +854,7 @@ function clearCart() {
     if (els.creditRequest) {
         els.creditRequest.checked = false;
     }
+    updateCartSummary(0);
     toast("Cart cleared", "success");
 }
 
@@ -859,6 +869,29 @@ function updateCartCount() {
 
 function estimateTotal() {
     return cart.reduce((sum, item) => sum + (parseFloat(item.display_price) || 0) * item.quantity, 0);
+}
+
+function updateCartSummary(total) {
+    const safeTotal = Number(total) || 0;
+    const vat = safeTotal ? (safeTotal * TAX_RATE / (1 + TAX_RATE)) : 0;
+    const subtotal = safeTotal - vat;
+    if (els.cartSubtotal) els.cartSubtotal.textContent = formatMoney(subtotal);
+    if (els.cartVat) els.cartVat.textContent = formatMoney(vat);
+    if (els.cartTotal) els.cartTotal.textContent = formatMoney(safeTotal);
+}
+
+function flashButtonFeedback(productId) {
+    const btn = els.catalogGrid?.querySelector(`button[data-add="${productId}"]`);
+    if (!btn) return;
+    const original = btn.textContent;
+    btn.textContent = "Added ✓";
+    btn.classList.remove("primary");
+    btn.classList.add("ghost");
+    setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove("ghost");
+        btn.classList.add("primary");
+    }, 900);
 }
 
 async function placeOrder() {
@@ -885,7 +918,7 @@ async function placeOrder() {
         clearCart();
         ordersOffset = 0;
         await loadOrders();
-        toast("Order placed", "success");
+        toast("Order placed successfully", "success");
         location.hash = `order/${order.id}`;
     } catch (err) {
         toast(`Order failed: ${err.message}`, "error");

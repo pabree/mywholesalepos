@@ -18,7 +18,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'customer-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'customer-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'customer-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'customer.css' %}?v=2026-04-05.4">
+    <link rel="stylesheet" href="{% static 'customer.css' %}?v=2026-04-06.5">
 </head>
 <body>
     <div class="install-banner hidden" id="install-banner">
@@ -131,12 +131,21 @@
                     <button class="btn ghost" id="clear-cart">Clear</button>
                 </div>
                 <div id="cart-items" class="list"></div>
-                <div id="cart-empty" class="empty">Your cart is empty.</div>
+                <div id="cart-empty" class="empty">Your cart is empty. Add items to get started.</div>
             </div>
 
             <div class="panel summary">
                 <div class="summary-row">
-                    <span>Estimated total</span>
+                    <span>Subtotal</span>
+                    <strong id="cart-subtotal">KSh 0.00</strong>
+                </div>
+                <div class="summary-row">
+                    <span>VAT (included)</span>
+                    <span id="cart-vat">KSh 0.00</span>
+                </div>
+                <div class="summary-divider"></div>
+                <div class="summary-row total">
+                    <span>Total</span>
                     <strong id="cart-total">KSh 0.00</strong>
                 </div>
                 <label class="credit-request">
@@ -159,7 +168,7 @@
                 <div id="orders-loading" class="loading hidden">Loading orders...</div>
                 <div id="orders-error" class="empty hidden"></div>
                 <div id="orders-list" class="list"></div>
-                <div id="orders-empty" class="empty">You have no orders yet.</div>
+                <div id="orders-empty" class="empty">You have no orders yet. Place an order to see it here.</div>
                 <div class="pagination-controls">
                     <button id="orders-prev" class="btn ghost" disabled>Prev</button>
                     <span id="orders-page" class="pagination-meta">Page 1 of 1</span>
@@ -189,6 +198,6 @@
 
     <div id="toast-container"></div>
 
-    <script src="{% static 'customer.js' %}?v=2026-04-05.4"></script>
+    <script src="{% static 'customer.js' %}?v=2026-04-06.4"></script>
 </body>
 </html>
