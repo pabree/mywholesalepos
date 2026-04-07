@@ -6,6 +6,8 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from decimal import Decimal, InvalidOperation
+import json
+import re
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
 from accounts.permissions import RolePermission
@@ -268,6 +270,18 @@ class ProductCreateView(APIView):
             stock_quantity = None
             errors["stock_quantity"] = str(exc)
 
+        try:
+            units_payload = _parse_units_payload(
+                data.get("units"),
+                retail_price=retail_price,
+                selling_price=selling_price,
+                wholesale_price=wholesale_price,
+                wholesale_threshold=wholesale_threshold,
+            )
+        except ValueError as exc:
+            units_payload = None
+            errors["units"] = str(exc)
+
         branch = _get_branch_from_value(data.get("branch"))
         if stock_quantity is not None and not branch:
             errors["branch"] = "Branch is required when stock_quantity is provided."
@@ -296,13 +310,22 @@ class ProductCreateView(APIView):
                 wholesale_threshold=wholesale_threshold,
                 is_active=True if is_active is None else is_active,
             )
-            _ensure_base_unit(
-                product,
-                unit_name=unit_name,
-                retail_price=retail_price or selling_price,
-                wholesale_price=wholesale_price,
-                wholesale_threshold=wholesale_threshold,
-            )
+            if units_payload:
+                _sync_product_units(product, units_payload)
+                base_unit = next((u for u in units_payload if u.get("is_base_unit")), None)
+                if base_unit:
+                    product.retail_price = base_unit.get("retail_price")
+                    product.wholesale_price = base_unit.get("wholesale_price")
+                    product.wholesale_threshold = base_unit.get("wholesale_threshold")
+                    product.save(update_fields=["retail_price", "wholesale_price", "wholesale_threshold", "updated_at"])
+            else:
+                _ensure_base_unit(
+                    product,
+                    unit_name=unit_name,
+                    retail_price=retail_price or selling_price,
+                    wholesale_price=wholesale_price,
+                    wholesale_threshold=wholesale_threshold,
+                )
             if branch and stock_quantity is not None:
                 Inventory.objects.update_or_create(
                     branch=branch,
@@ -366,6 +389,19 @@ class ProductUpdateView(APIView):
             stock_quantity = None
             errors["stock_quantity"] = str(exc)
 
+        try:
+            units_payload = _parse_units_payload(
+                data.get("units"),
+                product=product,
+                retail_price=retail_price,
+                selling_price=selling_price,
+                wholesale_price=wholesale_price,
+                wholesale_threshold=wholesale_threshold,
+            )
+        except ValueError as exc:
+            units_payload = None
+            errors["units"] = str(exc)
+
         branch = _get_branch_from_value(data.get("branch"))
         if stock_quantity is not None and not branch:
             errors["branch"] = "Branch is required when stock_quantity is provided."
@@ -395,13 +431,22 @@ class ProductUpdateView(APIView):
                 product.is_active = is_active
             product.save()
 
-            _ensure_base_unit(
-                product,
-                unit_name=unit_name,
-                retail_price=retail_price or selling_price,
-                wholesale_price=wholesale_price,
-                wholesale_threshold=wholesale_threshold,
-            )
+            if units_payload:
+                _sync_product_units(product, units_payload)
+                base_unit = next((u for u in units_payload if u.get("is_base_unit")), None)
+                if base_unit:
+                    product.retail_price = base_unit.get("retail_price")
+                    product.wholesale_price = base_unit.get("wholesale_price")
+                    product.wholesale_threshold = base_unit.get("wholesale_threshold")
+                    product.save(update_fields=["retail_price", "wholesale_price", "wholesale_threshold", "updated_at"])
+            else:
+                _ensure_base_unit(
+                    product,
+                    unit_name=unit_name,
+                    retail_price=retail_price or selling_price,
+                    wholesale_price=wholesale_price,
+                    wholesale_threshold=wholesale_threshold,
+                )
 
             if branch and stock_quantity is not None:
                 Inventory.objects.update_or_create(
@@ -444,6 +489,152 @@ def _parse_bool(value):
     if val in ("0", "false", "no", "n", "off"):
         return False
     return None
+
+
+def _normalize_unit_code(value):
+    if value is None:
+        return ""
+    code = str(value).strip().lower()
+    code = re.sub(r"\s+", "_", code)
+    code = re.sub(r"[^a-z0-9_]", "", code)
+    return code[:32]
+
+
+def _coerce_units_payload(data):
+    if data is None:
+        return None
+    if isinstance(data, list):
+        return data
+    if isinstance(data, str):
+        try:
+            parsed = json.loads(data)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Units must be a JSON array.") from exc
+        if not isinstance(parsed, list):
+            raise ValueError("Units must be a list.")
+        return parsed
+    raise ValueError("Units must be a list.")
+
+
+def _parse_units_payload(
+    units_data,
+    *,
+    product=None,
+    retail_price=None,
+    selling_price=None,
+    wholesale_price=None,
+    wholesale_threshold=None,
+):
+    if units_data is None:
+        return None
+    units = _coerce_units_payload(units_data)
+    cleaned = []
+    base_count = 0
+    codes = set()
+
+    for idx, raw in enumerate(units, start=1):
+        if not isinstance(raw, dict):
+            raise ValueError(f"Unit entry {idx} must be an object.")
+
+        unit_id = raw.get("id")
+        if unit_id and product:
+            if not product.units.filter(id=unit_id).exists():
+                raise ValueError(f"Unit entry {idx} does not belong to this product.")
+
+        unit_name = str(raw.get("unit_name") or "").strip()
+        if not unit_name:
+            raise ValueError(f"Unit entry {idx} is missing unit_name.")
+
+        unit_code = str(raw.get("unit_code") or "").strip()
+        if not unit_code:
+            unit_code = _normalize_unit_code(unit_name) or "unit"
+        unit_code = unit_code[:32]
+        if unit_code in codes:
+            raise ValueError(f"Duplicate unit code: {unit_code}.")
+        codes.add(unit_code)
+
+        try:
+            conversion = _parse_int(raw.get("conversion_to_base_unit"), field="conversion_to_base_unit")
+        except ValueError as exc:
+            raise ValueError(f"Unit entry {idx}: {exc}") from exc
+        if conversion is None or conversion <= 0:
+            raise ValueError(f"Unit entry {idx}: conversion_to_base_unit is required and must be positive.")
+
+        is_base = _parse_bool(raw.get("is_base_unit")) or False
+        if is_base:
+            base_count += 1
+            if conversion != 1:
+                raise ValueError("Base unit conversion must be 1.")
+
+        retail = None
+        wholesale = None
+        threshold = None
+        if raw.get("retail_price") not in (None, ""):
+            retail = _parse_decimal(raw.get("retail_price"), field="retail_price")
+        if raw.get("wholesale_price") not in (None, ""):
+            wholesale = _parse_decimal(raw.get("wholesale_price"), field="wholesale_price")
+        if raw.get("wholesale_threshold") not in (None, ""):
+            threshold = _parse_int(raw.get("wholesale_threshold"), field="wholesale_threshold")
+
+        is_active = _parse_bool(raw.get("is_active"))
+        if is_active is None:
+            is_active = True
+
+        cleaned.append(
+            {
+                "id": unit_id,
+                "unit_name": unit_name,
+                "unit_code": unit_code,
+                "conversion_to_base_unit": conversion,
+                "is_base_unit": is_base,
+                "retail_price": retail,
+                "wholesale_price": wholesale,
+                "wholesale_threshold": threshold,
+                "is_active": is_active,
+            }
+        )
+
+    if base_count != 1:
+        raise ValueError("Exactly one base unit is required.")
+
+    for unit in cleaned:
+        if unit["is_base_unit"]:
+            if unit["retail_price"] is None:
+                unit["retail_price"] = retail_price if retail_price is not None else selling_price
+            if unit["wholesale_price"] is None:
+                unit["wholesale_price"] = wholesale_price
+            if unit["wholesale_threshold"] is None:
+                unit["wholesale_threshold"] = wholesale_threshold
+
+    return cleaned
+
+
+def _sync_product_units(product, units_payload):
+    existing = {str(u.id): u for u in product.units.all()}
+    keep_ids = set()
+
+    for unit in units_payload:
+        unit_id = str(unit.get("id") or "")
+        if unit_id and unit_id in existing:
+            obj = existing[unit_id]
+        else:
+            obj = ProductUnit(product=product)
+
+        obj.unit_name = unit["unit_name"]
+        obj.unit_code = unit["unit_code"]
+        obj.conversion_to_base_unit = unit["conversion_to_base_unit"]
+        obj.is_base_unit = unit["is_base_unit"]
+        obj.retail_price = unit.get("retail_price")
+        obj.wholesale_price = unit.get("wholesale_price")
+        obj.wholesale_threshold = unit.get("wholesale_threshold")
+        obj.is_active = unit.get("is_active", True)
+        obj.save()
+        keep_ids.add(str(obj.id))
+
+    for obj in product.units.exclude(id__in=keep_ids):
+        if obj.is_active:
+            obj.is_active = False
+            obj.save(update_fields=["is_active", "updated_at"])
 
 
 class ProductImportTemplateView(APIView):

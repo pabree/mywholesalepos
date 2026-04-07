@@ -1202,21 +1202,25 @@
                                 <option value="">Loading categories...</option>
                             </select>
                         </label>
-                        <label>Unit
-                            <select id="product-unit" class="summary-select">
-                                <option value="Base Unit">Base Unit</option>
-                                <option value="Piece">Piece</option>
-                                <option value="Pack">Pack</option>
-                                <option value="Box">Box</option>
-                                <option value="Carton">Carton</option>
-                                <option value="Bag">Bag</option>
-                            </select>
+                        <label>Base Unit Name
+                            <input id="product-unit-name" class="summary-input" placeholder="e.g. Piece, Bottle" required>
+                        </label>
+                        <label>Base Unit Code
+                            <input id="product-unit-code" class="summary-input" placeholder="e.g. piece, bottle">
                         </label>
                         <label>Cost Price<span class="required">*</span><input id="product-cost" type="number" class="summary-input" step="0.01" required></label>
                         <label>Selling Price<span class="required">*</span><input id="product-selling" type="number" class="summary-input" step="0.01" required></label>
                         <label>Retail Price<input id="product-retail" type="number" class="summary-input" step="0.01"></label>
                         <label>Wholesale Price<input id="product-wholesale" type="number" class="summary-input" step="0.01"></label>
                         <label>Wholesale Threshold<input id="product-threshold" type="number" class="summary-input"></label>
+                        <div class="unit-editor">
+                            <div class="unit-editor-header">
+                                <span>Additional Units</span>
+                                <button type="button" id="product-unit-add" class="btn-ghost">Add Unit</button>
+                            </div>
+                            <div id="product-units-list" class="unit-editor-list"></div>
+                            <div class="unit-editor-hint">Base unit is defined above. Add cartons, bales, packs, etc. with conversion to base.</div>
+                        </div>
                         <label>Branch
                             <select id="product-branch" class="summary-select">
                                 <option value="">Select branch (optional)</option>

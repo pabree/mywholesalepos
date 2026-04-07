@@ -395,7 +395,10 @@ const els = {
     productSku: document.getElementById("product-sku"),
     productName: document.getElementById("product-name"),
     productCategory: document.getElementById("product-category"),
-    productUnit: document.getElementById("product-unit"),
+    productUnitName: document.getElementById("product-unit-name"),
+    productUnitCode: document.getElementById("product-unit-code"),
+    productUnitsList: document.getElementById("product-units-list"),
+    productUnitAdd: document.getElementById("product-unit-add"),
     productCost: document.getElementById("product-cost"),
     productSelling: document.getElementById("product-selling"),
     productRetail: document.getElementById("product-retail"),
@@ -1196,6 +1199,17 @@ document.addEventListener("DOMContentLoaded", () => {
         els.productForm.addEventListener("submit", (event) => {
             event.preventDefault();
             saveProductForm();
+        });
+    }
+    if (els.productUnitAdd) {
+        els.productUnitAdd.addEventListener("click", () => addProductUnitRow());
+    }
+    if (els.productUnitsList) {
+        els.productUnitsList.addEventListener("click", (event) => {
+            const btn = event.target?.closest?.(".unit-remove");
+            if (!btn) return;
+            const row = btn.closest(".unit-row");
+            if (row) row.remove();
         });
     }
     if (els.productImportTemplate) {
@@ -3033,6 +3047,41 @@ function renderBackOfficeProducts() {
     }).join("");
 }
 
+function getBaseUnitForProduct(product) {
+    if (!product || !Array.isArray(product.units)) return null;
+    return product.units.find(u => u.is_base_unit) || product.units[0] || null;
+}
+
+function buildProductUnitRow(unit = {}) {
+    const idAttr = unit.id ? `data-unit-id="${unit.id}"` : "";
+    return `
+        <div class="unit-row" ${idAttr}>
+            <input class="summary-input unit-name" placeholder="Unit name" value="${esc(unit.unit_name || "")}">
+            <input class="summary-input unit-code" placeholder="Code" value="${esc(unit.unit_code || "")}">
+            <input class="summary-input unit-conversion" type="number" min="1" step="1" placeholder="Conversion" value="${unit.conversion_to_base_unit || ""}">
+            <input class="summary-input unit-retail" type="number" step="0.01" placeholder="Retail price" value="${unit.retail_price ?? ""}">
+            <input class="summary-input unit-wholesale" type="number" step="0.01" placeholder="Wholesale price" value="${unit.wholesale_price ?? ""}">
+            <input class="summary-input unit-threshold" type="number" min="1" step="1" placeholder="Wholesale threshold" value="${unit.wholesale_threshold ?? ""}">
+            <label class="checkbox-row unit-active">
+                <input type="checkbox" ${unit.is_active === false ? "" : "checked"}>
+                Active
+            </label>
+            <button type="button" class="btn-ghost unit-remove">Remove</button>
+        </div>
+    `;
+}
+
+function renderProductUnitRows(units) {
+    if (!els.productUnitsList) return;
+    const rows = (units || []).map(unit => buildProductUnitRow(unit)).join("");
+    els.productUnitsList.innerHTML = rows;
+}
+
+function addProductUnitRow(unit = {}) {
+    if (!els.productUnitsList) return;
+    els.productUnitsList.insertAdjacentHTML("beforeend", buildProductUnitRow(unit));
+}
+
 function openProductForm(productId = null) {
     if (!els.productFormModal) return;
     editingProductId = productId;
@@ -3043,7 +3092,10 @@ function openProductForm(productId = null) {
         if (els.productActive) els.productActive.checked = true;
         if (els.productCategory) els.productCategory.value = "";
         if (els.productBranch) els.productBranch.value = "";
-        if (els.productUnit) els.productUnit.value = "Base Unit";
+        if (els.productUnitName) els.productUnitName.value = "Base Unit";
+        if (els.productUnitCode) els.productUnitCode.value = "";
+        if (els.productForm) els.productForm.dataset.baseUnitId = "";
+        renderProductUnitRows([]);
     } else {
         const product = backOfficeProducts.find(p => p.id === productId);
         if (!product) return;
@@ -3051,15 +3103,19 @@ function openProductForm(productId = null) {
         if (els.productSku) els.productSku.value = product.sku || "";
         if (els.productName) els.productName.value = product.name || "";
         if (els.productCategory) els.productCategory.value = product.category || "";
-        if (els.productUnit) els.productUnit.value = product.units?.[0]?.unit_name || "Base Unit";
+        const baseUnit = getBaseUnitForProduct(product);
+        if (els.productUnitName) els.productUnitName.value = baseUnit?.unit_name || "Base Unit";
+        if (els.productUnitCode) els.productUnitCode.value = baseUnit?.unit_code || "";
+        if (els.productForm) els.productForm.dataset.baseUnitId = baseUnit?.id || "";
         if (els.productCost) els.productCost.value = product.cost_price || "";
         if (els.productSelling) els.productSelling.value = product.selling_price || "";
-        if (els.productRetail) els.productRetail.value = product.retail_price || "";
-        if (els.productWholesale) els.productWholesale.value = product.wholesale_price || "";
-        if (els.productThreshold) els.productThreshold.value = product.wholesale_threshold || "";
+        if (els.productRetail) els.productRetail.value = baseUnit?.retail_price || product.retail_price || "";
+        if (els.productWholesale) els.productWholesale.value = baseUnit?.wholesale_price || product.wholesale_price || "";
+        if (els.productThreshold) els.productThreshold.value = baseUnit?.wholesale_threshold || product.wholesale_threshold || "";
         if (els.productActive) els.productActive.checked = product.is_active !== false;
         if (els.productBranch) els.productBranch.value = "";
         if (els.productStock) els.productStock.value = "";
+        renderProductUnitRows((product.units || []).filter(u => !u.is_base_unit));
     }
     openOverlay(els.productFormModal);
 }
@@ -3070,6 +3126,68 @@ function closeProductForm() {
     editingProductId = null;
 }
 
+function collectProductUnitsFromForm() {
+    const errors = [];
+    const units = [];
+
+    const baseName = (els.productUnitName?.value || "").trim();
+    const baseCode = (els.productUnitCode?.value || "").trim();
+    if (!baseName) {
+        errors.push("Base unit name is required.");
+    }
+    const baseUnitId = els.productForm?.dataset?.baseUnitId || "";
+    units.push({
+        id: baseUnitId || undefined,
+        unit_name: baseName || "Base Unit",
+        unit_code: baseCode || "",
+        conversion_to_base_unit: 1,
+        is_base_unit: true,
+        retail_price: els.productRetail?.value || "",
+        wholesale_price: els.productWholesale?.value || "",
+        wholesale_threshold: els.productThreshold?.value || "",
+        is_active: true,
+    });
+
+    const rows = els.productUnitsList?.querySelectorAll(".unit-row") || [];
+    rows.forEach((row, index) => {
+        const name = (row.querySelector(".unit-name")?.value || "").trim();
+        const code = (row.querySelector(".unit-code")?.value || "").trim();
+        const conversionRaw = (row.querySelector(".unit-conversion")?.value || "").trim();
+        const retail = (row.querySelector(".unit-retail")?.value || "").trim();
+        const wholesale = (row.querySelector(".unit-wholesale")?.value || "").trim();
+        const threshold = (row.querySelector(".unit-threshold")?.value || "").trim();
+        const isActive = row.querySelector(".unit-active input")?.checked ?? true;
+
+        const hasAny = name || code || conversionRaw || retail || wholesale || threshold;
+        if (!hasAny) return;
+
+        if (!name) {
+            errors.push(`Additional unit ${index + 1}: name is required.`);
+        }
+        if (!conversionRaw) {
+            errors.push(`Additional unit ${index + 1}: conversion is required.`);
+        }
+        const conversion = parseInt(conversionRaw, 10);
+        if (!Number.isInteger(conversion) || conversion <= 0) {
+            errors.push(`Additional unit ${index + 1}: conversion must be a positive integer.`);
+        }
+
+        units.push({
+            id: row.dataset.unitId || undefined,
+            unit_name: name,
+            unit_code: code,
+            conversion_to_base_unit: conversion,
+            is_base_unit: false,
+            retail_price: retail,
+            wholesale_price: wholesale,
+            wholesale_threshold: threshold,
+            is_active: isActive,
+        });
+    });
+
+    return { units, errors };
+}
+
 async function saveProductForm() {
     if (!canAccessBackOffice()) return;
     if (!payloadFieldCheck()) return;
@@ -3077,11 +3195,23 @@ async function saveProductForm() {
         els.productFormSave.disabled = true;
         els.productFormSave.textContent = "Saving...";
     }
+    const unitPayload = collectProductUnitsFromForm();
+    if (unitPayload.errors.length) {
+        const message = unitPayload.errors.join(" ");
+        if (els.productFormError) els.productFormError.textContent = message;
+        toast(message, "error");
+        if (els.productFormSave) {
+            els.productFormSave.disabled = false;
+            els.productFormSave.textContent = "Save Product";
+        }
+        return;
+    }
+
     const payload = {
         sku: els.productSku?.value?.trim() || "",
         name: els.productName?.value?.trim() || "",
         category: els.productCategory?.value || "",
-        unit: els.productUnit?.value || "",
+        unit: els.productUnitName?.value || "",
         cost_price: els.productCost?.value || "",
         selling_price: els.productSelling?.value || "",
         retail_price: els.productRetail?.value || "",
@@ -3090,6 +3220,7 @@ async function saveProductForm() {
         branch: els.productBranch?.value || "",
         stock_quantity: els.productStock?.value || "",
         is_active: els.productActive?.checked ?? true,
+        units: unitPayload.units,
     };
 
     if (els.productFormError) els.productFormError.textContent = "";
@@ -3122,6 +3253,7 @@ function payloadFieldCheck() {
         { field: "SKU", value: els.productSku?.value },
         { field: "Name", value: els.productName?.value },
         { field: "Category", value: els.productCategory?.value },
+        { field: "Base Unit Name", value: els.productUnitName?.value },
         { field: "Cost Price", value: els.productCost?.value },
         { field: "Selling Price", value: els.productSelling?.value },
     ];
@@ -4862,12 +4994,14 @@ function renderCustomerOrders() {
         const assigned = order.assigned_to?.display_name || "Unassigned";
         const preview = (order.items_preview || []).map(i => `${i.product_name} ×${i.quantity}`).join(", ");
         const creditBadge = renderCreditApprovalBadge(order.credit_approval_status);
+        const paymentBadge = renderPaymentOutstandingBadge(order);
         return `
             <div class="order-row ${active ? "active" : ""}" data-order="${order.id}">
                 <div class="order-main">
                     <div class="order-top">
                         <div class="order-id">#${shortOrderId(order.id)}</div>
                         ${renderOrderStatusBadge(order.status)}
+                        ${paymentBadge}
                     </div>
                     <div class="order-meta">${esc(customerName)} • ${esc(branchName)}</div>
                     <div class="order-meta small">${formatDateTime(order.created_at)}</div>
@@ -4907,6 +5041,8 @@ function renderCustomerOrderDetail(order) {
     const sale = order.sale || {};
     const saleStatus = sale.status || "";
     const saleCompleted = saleStatus === "completed";
+    const saleBalanceDue = parseFloat(sale.balance_due ?? sale.balance ?? "0");
+    const saleHasBalance = !Number.isNaN(saleBalanceDue) && saleBalanceDue > 0.009;
     const customerName = order.customer?.name || "Customer";
     const branchName = order.branch?.name || "Branch";
     const assignedId = order.assigned_to?.id || "";
@@ -4934,7 +5070,13 @@ function renderCustomerOrderDetail(order) {
     const actions = renderOrderActions(order.status, { saleCompleted });
     const saleAction = sale.id
         ? saleCompleted
-            ? `<div class="sale-completed-note">Linked sale completed.</div>`
+            ? saleHasBalance
+                ? `
+                    <button class="btn-secondary" data-open-credit-sale="${sale.id}" ${canPerformSales() ? "" : "disabled"}>
+                        Record Payment
+                    </button>
+                `
+                : `<div class="sale-completed-note">Linked sale paid.</div>`
             : `
                 <button class="btn-secondary" data-open-sale="${sale.id}" ${canPerformSales() ? "" : "disabled"}>
                     Open Linked Sale
@@ -5032,6 +5174,10 @@ function renderCustomerOrderDetail(order) {
     const openSaleBtn = els.customerOrderDetail.querySelector("button[data-open-sale]");
     if (openSaleBtn) {
         openSaleBtn.addEventListener("click", () => openLinkedSale(openSaleBtn.dataset.openSale));
+    }
+    const openCreditBtn = els.customerOrderDetail.querySelector("button[data-open-credit-sale]");
+    if (openCreditBtn) {
+        openCreditBtn.addEventListener("click", () => openLinkedCreditPayment(openCreditBtn.dataset.openCreditSale));
     }
 
     const assignSelect = document.getElementById("customer-order-assign");
@@ -5192,6 +5338,12 @@ async function openLinkedSale(saleId) {
         return;
     }
     if (sale.status === "completed") {
+        const balanceDue = parseFloat(sale.balance_due ?? sale.balance ?? "0");
+        const hasBalance = !Number.isNaN(balanceDue) && balanceDue > 0.009;
+        if (hasBalance) {
+            await openLinkedCreditPayment(sale.id);
+            return;
+        }
         toast("Linked sale is already completed", "info");
         return;
     }
@@ -5214,6 +5366,23 @@ async function openLinkedSale(saleId) {
     maybeAutofillLinkedSaleAmountPaid(sale);
     closeCustomerOrdersModal();
     toast("Linked sale loaded. Complete the sale to unlock delivery.", "info");
+}
+
+async function openLinkedCreditPayment(saleId) {
+    if (!saleId) return;
+    if (!canPerformSales()) {
+        toast("You do not have permission to record payments", "error");
+        return;
+    }
+    openCreditModal();
+    try {
+        await loadCreditSales();
+        await selectCreditSale(saleId);
+        setCreditTab("payments");
+        toast("Record payment for the linked sale", "info");
+    } catch (err) {
+        toast("Failed to open credit payments", "error");
+    }
 }
 
 function maybeAutofillLinkedSaleAmountPaid(sale) {
@@ -7120,6 +7289,19 @@ function renderOrderStatusBadge(status) {
     const normalized = (status || "pending").toString().toLowerCase();
     const label = formatStatus(normalized).replace(/_/g, " ");
     return `<span class="status-badge status-order status-order-${normalized}">${label}</span>`;
+}
+
+function renderPaymentOutstandingBadge(order) {
+    const sale = order?.sale;
+    if (!sale || sale.status !== "completed") return "";
+    const paymentStatus = (sale.payment_status || "").toString().toLowerCase();
+    const balanceDue = parseFloat(sale.balance_due ?? "0");
+    const hasBalance = !Number.isNaN(balanceDue) && balanceDue > 0.009;
+    if (!hasBalance && !["partial", "unpaid"].includes(paymentStatus)) return "";
+    if (paymentStatus === "partial") {
+        return `<span class="status-badge status-payment status-payment-partial">Partial payment</span>`;
+    }
+    return `<span class="status-badge status-payment status-payment-outstanding">Payment outstanding</span>`;
 }
 
 function renderSaleStatusBadge(status) {

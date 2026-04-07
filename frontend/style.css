@@ -750,6 +750,53 @@ body.overlay-open {
     color: var(--text-secondary);
 }
 
+.unit-editor {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-muted);
+}
+
+.unit-editor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.unit-editor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.unit-row {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 0.9fr 1fr 1fr 0.9fr auto auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.unit-row .summary-input {
+    min-width: 0;
+}
+
+.unit-row .unit-active {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.unit-editor-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
 .form-hint {
     font-size: 11px;
     color: var(--text-muted);
@@ -2505,6 +2552,23 @@ body.overlay-open {
 .status-order-cancelled {
     background: rgba(239, 68, 68, 0.18);
     color: var(--danger);
+}
+
+.status-payment {
+    text-transform: none;
+    font-weight: 700;
+}
+
+.status-payment-outstanding {
+    background: rgba(245, 158, 11, 0.18);
+    color: var(--warning);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.status-payment-partial {
+    background: rgba(245, 158, 11, 0.18);
+    color: var(--warning);
+    border: 1px solid rgba(245, 158, 11, 0.35);
 }
 
 .status-badge.status-sale {
