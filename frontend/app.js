@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-06.1";
+const APP_BUILD = "2026-04-06.2";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -103,6 +103,13 @@ let performanceUserSelections = {
     cashiers: "",
     salespeople: "",
     delivery: "",
+};
+let aiSummaryLoadedAt = 0;
+let aiSummaryPending = false;
+let aiSummaryContext = {
+    hasOutOfStock: false,
+    hasPendingOrders: false,
+    hasOverdueCredit: false,
 };
 let performanceUsersCache = new Map();
 let performanceRoutesCache = {
@@ -270,11 +277,28 @@ const els = {
     financeExportBtn: document.getElementById("finance-export-btn"),
     financeExportInclude: document.getElementById("finance-export-include"),
     ledgerSummary: document.getElementById("ledger-summary"),
+    aiSummaryCard: document.getElementById("ai-summary-card"),
+    aiSummaryStatus: document.getElementById("ai-summary-status"),
+    aiSummaryUpdated: document.getElementById("ai-summary-updated"),
+    aiSummaryLoading: document.getElementById("ai-summary-loading"),
+    aiSummaryText: document.getElementById("ai-summary-text"),
+    aiSummaryFinancial: document.getElementById("ai-summary-financial"),
+    aiSummaryOps: document.getElementById("ai-summary-ops"),
+    aiSummaryAlerts: document.getElementById("ai-summary-alerts"),
+    aiSummaryActions: document.getElementById("ai-summary-actions"),
+    aiSummaryFinanceAction: document.getElementById("ai-summary-finance-action"),
+    aiSummaryOpsAction: document.getElementById("ai-summary-ops-action"),
+    aiSummaryAlertsAction: document.getElementById("ai-summary-alerts-action"),
+    aiPromptInput: document.getElementById("ai-prompt-input"),
+    aiPromptSubmit: document.getElementById("ai-prompt-submit"),
+    aiResponse: document.getElementById("ai-response"),
+    aiError: document.getElementById("ai-error"),
     ledgerList: document.getElementById("ledger-list"),
     ledgerLoading: document.getElementById("ledger-loading"),
     backofficeModal: document.getElementById("backoffice-modal"),
     backofficeCloseBtn: document.getElementById("backoffice-close-btn"),
     backofficeTabs: document.querySelectorAll(".backoffice-tab"),
+    backofficeLedgerTab: document.getElementById("backoffice-ledger-tab"),
     backofficeProductSection: document.getElementById("backoffice-products"),
     backofficeCustomerSection: document.getElementById("backoffice-customers"),
     backofficeStaffSection: document.getElementById("backoffice-staff"),
@@ -740,6 +764,34 @@ document.addEventListener("DOMContentLoaded", () => {
             hideSearchResults();
         }
     });
+    if (els.aiPromptSubmit) {
+        els.aiPromptSubmit.addEventListener("click", submitAiPrompt);
+    }
+    if (els.aiPromptInput) {
+        els.aiPromptInput.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            submitAiPrompt();
+        });
+    }
+    if (els.aiSummaryFinanceAction) {
+        els.aiSummaryFinanceAction.addEventListener("click", (event) => {
+            event.preventDefault();
+            focusLedgerDetails();
+        });
+    }
+    if (els.aiSummaryOpsAction) {
+        els.aiSummaryOpsAction.addEventListener("click", (event) => {
+            event.preventDefault();
+            focusOperationsDetails();
+        });
+    }
+    if (els.aiSummaryAlertsAction) {
+        els.aiSummaryAlertsAction.addEventListener("click", (event) => {
+            event.preventDefault();
+            focusAlertsDetails();
+        });
+    }
     focusSearchInput();
     if (els.backofficeCloseBtn) {
         els.backofficeCloseBtn.addEventListener("click", closeBackOffice);
@@ -748,6 +800,10 @@ document.addEventListener("DOMContentLoaded", () => {
         els.backofficeTabs.forEach(btn => {
             btn.addEventListener("click", () => {
                 if (btn.disabled) return;
+                if (btn.dataset.section === "ledger") {
+                    openLedgerModal();
+                    return;
+                }
                 setBackOfficeSection(btn.dataset.section);
             });
         });
@@ -5205,7 +5261,7 @@ async function updateCustomerOrderAssignee(orderId, assignedTo) {
 
 // ——— Ledger (Admin) ———
 function canViewLedger() {
-    return normalizeRole(currentUserRole) === "admin";
+    return ["admin", "supervisor"].includes(normalizeRole(currentUserRole));
 }
 
 function renderLedgerCustomerOptions() {
@@ -5241,6 +5297,9 @@ function setLedgerTab(tab) {
     }
     if (activeTab === "performance") {
         setPerformanceTab(performanceActiveTab);
+    }
+    if (activeTab === "overview") {
+        initAiSummary();
     }
 }
 
@@ -5283,8 +5342,11 @@ function openLedgerModal() {
     }
     setLedgerTab("overview");
     openOverlay(els.ledgerModal);
+    const scrollEl = els.ledgerModal.querySelector(".modal-body-scroll");
+    if (scrollEl) scrollEl.scrollTo({ top: 0 });
     ledgerOffset = 0;
     loadLedger();
+    initAiSummary();
 }
 
 function closeLedgerModal() {
@@ -6202,6 +6264,572 @@ function renderLedgerSummary() {
     `;
 }
 
+function setAiStatus(text, tone = "") {
+    if (!els.aiSummaryStatus) return;
+    els.aiSummaryStatus.textContent = text;
+    els.aiSummaryStatus.dataset.tone = tone;
+}
+
+function resetAiPanel() {
+    if (els.aiSummaryFinancial) {
+        els.aiSummaryFinancial.innerHTML = `<li class="ai-summary-placeholder">Open the ledger overview to generate a summary.</li>`;
+    }
+    if (els.aiSummaryOps) {
+        els.aiSummaryOps.innerHTML = "";
+    }
+    if (els.aiSummaryAlerts) {
+        els.aiSummaryAlerts.innerHTML = "";
+    }
+    if (els.aiSummaryActions) {
+        els.aiSummaryActions.innerHTML = "";
+    }
+    if (els.aiSummaryUpdated) {
+        els.aiSummaryUpdated.textContent = "—";
+    }
+    aiSummaryContext = { hasOutOfStock: false, hasPendingOrders: false, hasOverdueCredit: false };
+    if (els.aiResponse) {
+        els.aiResponse.classList.add("hidden");
+        els.aiResponse.textContent = "";
+    }
+    if (els.aiError) {
+        els.aiError.classList.add("hidden");
+        els.aiError.textContent = "";
+    }
+    if (els.aiSummaryLoading) {
+        els.aiSummaryLoading.classList.add("hidden");
+    }
+    setAiStatus("Ready");
+}
+
+function fmtKes(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    return `KES ${num.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtCount(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    return num.toLocaleString("en-KE");
+}
+
+function fmtDelta(value, formatter = v => v) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    const sign = num > 0 ? "+" : num < 0 ? "-" : "";
+    const absValue = formatter(Math.abs(num));
+    return absValue ? `${sign}${absValue}` : "";
+}
+
+function fmtPercentDelta(current, baseline) {
+    const cur = Number(current);
+    const base = Number(baseline);
+    if (!Number.isFinite(cur) || !Number.isFinite(base) || base === 0) return "";
+    const diff = ((cur - base) / Math.abs(base)) * 100;
+    const sign = diff > 0 ? "+" : diff < 0 ? "-" : "";
+    return `${sign}${Math.abs(diff).toFixed(0)}%`;
+}
+
+function buildComparisonNote(current, comparisons, formatter) {
+    const notes = comparisons
+        .map(item => {
+            if (!item || !Number.isFinite(Number(item.value))) return "";
+            const delta = Number(current) - Number(item.value);
+            if (!Number.isFinite(delta)) return "";
+            const deltaText = fmtDelta(delta, formatter);
+            const pctText = fmtPercentDelta(current, item.value);
+            if (!deltaText && !pctText) return "";
+            const suffix = pctText ? ` (${pctText})` : "";
+            return `${item.label} ${deltaText}${suffix}`;
+        })
+        .filter(Boolean);
+    return notes.join(" · ");
+}
+
+function addMetric(list, label, value, formatter = v => v, note = "") {
+    if (value === null || value === undefined || value === "") return;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return;
+    const formatted = formatter(num);
+    if (!formatted) return;
+    list.push({ label, value: formatted, note });
+}
+
+function addTextMetric(list, label, value) {
+    const text = (value || "").toString().trim();
+    if (!text) return;
+    list.push({ label, value: text });
+}
+
+function renderMetricList(items, emptyText) {
+    if (!items.length) {
+        return `<li class="ai-summary-empty">${esc(emptyText)}</li>`;
+    }
+    return items.map(item => (
+        `<li class="ai-metric-row">
+            <div class="ai-metric-main">
+                <span class="ai-metric-label">${esc(item.label)}</span>
+                <span class="ai-metric-value">${esc(item.value)}</span>
+            </div>
+            ${item.note ? `<span class="ai-metric-note">${esc(item.note)}</span>` : ""}
+        </li>`
+    )).join("");
+}
+
+function formatShortTime(value) {
+    if (!value) return "—";
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleTimeString("en-KE", { hour: "numeric", minute: "2-digit" });
+}
+
+function focusLedgerDetails() {
+    setLedgerTab("overview");
+    if (els.ledgerSummary) {
+        els.ledgerSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+    }
+    if (els.ledgerList) {
+        els.ledgerList.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+}
+
+function focusOperationsDetails() {
+    if (!canAccessBackOffice()) {
+        focusLedgerDetails();
+        return;
+    }
+    openBackOffice();
+    setBackOfficeSection("orders");
+}
+
+function focusAlertsDetails() {
+    if (!canAccessBackOffice()) {
+        focusLedgerDetails();
+        return;
+    }
+    // Fallback routing: direct to the most likely operational area based on alert type.
+    if (aiSummaryContext.hasOutOfStock) {
+        openBackOffice();
+        setBackOfficeSection("inventory");
+        return;
+    }
+    if (aiSummaryContext.hasPendingOrders) {
+        openBackOffice();
+        setBackOfficeSection("orders");
+        return;
+    }
+    if (aiSummaryContext.hasOverdueCredit) {
+        openBackOffice();
+        setBackOfficeSection("payments");
+        return;
+    }
+    openBackOffice();
+    setBackOfficeSection("orders");
+}
+
+function initAiSummary() {
+    if (!els.aiSummaryCard) return;
+    if (!canViewLedger()) return;
+    const now = Date.now();
+    if (aiSummaryPending) return;
+    if (aiSummaryLoadedAt && now - aiSummaryLoadedAt < 60_000) return;
+    loadAiSummary();
+}
+
+async function loadAiSummary() {
+    if (!els.aiSummaryCard) return;
+    aiSummaryPending = true;
+    if (els.aiSummaryLoading) els.aiSummaryLoading.classList.remove("hidden");
+    if (els.aiError) els.aiError.classList.add("hidden");
+    setAiStatus("Loading…", "loading");
+
+    try {
+        const params = buildLedgerParams();
+        const summaryQs = params.toString();
+        const branchId = els.ledgerBranch?.value || "";
+        const hasDateFilter = params.get("date_from") || params.get("date_to");
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayKey = yesterday.toISOString().slice(0, 10);
+        const compareParams = new URLSearchParams(params.toString());
+        compareParams.set("date_from", yesterdayKey);
+        compareParams.set("date_to", yesterdayKey);
+
+        const [summary, products, creditOpen, cashierPerf, orders, summaryYesterday] = await Promise.all([
+            apiFetch(`/ledger/summary/${summaryQs ? `?${summaryQs}` : ""}`),
+            apiFetch(withParams("/inventory/products/", { branch: branchId, limit: 200, offset: 0 })),
+            apiFetch(`/sales/credit/open/`),
+            apiFetch(`/finance/performance/cashiers/${summaryQs ? `?${summaryQs}` : ""}`),
+            apiFetch(`/sales/backoffice/orders/${summaryQs ? `?${summaryQs}` : ""}`),
+            !hasDateFilter ? apiFetch(`/ledger/summary/?${compareParams.toString()}`) : Promise.resolve(null),
+        ]);
+
+        const productPage = normalizePaginated(products);
+        const productList = ensureArray(productPage, "ai-products");
+        const ordersPage = normalizePaginated(orders);
+        const ordersList = ensureArray(ordersPage, "ai-orders");
+        const creditList = ensureArray(creditOpen, "ai-credit");
+        const cashierResults = (cashierPerf && cashierPerf.results) ? cashierPerf.results : [];
+
+        const financialMetrics = [];
+        const salesToday = Number(summary?.sales_today);
+        const salesWeekAvg = Number(summary?.sales_week) ? Number(summary?.sales_week) / 7 : null;
+        const salesNote = buildComparisonNote(
+            salesToday,
+            [
+                !hasDateFilter ? { label: "vs yesterday", value: summaryYesterday?.sales_today } : null,
+                !hasDateFilter && Number.isFinite(salesWeekAvg) ? { label: "vs week avg", value: salesWeekAvg } : null,
+            ],
+            fmtKes
+        );
+        addMetric(financialMetrics, "Sales today", summary?.sales_today, fmtKes, salesNote);
+
+        const grossToday = Number(summary?.gross_profit_today);
+        const grossNote = buildComparisonNote(
+            grossToday,
+            !hasDateFilter ? [{ label: "vs yesterday", value: summaryYesterday?.gross_profit_today }] : [],
+            fmtKes
+        );
+        addMetric(financialMetrics, "Gross profit today", summary?.gross_profit_today, fmtKes, grossNote);
+        addMetric(financialMetrics, "Outstanding credit", summary?.outstanding_credit, fmtKes);
+        addMetric(financialMetrics, "Net position", summary?.net_position, fmtKes);
+
+        if (els.aiSummaryFinancial) {
+            els.aiSummaryFinancial.innerHTML = renderMetricList(financialMetrics, "Financial data is unavailable.");
+        }
+
+        const pendingOrders = ordersList.filter(o => ["pending", "pending_credit_approval"].includes((o.status || "").toLowerCase()));
+        const lowStockItems = productList.filter(p => Number(p.stock) <= 0);
+        const opsMetrics = [];
+        addMetric(opsMetrics, "Pending orders", pendingOrders.length, fmtCount);
+        addMetric(opsMetrics, "Out of stock items", lowStockItems.length, fmtCount);
+        addTextMetric(opsMetrics, "Top cashier", cashierResults[0]?.user_name);
+
+        if (els.aiSummaryOps) {
+            els.aiSummaryOps.innerHTML = renderMetricList(opsMetrics, "Operational data is unavailable.");
+        }
+
+        const alerts = [];
+        aiSummaryContext = {
+            hasOutOfStock: lowStockItems.length > 0,
+            hasPendingOrders: pendingOrders.length > 0,
+            hasOverdueCredit: Number(summary?.overdue_credit || 0) > 0,
+        };
+        if (lowStockItems.length) {
+            const sample = lowStockItems.slice(0, 3).map(p => p.name).filter(Boolean);
+            const suffix = lowStockItems.length > sample.length ? ` +${lowStockItems.length - sample.length} more` : "";
+            const details = sample.length ? `: ${sample.join(", ")}${suffix}` : "";
+            alerts.push({ tone: "critical", text: `Out of stock (${lowStockItems.length})${details}` });
+        }
+        if (pendingOrders.length) {
+            alerts.push({ tone: "warn", text: `Pending orders: ${pendingOrders.length}` });
+        }
+        const overdue = Number(summary?.overdue_credit || 0);
+        if (overdue > 0) {
+            alerts.push({ tone: "critical", text: `Overdue credit: ${fmtKes(overdue)}` });
+        }
+        if (!alerts.length) {
+            alerts.push({ tone: "ok", text: "No critical alerts detected." });
+        }
+
+        if (els.aiSummaryAlerts) {
+            els.aiSummaryAlerts.innerHTML = alerts.map(item => (
+                `<li class="ai-alert ${item.tone}">${esc(item.text)}</li>`
+            )).join("");
+        }
+
+        const actions = [];
+        if (lowStockItems.length) {
+            actions.push({ tone: "critical", text: "Restock out-of-stock items and confirm replenishment ETA." });
+        }
+        if (pendingOrders.length) {
+            actions.push({ tone: "warn", text: "Review pending orders and prioritize fulfillment backlog." });
+        }
+        if (overdue > 0) {
+            actions.push({ tone: "critical", text: "Follow up on overdue credit balances and confirm collection plan." });
+        }
+        if (!hasDateFilter && Number.isFinite(salesToday) && salesToday === 0) {
+            actions.push({ tone: "warn", text: "No sales recorded today. Verify trading activity or POS sync." });
+        }
+        if (!actions.length) {
+            actions.push({ tone: "ok", text: "No urgent action required." });
+        }
+        if (els.aiSummaryActions) {
+            els.aiSummaryActions.innerHTML = actions.map(item => (
+                `<li class="ai-action ${item.tone}">${esc(item.text)}</li>`
+            )).join("");
+        }
+
+        setAiStatus("Updated", "ok");
+        if (els.aiSummaryUpdated) {
+            els.aiSummaryUpdated.textContent = formatShortTime(new Date());
+        }
+        aiSummaryLoadedAt = Date.now();
+    } catch (err) {
+        if (els.aiError) {
+            els.aiError.textContent = err.message || "Unable to load AI summary.";
+            els.aiError.classList.remove("hidden");
+        }
+        setAiStatus("Error", "error");
+    } finally {
+        aiSummaryPending = false;
+        if (els.aiSummaryLoading) els.aiSummaryLoading.classList.add("hidden");
+    }
+}
+
+async function submitAiPrompt() {
+    if (!els.aiPromptInput || !els.aiResponse) return;
+    const prompt = (els.aiPromptInput.value || "").trim();
+    if (!prompt) return;
+    if (els.aiResponse) {
+        els.aiResponse.innerHTML = `<div class="ai-response-text">Thinking…</div>`;
+        els.aiResponse.classList.remove("hidden");
+    }
+    if (els.aiError) {
+        els.aiError.classList.add("hidden");
+        els.aiError.textContent = "";
+    }
+
+    const parseAiError = (err) => {
+        const fallback = "Unable to answer right now.";
+        if (!err || !err.message) return fallback;
+        const raw = err.message;
+        try {
+            const data = JSON.parse(raw);
+            if (data && typeof data.detail === "string") return data.detail;
+        } catch (e) {
+            // ignore JSON parse
+        }
+        return raw || fallback;
+    };
+
+    try {
+        const data = await apiRequest("/ai/ask/", {
+            method: "POST",
+            body: { prompt },
+        });
+        if (!data || !data.answer) {
+            throw new Error("AI response unavailable.");
+        }
+        const responsePayload = {
+            title: data.source ? `${formatStatus(data.source)} Response` : "AI Response",
+            text: data.answer,
+        };
+        els.aiResponse.innerHTML = renderAiResponse(responsePayload);
+    } catch (err) {
+        if (els.aiError) {
+            els.aiError.textContent = parseAiError(err);
+            els.aiError.classList.remove("hidden");
+        }
+    } finally {
+        els.aiPromptInput.value = "";
+    }
+}
+
+function buildAiResponse(prompt, summary) {
+    const text = prompt.toLowerCase();
+    if (!summary) {
+        return { title: "Summary unavailable", lines: ["Refresh the ledger to pull the latest data."] };
+    }
+
+    const line = (label, value, formatter = v => v) => {
+        if (value === null || value === undefined || value === "") return null;
+        const num = Number(value);
+        if (!Number.isFinite(num)) return null;
+        const formatted = formatter(num);
+        if (!formatted) return null;
+        return `${label}: ${formatted}`;
+    };
+
+    const response = (title, lines, fallback = "No matching data available.") => {
+        const clean = lines.filter(Boolean);
+        return { title, lines: clean.length ? clean : [fallback] };
+    };
+
+    if (text.includes("sales")) {
+        return response("Sales Snapshot", [
+            line("Today", summary.sales_today, fmtKes),
+            line("This week", summary.sales_week, fmtKes),
+            line("This month", summary.sales_month, fmtKes),
+        ]);
+    }
+    if (text.includes("credit")) {
+        return response("Credit Position", [
+            line("Outstanding credit", summary.outstanding_credit, fmtKes),
+            line("Overdue credit", summary.overdue_credit, fmtKes),
+        ]);
+    }
+    if (text.includes("profit")) {
+        const margin = Number(summary.gross_margin_percent_month);
+        const marginLine = Number.isFinite(margin) ? `Gross margin (month): ${fmtPercent(margin)}` : null;
+        return response("Profit Snapshot", [
+            line("Gross profit today", summary.gross_profit_today, fmtKes),
+            line("Gross profit this month", summary.gross_profit_month, fmtKes),
+            marginLine,
+        ]);
+    }
+    if (text.includes("expenses")) {
+        return response("Expense Snapshot", [
+            line("Expenses today", summary.expenses_today, fmtKes),
+            line("Expenses this month", summary.expenses_month, fmtKes),
+            line("Net position", summary.net_position, fmtKes),
+        ]);
+    }
+
+    return response("Business Snapshot", [
+        line("Sales today", summary.sales_today, fmtKes),
+        line("Gross profit today", summary.gross_profit_today, fmtKes),
+        line("Outstanding credit", summary.outstanding_credit, fmtKes),
+    ]);
+}
+
+function renderAiResponse(payload) {
+    if (!payload) return "";
+    if (typeof payload === "string") {
+        return renderAiAnswer(payload);
+    }
+    const title = payload.title ? `<div class="ai-response-title">${esc(payload.title)}</div>` : "";
+    if (payload.text) {
+        return `${title}${renderAiAnswer(payload.text)}`;
+    }
+    const lines = Array.isArray(payload.lines) && payload.lines.length
+        ? `<ul class="ai-response-list">${payload.lines.map(item => `<li>${esc(item)}</li>`).join("")}</ul>`
+        : "";
+    return `${title}${lines}`;
+}
+
+function renderAiAnswer(text) {
+    const content = (text || "").toString().trim();
+    if (!content) {
+        return `<div class="ai-response-text">No response available.</div>`;
+    }
+    const sections = parseAiAnswerSections(content);
+    return sections.map(section => {
+        const sectionTitle = section.title
+            ? `<div class="ai-response-section-title">${esc(section.title)}</div>`
+            : "";
+        const tone = section.tone ? ` data-tone="${section.tone}"` : "";
+        return `<div class="ai-response-section"${tone}>${sectionTitle}${section.body}</div>`;
+    }).join("");
+}
+
+function parseAiAnswerSections(text) {
+    const lines = text.split(/\r?\n/).map(line => line.trim());
+    const sections = [];
+    let current = { title: "", tone: "summary", blocks: [] };
+
+    const pushSection = () => {
+        if (!current) return;
+        const body = renderAiBlocks(current.blocks);
+        sections.push({
+            title: current.title,
+            tone: current.tone,
+            body,
+        });
+    };
+
+    const normalizeTitle = (value) => value.replace(/^#+\s*/, "").replace(/:$/, "").trim();
+    const classifyTitle = (value) => {
+        const t = value.toLowerCase();
+        if (t.includes("financial")) return "finance";
+        if (t.includes("operation")) return "ops";
+        if (t.includes("alert")) return "alert";
+        if (t.includes("action")) return "action";
+        if (t.includes("risk")) return "risk";
+        return "summary";
+    };
+
+    const isHeader = (line) => {
+        if (!line) return false;
+        if (line.startsWith("#")) return true;
+        if (line.length <= 40 && /:$/.test(line)) return true;
+        const lower = line.toLowerCase();
+        return ["financial overview", "operations", "alerts", "action items", "risks"].some(key => lower === key);
+    };
+
+    lines.forEach((line) => {
+        if (!line) {
+            current.blocks.push({ type: "spacer" });
+            return;
+        }
+        if (isHeader(line)) {
+            if (current.blocks.length || current.title) {
+                pushSection();
+            }
+            const title = normalizeTitle(line);
+            current = { title, tone: classifyTitle(title), blocks: [] };
+            return;
+        }
+        if (/^[-*•]\s+/.test(line)) {
+            current.blocks.push({ type: "bullet", text: line.replace(/^[-*•]\s+/, "") });
+            return;
+        }
+        if (line.includes(":")) {
+            const [label, ...rest] = line.split(":");
+            const value = rest.join(":").trim();
+            if (label && value) {
+                current.blocks.push({ type: "metric", label: label.trim(), value });
+                return;
+            }
+        }
+        current.blocks.push({ type: "text", text: line });
+    });
+
+    if (current.blocks.length || current.title) {
+        pushSection();
+    }
+    return sections.length ? sections : [{ title: "Summary", tone: "summary", body: renderAiBlocks([{ type: "text", text }]) }];
+}
+
+function renderAiBlocks(blocks) {
+    if (!blocks.length) {
+        return `<div class="ai-response-text">No details provided.</div>`;
+    }
+    const html = [];
+    let listItems = [];
+    const flushList = () => {
+        if (!listItems.length) return;
+        html.push(`<ul class="ai-response-bullets">${listItems.join("")}</ul>`);
+        listItems = [];
+    };
+    blocks.forEach((block) => {
+        if (block.type === "bullet") {
+            const tone = classifyAiBullet(block.text);
+            listItems.push(`<li class="ai-response-bullet"${tone ? ` data-tone="${tone}"` : ""}>${esc(block.text)}</li>`);
+            return;
+        }
+        flushList();
+        if (block.type === "metric") {
+            html.push(
+                `<div class="ai-response-metric"><span class="ai-response-label">${esc(block.label)}</span><span class="ai-response-value">${esc(block.value)}</span></div>`
+            );
+            return;
+        }
+        if (block.type === "spacer") {
+            html.push(`<div class="ai-response-spacer"></div>`);
+            return;
+        }
+        html.push(`<div class="ai-response-text">${esc(block.text)}</div>`);
+    });
+    flushList();
+    return html.join("");
+}
+
+function classifyAiBullet(text) {
+    const lower = (text || "").toLowerCase();
+    if (/(overdue|out of stock|failed|error|critical|risk|blocked|urgent)/.test(lower)) {
+        return "critical";
+    }
+    if (/(pending|watch|review|attention|warning)/.test(lower)) {
+        return "warn";
+    }
+    if (/(ok|stable|on track|no issues)/.test(lower)) {
+        return "ok";
+    }
+    return "";
+}
+
 function formatLedgerType(type) {
     const normalized = (type || "").toString().toLowerCase();
     const map = {
@@ -6873,6 +7501,11 @@ function applyRoleUI() {
         const canView = canViewLedger();
         els.ledgerBtn.classList.toggle("hidden", !canView);
         els.ledgerBtn.setAttribute("aria-disabled", canView ? "false" : "true");
+    }
+    if (els.backofficeLedgerTab) {
+        const canView = canViewLedger();
+        els.backofficeLedgerTab.classList.toggle("hidden", !canView);
+        els.backofficeLedgerTab.setAttribute("aria-disabled", canView ? "false" : "true");
     }
     if (els.backofficeBtn) {
         const canBackOffice = canAccessBackOffice();

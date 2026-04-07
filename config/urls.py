@@ -28,6 +28,7 @@ from accounts.views import (
     UserCreateView,
     UserUpdateView,
 )
+from core.ai_views import AskAIView, AskAIHealthView
 from sales.ledger_views import FinanceExportView
 
 
@@ -64,6 +65,8 @@ urlpatterns = [
     path("api/accounts/users/", UserListView.as_view(), name="api-users"),
     path("api/accounts/users/create/", UserCreateView.as_view(), name="api-users-create"),
     path("api/accounts/users/<uuid:user_id>/", UserUpdateView.as_view(), name="api-users-update"),
+    path("api/ai/ask/", AskAIView.as_view(), name="api-ai-ask"),
+    path("api/ai/health/", AskAIHealthView.as_view(), name="api-ai-health"),
     path("api/ledger/", include("sales.ledger_urls")),
     path("api/finance/export/", FinanceExportView.as_view(), name="finance-export"),
     path("api/finance/performance/", include("sales.performance_urls")),

@@ -12,10 +12,25 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 import os
+import logging
 import dj_database_url
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+if load_dotenv:
+    env_path = Path(os.environ.get("DJANGO_DOTENV_PATH", BASE_DIR / ".env")).expanduser()
+    loaded = load_dotenv(env_path)
+    logger = logging.getLogger("config.settings")
+    logger.info("Loaded .env from %s: %s", env_path, "yes" if loaded else "no")
+    logger.info(
+        "PAPERCLIP_COMMAND set: %s",
+        "yes" if os.environ.get("PAPERCLIP_COMMAND") else "no",
+    )
 
 
 # Quick-start development settings - unsuitable for production
