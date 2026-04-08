@@ -496,6 +496,17 @@ body.overlay-open {
     justify-content: space-between;
 }
 
+.inventory-search-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.inventory-search-row .summary-input {
+    flex: 1 1 260px;
+}
+
 .backoffice-filters {
     display: flex;
     flex-wrap: wrap;
@@ -592,6 +603,71 @@ body.overlay-open {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--surface);
+}
+
+.inventory-mode-toggle {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.radio-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.counted-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    padding: 10px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-muted);
+    margin-bottom: 12px;
+}
+
+.inventory-variance,
+.inventory-adjust-preview {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.scan-modal {
+    width: min(520px, 92vw);
+}
+
+.scan-video {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: #000;
+    max-height: 60vh;
+    object-fit: cover;
+}
+
+.scan-status {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.scan-status[data-tone="error"] {
+    color: var(--danger);
+}
+
+.scan-status[data-tone="success"] {
+    color: var(--success);
 }
 
 .modal-content.sale-detail-modal {
@@ -3158,6 +3234,21 @@ body.overlay-open {
     gap: 12px;
     padding: 0 28px 24px;
     flex-shrink: 0;
+    align-items: center;
+}
+
+.receipt-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.receipt-toggle input {
+    width: 14px;
+    height: 14px;
 }
 
 .btn-primary,
@@ -3322,6 +3413,67 @@ body.overlay-open {
 .pagination-controls .btn-ghost:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+    .inventory-mode-toggle {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .counted-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .inventory-search-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .inventory-search-row .summary-input {
+        width: 100%;
+        font-size: 16px;
+        padding: 10px 12px;
+    }
+
+    #inventory-scan-btn {
+        width: 100%;
+        padding: 12px;
+        font-size: 14px;
+    }
+
+    .backoffice-filters {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .backoffice-filters .summary-select {
+        width: 100%;
+        font-size: 16px;
+        padding: 10px 12px;
+    }
+
+    .inventory-stock-meta {
+        font-size: 14px;
+        padding: 6px 0;
+    }
+
+    .inventory-adjust-card .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .inventory-adjust-card .summary-input,
+    .inventory-adjust-card .summary-select {
+        font-size: 16px;
+        padding: 10px 12px;
+    }
+
+    #inventory-adjust-submit {
+        width: 100%;
+        padding: 12px;
+        font-size: 14px;
+    }
 }
 
 /* ---- RESPONSIVE ---- */

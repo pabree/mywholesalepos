@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-06.2";
+const APP_BUILD = "2026-04-08.2";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -14,6 +14,7 @@ customerOrdersLog("[customer-orders] app.js loaded", { build: APP_BUILD });
 window.__APP_BUILD__ = APP_BUILD;
 const POS_DEBUG = new URLSearchParams(window.location.search).has("posDebug")
     || localStorage.getItem("pos_debug") === "1";
+const AUTO_PRINT_KEY = "pos_auto_print_receipt";
 const posLog = (...args) => {
     if (POS_DEBUG) console.debug(...args);
 };
@@ -77,6 +78,10 @@ let inventoryAdjustProducts = [];
 let inventoryAdjustOffset = 0;
 let inventoryAdjustLimit = 20;
 let inventoryAdjustPage = { count: 0, next: null, previous: null, results: [] };
+let inventoryScanStream = null;
+let inventoryScanDetector = null;
+let inventoryScanActive = false;
+let inventoryScanLoopTimer = null;
 let backOfficeSales = [];
 let backOfficeSalesQuery = "";
 let backOfficeSalesOffset = 0;
@@ -136,6 +141,7 @@ let activeSaleRowId = null;
 let mpesaPendingPayment = null;
 let mpesaPollTimer = null;
 let mpesaPollAttempts = 0;
+let autoPrintedSales = new Set();
 
 const HELD_SALES_LIMIT = 20;
 const CUSTOMER_ORDERS_LIMIT = 20;
@@ -207,6 +213,7 @@ const els = {
     receiptContent:  document.getElementById("receipt-content"),
     printReceiptBtn: document.getElementById("print-receipt-btn"),
     receiptCloseBtn: document.getElementById("receipt-close-btn"),
+    autoPrintToggle: document.getElementById("auto-print-toggle"),
     newSaleBtn:      document.getElementById("new-sale-btn"),
     toastContainer:  document.getElementById("toast-container"),
     authBtn:         document.getElementById("auth-btn"),
@@ -334,6 +341,16 @@ const els = {
     inventoryAdjustPrev: document.getElementById("inventory-adjust-prev"),
     inventoryAdjustNext: document.getElementById("inventory-adjust-next"),
     inventoryAdjustPage: document.getElementById("inventory-adjust-page"),
+    inventoryAdjustMode: document.querySelectorAll("input[name='inventory-adjust-mode']"),
+    inventoryCountedFields: document.getElementById("inventory-counted-fields"),
+    inventoryCountedQty: document.getElementById("inventory-counted-qty"),
+    inventoryVariance: document.getElementById("inventory-variance"),
+    inventoryAdjustPreview: document.getElementById("inventory-adjust-preview"),
+    inventoryScanBtn: document.getElementById("inventory-scan-btn"),
+    inventoryScanModal: document.getElementById("inventory-scan-modal"),
+    inventoryScanClose: document.getElementById("inventory-scan-close"),
+    inventoryScanVideo: document.getElementById("inventory-scan-video"),
+    inventoryScanStatus: document.getElementById("inventory-scan-status"),
     backofficeSalesSearch: document.getElementById("backoffice-sales-search"),
     backofficeSalesBranch: document.getElementById("backoffice-sales-branch"),
     backofficeSalesStatus: document.getElementById("backoffice-sales-status"),
@@ -562,6 +579,8 @@ function getOverlayCloseHandler(id) {
             return closeReturnsModal;
         case "receipt-modal":
             return closeReceiptModal;
+        case "inventory-scan-modal":
+            return closeInventoryScanModal;
         default:
             return null;
     }
@@ -822,6 +841,26 @@ document.addEventListener("DOMContentLoaded", () => {
         els.inventoryAdjustSearch.addEventListener("input", () => {
             loadInventoryAdjustProducts(els.inventoryAdjustSearch.value || "");
         });
+    }
+    if (els.inventoryAdjustMode) {
+        els.inventoryAdjustMode.forEach(input => {
+            input.addEventListener("change", () => {
+                updateInventoryAdjustMode();
+            });
+        });
+    }
+    if (els.inventoryCountedQty) {
+        els.inventoryCountedQty.addEventListener("input", () => {
+            updateInventoryCountedPreview();
+        });
+    }
+    if (els.inventoryScanBtn) {
+        els.inventoryScanBtn.addEventListener("click", () => {
+            openInventoryScanModal();
+        });
+    }
+    if (els.inventoryScanClose) {
+        els.inventoryScanClose.addEventListener("click", closeInventoryScanModal);
     }
     if (els.inventoryAdjustBranch) {
         els.inventoryAdjustBranch.addEventListener("change", () => {
@@ -1274,6 +1313,12 @@ document.addEventListener("DOMContentLoaded", () => {
     posLog("[pos] checkout button bound", { found: Boolean(els.checkoutBtn) });
     if (els.printReceiptBtn) {
         els.printReceiptBtn.addEventListener("click", printReceipt);
+    }
+    if (els.autoPrintToggle) {
+        els.autoPrintToggle.checked = isAutoPrintEnabled();
+        els.autoPrintToggle.addEventListener("change", () => {
+            setAutoPrintEnabled(els.autoPrintToggle.checked);
+        });
     }
     els.newSaleBtn.addEventListener("click", newSale);
     if (els.receiptCloseBtn) els.receiptCloseBtn.addEventListener("click", closeReceiptModal);
@@ -2781,6 +2826,150 @@ async function initInventoryAdjustments() {
     }
     loadInventoryAdjustProducts(els.inventoryAdjustSearch?.value || "");
     loadInventoryAdjustments();
+    updateInventoryAdjustMode();
+}
+
+function openInventoryScanModal() {
+    if (!els.inventoryScanModal) return;
+    openOverlay(els.inventoryScanModal, { closeOthers: false });
+    startInventoryScanner();
+}
+
+function closeInventoryScanModal() {
+    stopInventoryScanner();
+    closeOverlay(els.inventoryScanModal);
+}
+
+function setInventoryScanStatus(message = "", tone = "info") {
+    if (!els.inventoryScanStatus) return;
+    els.inventoryScanStatus.textContent = message;
+    els.inventoryScanStatus.dataset.tone = tone;
+}
+
+async function startInventoryScanner() {
+    if (inventoryScanActive) return;
+    if (!els.inventoryScanVideo) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setInventoryScanStatus("Camera not supported on this device.", "error");
+        return;
+    }
+    if (!("BarcodeDetector" in window)) {
+        setInventoryScanStatus("Barcode scanning not supported in this browser.", "error");
+        return;
+    }
+
+    try {
+        inventoryScanDetector = new BarcodeDetector({
+            formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "code_93", "itf", "qr_code"],
+        });
+        inventoryScanStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" } },
+            audio: false,
+        });
+        els.inventoryScanVideo.srcObject = inventoryScanStream;
+        await els.inventoryScanVideo.play();
+        inventoryScanActive = true;
+        setInventoryScanStatus("Scanning... Hold steady.", "info");
+        runInventoryScanLoop();
+    } catch (err) {
+        setInventoryScanStatus("Camera permission denied or unavailable.", "error");
+        stopInventoryScanner();
+    }
+}
+
+function runInventoryScanLoop() {
+    if (!inventoryScanActive || !inventoryScanDetector || !els.inventoryScanVideo) return;
+    if (inventoryScanLoopTimer) clearTimeout(inventoryScanLoopTimer);
+    inventoryScanLoopTimer = setTimeout(async () => {
+        if (!inventoryScanActive) return;
+        try {
+            const codes = await inventoryScanDetector.detect(els.inventoryScanVideo);
+            if (codes && codes.length) {
+                const value = codes[0].rawValue || codes[0].data || "";
+                if (value) {
+                    handleInventoryScanResult(value);
+                    return;
+                }
+            }
+        } catch (err) {
+            // ignore transient scan errors
+        }
+        runInventoryScanLoop();
+    }, 220);
+}
+
+function handleInventoryScanResult(value) {
+    const code = String(value || "").trim();
+    if (!code) return;
+    if (els.inventoryAdjustSearch) {
+        els.inventoryAdjustSearch.value = code;
+        loadInventoryAdjustProducts(code);
+    }
+    stopInventoryScanner();
+    closeOverlay(els.inventoryScanModal);
+    toast(`Scanned: ${code}`, "success");
+}
+
+function stopInventoryScanner() {
+    inventoryScanActive = false;
+    if (inventoryScanLoopTimer) {
+        clearTimeout(inventoryScanLoopTimer);
+        inventoryScanLoopTimer = null;
+    }
+    if (inventoryScanStream) {
+        inventoryScanStream.getTracks().forEach(track => track.stop());
+        inventoryScanStream = null;
+    }
+    if (els.inventoryScanVideo) {
+        els.inventoryScanVideo.pause();
+        els.inventoryScanVideo.srcObject = null;
+    }
+}
+
+function getInventoryAdjustMode() {
+    if (!els.inventoryAdjustMode) return "manual";
+    const selected = Array.from(els.inventoryAdjustMode).find(input => input.checked);
+    return selected ? selected.value : "manual";
+}
+
+function updateInventoryAdjustMode() {
+    const mode = getInventoryAdjustMode();
+    if (els.inventoryCountedFields) {
+        els.inventoryCountedFields.classList.toggle("hidden", mode !== "counted");
+    }
+    const isCounted = mode === "counted";
+    if (els.inventoryAdjustType) els.inventoryAdjustType.disabled = isCounted;
+    if (els.inventoryAdjustQty) els.inventoryAdjustQty.disabled = isCounted;
+    if (isCounted) {
+        updateInventoryCountedPreview();
+    }
+}
+
+function updateInventoryCountedPreview() {
+    if (!els.inventoryCountedQty || !els.inventoryVariance || !els.inventoryAdjustPreview) return;
+    const mode = getInventoryAdjustMode();
+    if (mode !== "counted") return;
+    const systemQty = Number(els.inventoryAdjustStock?.textContent || 0);
+    const counted = Number(els.inventoryCountedQty.value || 0);
+    if (Number.isNaN(counted)) {
+        els.inventoryVariance.textContent = "—";
+        els.inventoryAdjustPreview.textContent = "—";
+        return;
+    }
+    const diff = counted - systemQty;
+    if (diff === 0) {
+        els.inventoryVariance.textContent = "0";
+        els.inventoryAdjustPreview.textContent = "No adjustment needed";
+        if (els.inventoryAdjustType) els.inventoryAdjustType.value = "increase";
+        if (els.inventoryAdjustQty) els.inventoryAdjustQty.value = "";
+        return;
+    }
+    const type = diff > 0 ? "increase" : "decrease";
+    const qty = Math.abs(diff);
+    if (els.inventoryAdjustType) els.inventoryAdjustType.value = type;
+    if (els.inventoryAdjustQty) els.inventoryAdjustQty.value = qty;
+    els.inventoryVariance.textContent = diff > 0 ? `+${diff}` : `${diff}`;
+    els.inventoryAdjustPreview.textContent = `${formatStatus(type)} ${qty}`;
 }
 
 async function loadInventoryAdjustProducts(query = "") {
@@ -2813,6 +3002,7 @@ async function updateInventoryAdjustStock() {
     const branchId = els.inventoryAdjustBranch?.value || "";
     if (!productId || !branchId) {
         els.inventoryAdjustStock.textContent = "—";
+        updateInventoryCountedPreview();
         return;
     }
     try {
@@ -2825,6 +3015,7 @@ async function updateInventoryAdjustStock() {
     } catch (err) {
         els.inventoryAdjustStock.textContent = "—";
     }
+    updateInventoryCountedPreview();
 }
 
 async function submitInventoryAdjustment() {
@@ -2835,12 +3026,27 @@ async function submitInventoryAdjustment() {
     const qty = Number(els.inventoryAdjustQty?.value || 0);
     const reason = els.inventoryAdjustReason?.value?.trim() || "";
     const note = els.inventoryAdjustNote?.value?.trim() || "";
+    const mode = getInventoryAdjustMode();
 
     if (!productId || !branchId) {
         const message = "Product and branch are required.";
         if (els.inventoryAdjustError) els.inventoryAdjustError.textContent = message;
         toast(message, "error");
         return;
+    }
+    if (mode === "counted") {
+        if (!els.inventoryCountedQty?.value) {
+            const message = "Counted quantity is required.";
+            if (els.inventoryAdjustError) els.inventoryAdjustError.textContent = message;
+            toast(message, "error");
+            return;
+        }
+        if (!qty || qty <= 0) {
+            const message = "No adjustment needed.";
+            if (els.inventoryAdjustError) els.inventoryAdjustError.textContent = message;
+            toast(message, "info");
+            return;
+        }
     }
     if (!qty || qty <= 0) {
         const message = "Quantity must be greater than zero.";
@@ -2874,6 +3080,7 @@ async function submitInventoryAdjustment() {
         await apiRequest("/inventory/adjustments/create/", { method: "POST", body: payload });
         toast("Inventory adjusted", "success");
         if (els.inventoryAdjustQty) els.inventoryAdjustQty.value = "";
+        if (els.inventoryCountedQty) els.inventoryCountedQty.value = "";
         if (els.inventoryAdjustReason) els.inventoryAdjustReason.value = "";
         if (els.inventoryAdjustNote) els.inventoryAdjustNote.value = "";
         await updateInventoryAdjustStock();
@@ -4612,7 +4819,7 @@ async function checkout() {
         currentSaleId = null;
         currentSaleMeta = null;
         currentSaleType = "retail";
-        showReceipt(saleId);
+        showReceipt(saleId, { autoPrint: true });
         loadProducts();
         loadHeldSales();
         await refreshCustomerOrdersAfterSaleComplete(saleId);
@@ -4708,7 +4915,7 @@ async function pollMpesaPayment(paymentId) {
                 currentSaleId = null;
                 currentSaleMeta = null;
                 currentSaleType = "retail";
-                showReceipt(statusData.sale_id);
+                showReceipt(statusData.sale_id, { autoPrint: true });
                 loadProducts();
                 loadHeldSales();
                 await refreshCustomerOrdersAfterSaleComplete(statusData.sale_id);
@@ -4766,7 +4973,7 @@ async function holdSale() {
 }
 
 // ——— Receipt ———
-async function showReceipt(saleId) {
+async function showReceipt(saleId, { autoPrint = false } = {}) {
     const [receipt, saleDetail] = await Promise.all([
         apiFetch(`/sales/${saleId}/receipt/`),
         apiFetch(`/sales/${saleId}/`),
@@ -4877,6 +5084,34 @@ async function showReceipt(saleId) {
     `;
 
     openOverlay(els.receiptModal);
+    if (autoPrint && saleId) {
+        scheduleAutoPrint(saleId);
+    }
+}
+
+function scheduleAutoPrint(saleId) {
+    if (!isAutoPrintEnabled()) return;
+    if (autoPrintedSales.has(saleId)) return;
+    autoPrintedSales.add(saleId);
+    requestAnimationFrame(() => {
+        setTimeout(() => {
+            try {
+                printReceipt();
+            } catch (err) {
+                console.warn("[receipt] auto-print failed", err);
+            }
+        }, 80);
+    });
+}
+
+function isAutoPrintEnabled() {
+    const value = localStorage.getItem(AUTO_PRINT_KEY);
+    if (value === null) return true;
+    return value === "1";
+}
+
+function setAutoPrintEnabled(enabled) {
+    localStorage.setItem(AUTO_PRINT_KEY, enabled ? "1" : "0");
 }
 
 function printReceipt() {

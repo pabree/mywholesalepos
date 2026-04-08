@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-06.2">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-08.2">
 </head>
 <body>
     <!-- Top Bar -->
@@ -220,8 +220,26 @@
                 </div>
             </div>
             <div class="modal-actions">
+                <label class="receipt-toggle">
+                    <input type="checkbox" id="auto-print-toggle">
+                    Auto-print receipts
+                </label>
                 <button id="print-receipt-btn" class="btn-primary">🖨️ Print</button>
                 <button id="new-sale-btn" class="btn-secondary">+ New Sale</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inventory Scan Modal -->
+    <div id="inventory-scan-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content scan-modal">
+            <div class="modal-header">
+                <h3>Scan Barcode</h3>
+                <button id="inventory-scan-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body">
+                <video id="inventory-scan-video" class="scan-video" autoplay playsinline></video>
+                <div id="inventory-scan-status" class="scan-status">Point the camera at a barcode.</div>
             </div>
         </div>
     </div>
@@ -992,8 +1010,9 @@
                     </div>
                     <div id="backoffice-inventory" class="backoffice-section hidden">
                         <div class="backoffice-toolbar">
-                            <div class="backoffice-search">
+                            <div class="backoffice-search inventory-search-row">
                                 <input type="text" id="inventory-adjust-search" class="summary-input" placeholder="Search product by name or SKU">
+                                <button id="inventory-scan-btn" class="btn-secondary">Scan Barcode</button>
                             </div>
                         </div>
                         <div class="backoffice-filters">
@@ -1008,6 +1027,27 @@
                             </div>
                         </div>
                         <div class="inventory-adjust-card">
+                            <div class="inventory-mode-toggle">
+                                <label class="radio-row">
+                                    <input type="radio" name="inventory-adjust-mode" value="manual" checked>
+                                    Manual adjustment
+                                </label>
+                                <label class="radio-row">
+                                    <input type="radio" name="inventory-adjust-mode" value="counted">
+                                    Counted stock
+                                </label>
+                            </div>
+                            <div id="inventory-counted-fields" class="counted-fields hidden">
+                                <label>Counted Quantity<span class="required">*</span>
+                                    <input id="inventory-counted-qty" type="number" min="0" class="summary-input" placeholder="Enter counted stock">
+                                </label>
+                                <div class="inventory-variance">
+                                    Variance: <strong id="inventory-variance">—</strong>
+                                </div>
+                                <div class="inventory-adjust-preview">
+                                    Adjustment: <strong id="inventory-adjust-preview">—</strong>
+                                </div>
+                            </div>
                             <div class="form-grid">
                                 <label>Adjustment Type<span class="required">*</span>
                                     <select id="inventory-adjust-type" class="summary-select" required>
@@ -1409,6 +1449,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-06.2"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-08.2"></script>
 </body>
 </html>
