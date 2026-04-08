@@ -1272,7 +1272,9 @@ document.addEventListener("DOMContentLoaded", () => {
     els.holdSaleBtn.addEventListener("click", holdSale);
     els.checkoutBtn.addEventListener("click", checkout);
     posLog("[pos] checkout button bound", { found: Boolean(els.checkoutBtn) });
-    els.printReceiptBtn.addEventListener("click", () => window.print());
+    if (els.printReceiptBtn) {
+        els.printReceiptBtn.addEventListener("click", printReceipt);
+    }
     els.newSaleBtn.addEventListener("click", newSale);
     if (els.receiptCloseBtn) els.receiptCloseBtn.addEventListener("click", closeReceiptModal);
     els.authBtn.addEventListener("click", openAuthModal);
@@ -4774,12 +4776,27 @@ async function showReceipt(saleId) {
         return;
     }
 
-    const itemsHtml = receipt.items.map(item => `
-        <div class="receipt-item">
-            <span class="receipt-item-name">${esc(item.product)} × ${item.quantity}</span>
-            <span class="receipt-item-total">${fmtPrice(item.total)}</span>
-        </div>
-    `).join("");
+    const detailItems = ensureArray(saleDetail?.items || [], "saleDetailItems");
+    const itemsHtml = receipt.items.map((item, index) => {
+        const detail = detailItems[index];
+        let unitLabel = "";
+        if (detail?.product && detail?.product_unit) {
+            const product = allProducts.find(p => p.id === detail.product);
+            const unit = product?.units?.find(u => u.id === detail.product_unit);
+            unitLabel = unit?.unit_code || unit?.unit_name || "";
+        }
+        const unitMeta = unitLabel ? ` ${esc(unitLabel)}` : "";
+        const unitPrice = item.unit_price ?? detail?.unit_price ?? 0;
+        return `
+            <div class="receipt-item">
+                <div>
+                    <div class="receipt-item-name">${esc(item.product)} × ${item.quantity}${unitMeta}</div>
+                    <div class="receipt-item-meta">@ ${fmtPrice(unitPrice)}</div>
+                </div>
+                <span class="receipt-item-total">${fmtPrice(item.total)}</span>
+            </div>
+        `;
+    }).join("");
 
     const paymentList = ensureArray(saleDetail?.payments || receipt.payments || [], "receiptPayments");
     const paymentHistory = renderPaymentHistoryList(paymentList, { compact: true });
@@ -4805,12 +4822,23 @@ async function showReceipt(saleId) {
     const receiptTax = receipt.tax ?? (receiptTotal * TAX_RATE / (1 + TAX_RATE));
     const receiptNet = Math.max(0, receiptTotal - receiptTax);
 
+    const branchName = branches.find(b => b.id === saleDetail?.branch)?.name || "";
+    const customerName = saleDetail?.customer ? getCustomerName(saleDetail.customer) : "";
+    const servedBy = currentUser?.display_name || currentUser?.username || currentUser?.email || "";
+
+    const receiptMeta = [
+        branchName ? `<div class="receipt-meta">${esc(branchName)}</div>` : "",
+        customerName ? `<div class="receipt-subline">Customer: ${esc(customerName)}</div>` : "",
+        servedBy ? `<div class="receipt-subline">Served by: ${esc(servedBy)}</div>` : "",
+    ].filter(Boolean).join("");
+
     els.receiptContent.innerHTML = `
         <div class="receipt-success">✅</div>
         <div class="receipt-header">
-            <h3>Sale Complete</h3>
+            <h3>Sale Receipt</h3>
             <div class="receipt-id">Sale #${receipt.sale_id}</div>
             <div class="receipt-date">${new Date(receipt.date).toLocaleString()}</div>
+            ${receiptMeta}
         </div>
         <hr class="receipt-divider">
         <div class="receipt-items">${itemsHtml}</div>
@@ -4849,6 +4877,63 @@ async function showReceipt(saleId) {
     `;
 
     openOverlay(els.receiptModal);
+}
+
+function printReceipt() {
+    const contentEl = document.getElementById("receipt-content");
+    if (!contentEl) {
+        window.print();
+        return;
+    }
+    const content = contentEl.innerHTML;
+    const win = window.open("", "", "width=360,height=600");
+    if (!win) {
+        window.print();
+        return;
+    }
+    win.document.write(`
+        <html>
+            <head>
+                <title>Receipt</title>
+                <style>
+                    body {
+                        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                        font-size: 12px;
+                        background: #ffffff;
+                        color: #000000;
+                        margin: 0;
+                        padding: 10px 12px;
+                    }
+                    .receipt { padding: 0; text-align: left; }
+                    .receipt-success { display: none; }
+                    .receipt-header h3 { font-size: 16px; margin: 0 0 4px; }
+                    .receipt-header .receipt-id,
+                    .receipt-header .receipt-date,
+                    .receipt-meta,
+                    .receipt-subline { font-size: 11px; color: #333; }
+                    .receipt-divider { border: none; border-top: 1px dashed #999; margin: 8px 0; }
+                    .receipt-items { text-align: left; }
+                    .receipt-item { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 12px; }
+                    .receipt-item-name { color: #000; }
+                    .receipt-item-meta { font-size: 11px; color: #555; }
+                    .receipt-item-total { font-weight: 700; }
+                    .receipt-totals { text-align: left; margin-top: 6px; }
+                    .receipt-total-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
+                    .receipt-total-row.receipt-grand { font-size: 14px; font-weight: 700; border-top: 1px dashed #999; margin-top: 6px; padding-top: 6px; }
+                    .receipt-total-row.receipt-paid { font-weight: 700; }
+                    .receipt-payments { margin-top: 8px; }
+                    .receipt-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+                </style>
+            </head>
+            <body>
+                ${content}
+            </body>
+        </html>
+    `);
+    win.document.close();
+    win.focus();
+    win.print();
+    win.close();
 }
 
 function closeReceiptModal() {

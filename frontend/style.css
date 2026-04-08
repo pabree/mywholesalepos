@@ -3048,6 +3048,17 @@ body.overlay-open {
     text-align: center;
 }
 
+.receipt-meta,
+.receipt-subline {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.receipt-subline {
+    margin-top: 2px;
+}
+
 .receipt-header {
     margin-bottom: 20px;
 }
@@ -3095,9 +3106,20 @@ body.overlay-open {
     color: var(--text-secondary);
 }
 
+.receipt-item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
 .receipt-item-total {
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+}
+
+#receipt-content {
+    overflow: visible !important;
+    max-height: none !important;
 }
 
 .receipt-totals {
@@ -3223,6 +3245,44 @@ body.overlay-open {
 .toast.toast-success { border-left-color: var(--success); }
 .toast.toast-error   { border-left-color: var(--danger); }
 .toast.toast-warning { border-left-color: var(--warning); }
+
+@media print {
+    body * {
+        display: none !important;
+    }
+
+    #receipt-content,
+    #receipt-content * {
+        display: block !important;
+        visibility: visible !important;
+    }
+
+    #receipt-content {
+        position: absolute !important;
+        top: 0;
+        left: 0;
+        width: 100% !important;
+        max-height: none !important;
+        overflow: visible !important;
+        background: white !important;
+        color: black !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        padding: 10px 12px !important;
+        text-align: left !important;
+    }
+
+    * {
+        background: white !important;
+        color: black !important;
+        box-shadow: none !important;
+    }
+
+    body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+        font-size: 12px !important;
+    }
+}
 
 @keyframes toastIn {
     from {
