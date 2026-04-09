@@ -72,10 +72,12 @@ urlpatterns = [
     path("api/finance/performance/", include("sales.performance_urls")),
     path("api/payments/", include("sales.payment_urls")),
     path("api/expenses/", include("expenses.urls")),
+    path("api/purchases/", include("purchases.urls")),
     path("api/routes/", include("logistics.urls")),
     path("api/sales/", include("sales.urls")),
     path("api/customer/", include("sales.customer_urls")),
     path("api/inventory/", include("inventory.urls")),
     path("api/customers/", include("customers.urls")),
+    path("api/suppliers/", include("suppliers.urls")),
     path("api/business/", include("business.urls")),
 ]

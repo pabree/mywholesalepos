@@ -1,7 +1,7 @@
 from django.contrib import admin
 from core.admin import BaseModelAdmin, BaseTabularInline
 from .forms import ProductUnitForm, ProductUnitInlineFormSet
-from .models import Category, Product, ProductUnit, Inventory, StockMovement
+from .models import Category, Product, ProductUnit, Inventory, StockMovement, ProductSupplier
 
 
 @admin.register(Category)
@@ -87,3 +87,11 @@ class StockMovementAdmin(BaseModelAdmin):
     search_fields = ("product__name", "product__sku", "reference")
     list_filter = ("movement_type", "branch", "created_at")
     raw_id_fields = ("inventory", "product", "branch", "sale")
+
+
+@admin.register(ProductSupplier)
+class ProductSupplierAdmin(BaseModelAdmin):
+    list_display = ("product", "supplier", "supplier_sku", "supplier_price", "is_primary", "is_active")
+    search_fields = ("product__name", "product__sku", "supplier__name", "supplier_sku")
+    list_filter = ("is_primary", "is_active")
+    raw_id_fields = ("product", "supplier")

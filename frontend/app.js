@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-09.1";
+const APP_BUILD = "2026-04-09.6";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -50,6 +50,23 @@ let backOfficeActiveSection = "products";
 let backOfficeQuery = "";
 let editingProductId = null;
 let backOfficeCategories = [];
+let backOfficeSuppliers = [];
+let backOfficeSupplierQuery = "";
+let editingSupplierId = null;
+let backOfficeSupplierOffset = 0;
+let backOfficeSupplierLimit = 20;
+let backOfficeSupplierPage = { count: 0, next: null, previous: null, results: [] };
+let supplierOptions = [];
+let productSupplierLinks = [];
+let backOfficePurchases = [];
+let backOfficePurchasesQuery = "";
+let backOfficePurchasesOffset = 0;
+let backOfficePurchasesLimit = 20;
+let backOfficePurchasesPage = { count: 0, next: null, previous: null, results: [] };
+let editingPurchaseId = null;
+let currentPurchaseDetail = null;
+let purchaseSupplierPrices = {};
+let purchaseReceiveTarget = null;
 let backOfficeCustomers = [];
 let backOfficeCustomerQuery = "";
 let editingCustomerId = null;
@@ -147,6 +164,8 @@ let offlineSyncing = false;
 let currentOfflineDraftId = null;
 let offlineDraftCount = 0;
 let currentOfflineDraftCorrelationId = null;
+let offlineSyncTimer = null;
+let offlineSyncBackground = false;
 
 const OFFLINE_DB_NAME = "pos_offline_v1";
 const OFFLINE_DB_VERSION = 1;
@@ -326,6 +345,8 @@ const els = {
     backofficeTabs: document.querySelectorAll(".backoffice-tab"),
     backofficeLedgerTab: document.getElementById("backoffice-ledger-tab"),
     backofficeProductSection: document.getElementById("backoffice-products"),
+    backofficeSupplierSection: document.getElementById("backoffice-suppliers"),
+    backofficePurchaseSection: document.getElementById("backoffice-purchases"),
     backofficeCustomerSection: document.getElementById("backoffice-customers"),
     backofficeStaffSection: document.getElementById("backoffice-staff"),
     backofficeInventorySection: document.getElementById("backoffice-inventory"),
@@ -400,6 +421,21 @@ const els = {
     backofficePaymentsNext: document.getElementById("backoffice-payments-next"),
     backofficePaymentsPage: document.getElementById("backoffice-payments-page"),
     backofficePaymentsExport: document.getElementById("backoffice-payments-export"),
+    backofficeSupplierSearch: document.getElementById("backoffice-supplier-search"),
+    backofficeSupplierTable: document.getElementById("backoffice-supplier-table"),
+    backofficeSupplierAdd: document.getElementById("backoffice-supplier-add"),
+    backofficeSupplierPrev: document.getElementById("backoffice-supplier-prev"),
+    backofficeSupplierNext: document.getElementById("backoffice-supplier-next"),
+    backofficeSupplierPage: document.getElementById("backoffice-supplier-page"),
+    backofficePurchasesSearch: document.getElementById("backoffice-purchases-search"),
+    backofficePurchasesStatus: document.getElementById("backoffice-purchases-status"),
+    backofficePurchasesSupplier: document.getElementById("backoffice-purchases-supplier"),
+    backofficePurchasesBranch: document.getElementById("backoffice-purchases-branch"),
+    backofficePurchasesTable: document.getElementById("backoffice-purchases-table"),
+    backofficePurchasesPrev: document.getElementById("backoffice-purchases-prev"),
+    backofficePurchasesNext: document.getElementById("backoffice-purchases-next"),
+    backofficePurchasesPage: document.getElementById("backoffice-purchases-page"),
+    backofficePurchaseAdd: document.getElementById("backoffice-purchase-add"),
     backofficeCustomerSearch: document.getElementById("backoffice-customer-search"),
     backofficeCustomerTable: document.getElementById("backoffice-customer-table"),
     backofficeCustomerAdd: document.getElementById("backoffice-customer-add"),
@@ -435,6 +471,9 @@ const els = {
     productUnitCode: document.getElementById("product-unit-code"),
     productUnitsList: document.getElementById("product-units-list"),
     productUnitAdd: document.getElementById("product-unit-add"),
+    productSupplierSelect: document.getElementById("product-supplier-select"),
+    productSupplierAdd: document.getElementById("product-supplier-add"),
+    productSuppliersList: document.getElementById("product-suppliers-list"),
     productCost: document.getElementById("product-cost"),
     productSelling: document.getElementById("product-selling"),
     productRetail: document.getElementById("product-retail"),
@@ -450,6 +489,48 @@ const els = {
     customerFormCancel: document.getElementById("customer-form-cancel"),
     customerFormSave: document.getElementById("customer-form-save"),
     customerFormError: document.getElementById("customer-form-error"),
+    supplierFormModal: document.getElementById("supplier-form-modal"),
+    supplierForm: document.getElementById("supplier-form"),
+    supplierFormTitle: document.getElementById("supplier-form-title"),
+    supplierFormClose: document.getElementById("supplier-form-close"),
+    supplierFormCancel: document.getElementById("supplier-form-cancel"),
+    supplierFormSave: document.getElementById("supplier-form-save"),
+    supplierFormError: document.getElementById("supplier-form-error"),
+    supplierName: document.getElementById("supplier-name"),
+    supplierContact: document.getElementById("supplier-contact"),
+    supplierPhone: document.getElementById("supplier-phone"),
+    supplierEmail: document.getElementById("supplier-email"),
+    supplierAddress: document.getElementById("supplier-address"),
+    supplierNotes: document.getElementById("supplier-notes"),
+    supplierActive: document.getElementById("supplier-active"),
+    supplierLinkedProducts: document.getElementById("supplier-linked-products"),
+    purchaseFormModal: document.getElementById("purchase-form-modal"),
+    purchaseForm: document.getElementById("purchase-form"),
+    purchaseFormTitle: document.getElementById("purchase-form-title"),
+    purchaseFormClose: document.getElementById("purchase-form-close"),
+    purchaseFormCancel: document.getElementById("purchase-form-cancel"),
+    purchaseFormSave: document.getElementById("purchase-form-save"),
+    purchaseFormError: document.getElementById("purchase-form-error"),
+    purchaseSupplier: document.getElementById("purchase-supplier"),
+    purchaseBranch: document.getElementById("purchase-branch"),
+    purchaseExpectedDate: document.getElementById("purchase-expected-date"),
+    purchaseNotes: document.getElementById("purchase-notes"),
+    purchaseStatusPill: document.getElementById("purchase-status-pill"),
+    purchaseLineProduct: document.getElementById("purchase-line-product"),
+    purchaseLineQty: document.getElementById("purchase-line-qty"),
+    purchaseLineCost: document.getElementById("purchase-line-cost"),
+    purchaseLineNotes: document.getElementById("purchase-line-notes"),
+    purchaseLineAdd: document.getElementById("purchase-line-add"),
+    purchaseLinesList: document.getElementById("purchase-lines-list"),
+    purchaseMarkOrdered: document.getElementById("purchase-mark-ordered"),
+    purchaseReceiveOpen: document.getElementById("purchase-receive-open"),
+    purchaseReceiveModal: document.getElementById("purchase-receive-modal"),
+    purchaseReceiveClose: document.getElementById("purchase-receive-close"),
+    purchaseReceiveCancel: document.getElementById("purchase-receive-cancel"),
+    purchaseReceiveSubmit: document.getElementById("purchase-receive-submit"),
+    purchaseReceiveList: document.getElementById("purchase-receive-list"),
+    purchaseReceiveError: document.getElementById("purchase-receive-error"),
+    purchaseReceiveMeta: document.getElementById("purchase-receive-meta"),
     customerName: document.getElementById("customer-name"),
     customerRoute: document.getElementById("customer-route"),
     customerWholesale: document.getElementById("customer-wholesale"),
@@ -770,6 +851,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderExpenseCategoryOptions();
     setupOverlayInteractions();
     initOfflineSupport();
+    bindPurchaseLineActions();
 
     els.productSearch.addEventListener("input", () => {
         searchResultIndex = -1;
@@ -951,6 +1033,69 @@ document.addEventListener("DOMContentLoaded", () => {
             backOfficeCustomerQuery = els.backofficeCustomerSearch.value || "";
             backOfficeCustomerOffset = 0;
             loadBackOfficeCustomers();
+        });
+    }
+    if (els.backofficeSupplierSearch) {
+        els.backofficeSupplierSearch.addEventListener("input", () => {
+            backOfficeSupplierQuery = els.backofficeSupplierSearch.value || "";
+            backOfficeSupplierOffset = 0;
+            loadBackOfficeSuppliers();
+        });
+    }
+    if (els.backofficeSupplierPrev) {
+        els.backofficeSupplierPrev.addEventListener("click", () => {
+            if (backOfficeSupplierOffset <= 0) return;
+            backOfficeSupplierOffset = Math.max(0, backOfficeSupplierOffset - backOfficeSupplierLimit);
+            loadBackOfficeSuppliers();
+        });
+    }
+    if (els.backofficeSupplierNext) {
+        els.backofficeSupplierNext.addEventListener("click", () => {
+            if (backOfficeSupplierOffset + backOfficeSupplierLimit >= (backOfficeSupplierPage?.count || 0)) return;
+            backOfficeSupplierOffset += backOfficeSupplierLimit;
+            loadBackOfficeSuppliers();
+        });
+    }
+    if (els.backofficePurchaseAdd) {
+        els.backofficePurchaseAdd.addEventListener("click", () => openPurchaseForm());
+    }
+    if (els.backofficePurchasesSearch) {
+        els.backofficePurchasesSearch.addEventListener("input", () => {
+            backOfficePurchasesQuery = els.backofficePurchasesSearch.value || "";
+            backOfficePurchasesOffset = 0;
+            loadBackOfficePurchases();
+        });
+    }
+    if (els.backofficePurchasesStatus) {
+        els.backofficePurchasesStatus.addEventListener("change", () => {
+            backOfficePurchasesOffset = 0;
+            loadBackOfficePurchases();
+        });
+    }
+    if (els.backofficePurchasesSupplier) {
+        els.backofficePurchasesSupplier.addEventListener("change", () => {
+            backOfficePurchasesOffset = 0;
+            loadBackOfficePurchases();
+        });
+    }
+    if (els.backofficePurchasesBranch) {
+        els.backofficePurchasesBranch.addEventListener("change", () => {
+            backOfficePurchasesOffset = 0;
+            loadBackOfficePurchases();
+        });
+    }
+    if (els.backofficePurchasesPrev) {
+        els.backofficePurchasesPrev.addEventListener("click", () => {
+            if (backOfficePurchasesOffset <= 0) return;
+            backOfficePurchasesOffset = Math.max(0, backOfficePurchasesOffset - backOfficePurchasesLimit);
+            loadBackOfficePurchases();
+        });
+    }
+    if (els.backofficePurchasesNext) {
+        els.backofficePurchasesNext.addEventListener("click", () => {
+            if (backOfficePurchasesOffset + backOfficePurchasesLimit >= (backOfficePurchasesPage?.count || 0)) return;
+            backOfficePurchasesOffset += backOfficePurchasesLimit;
+            loadBackOfficePurchases();
         });
     }
     if (els.backofficeCustomerBranch) {
@@ -1254,6 +1399,69 @@ document.addEventListener("DOMContentLoaded", () => {
             saveCustomerForm();
         });
     }
+    if (els.backofficeSupplierAdd) {
+        els.backofficeSupplierAdd.addEventListener("click", () => openSupplierForm());
+    }
+    if (els.supplierFormClose) {
+        els.supplierFormClose.addEventListener("click", closeSupplierForm);
+    }
+    if (els.supplierFormCancel) {
+        els.supplierFormCancel.addEventListener("click", closeSupplierForm);
+    }
+    if (els.supplierForm) {
+        els.supplierForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            saveSupplierForm();
+        });
+    }
+    if (els.purchaseFormClose) {
+        els.purchaseFormClose.addEventListener("click", closePurchaseForm);
+    }
+    if (els.purchaseFormCancel) {
+        els.purchaseFormCancel.addEventListener("click", closePurchaseForm);
+    }
+    if (els.purchaseForm) {
+        els.purchaseForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            savePurchaseForm();
+        });
+    }
+    if (els.purchaseSupplier) {
+        els.purchaseSupplier.addEventListener("change", () => {
+            loadPurchaseSupplierPricing(els.purchaseSupplier.value || "");
+        });
+    }
+    if (els.purchaseLineProduct) {
+        els.purchaseLineProduct.addEventListener("change", () => {
+            prefillPurchaseLineCost();
+        });
+    }
+    if (els.purchaseLineAdd) {
+        els.purchaseLineAdd.addEventListener("click", () => {
+            addPurchaseLine();
+        });
+    }
+    if (els.purchaseMarkOrdered) {
+        els.purchaseMarkOrdered.addEventListener("click", () => {
+            markPurchaseOrdered();
+        });
+    }
+    if (els.purchaseReceiveOpen) {
+        els.purchaseReceiveOpen.addEventListener("click", () => {
+            if (editingPurchaseId) openPurchaseReceiveModal(editingPurchaseId);
+        });
+    }
+    if (els.purchaseReceiveClose) {
+        els.purchaseReceiveClose.addEventListener("click", closePurchaseReceiveModal);
+    }
+    if (els.purchaseReceiveCancel) {
+        els.purchaseReceiveCancel.addEventListener("click", closePurchaseReceiveModal);
+    }
+    if (els.purchaseReceiveSubmit) {
+        els.purchaseReceiveSubmit.addEventListener("click", () => {
+            submitPurchaseReceive();
+        });
+    }
     if (els.backofficeProductSearch) {
         els.backofficeProductSearch.addEventListener("input", () => {
             backOfficeQuery = els.backofficeProductSearch.value || "";
@@ -1301,6 +1509,25 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!btn) return;
             const row = btn.closest(".unit-row");
             if (row) row.remove();
+        });
+    }
+    if (els.productSupplierAdd) {
+        els.productSupplierAdd.addEventListener("click", () => {
+            linkSupplierToProduct();
+        });
+    }
+    if (els.productSuppliersList) {
+        els.productSuppliersList.addEventListener("click", (event) => {
+            const row = event.target.closest(".supplier-link-row");
+            if (!row) return;
+            const linkId = row.dataset.linkId;
+            const action = event.target?.closest("[data-link-action]")?.dataset?.linkAction;
+            if (!action) return;
+            if (action === "save") {
+                saveProductSupplierLink(linkId, row);
+            } else if (action === "remove") {
+                removeProductSupplierLink(linkId);
+            }
         });
     }
     if (els.productImportTemplate) {
@@ -1745,10 +1972,8 @@ async function updateOfflineStatusUI() {
     if (offlineMode && pendingCount > 0) {
         message = `Offline: ${pendingCount} draft${pendingCount === 1 ? "" : "s"} saved locally.`;
     }
-    if (!offlineMode && pendingCount === 0 && offlineSyncing) {
-        message = "Syncing drafts...";
-    } else if (offlineSyncing) {
-        message = "Syncing drafts...";
+    if (offlineSyncing) {
+        message = offlineSyncBackground ? "Syncing in background..." : "Syncing drafts...";
     }
 
     if (els.offlineStatusText) els.offlineStatusText.textContent = message;
@@ -1774,6 +1999,80 @@ function renderOfflineDraftStatus(status) {
     return `<span class="status-badge status-draft status-draft-${normalized}">${label}</span>`;
 }
 
+function buildSyncErrorMeta(err) {
+    const raw = err?.message || err?.detail || err || "";
+    let parsed = null;
+    if (typeof raw === "string") {
+        try {
+            parsed = JSON.parse(raw);
+        } catch (e) {
+            parsed = null;
+        }
+    } else if (typeof raw === "object") {
+        parsed = raw;
+    }
+    const rawText = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const text = rawText.toLowerCase();
+
+    const meta = {
+        category: "unknown",
+        message: "Sync failed. Review the draft and retry.",
+        detail: rawText,
+        product_ids: [],
+        skus: [],
+    };
+
+    if (text.includes("unauthorized") || text.includes("forbidden") || text.includes("permission")) {
+        meta.category = "auth";
+        meta.message = "Session expired or permission denied. Log in and retry.";
+        return meta;
+    }
+    if (text.includes("stock") || text.includes("insufficient") || text.includes("out of stock")) {
+        meta.category = "stock";
+        meta.message = "Stock changed while offline. Please review quantities.";
+    } else if (text.includes("product") && (text.includes("not found") || text.includes("does not exist") || text.includes("missing"))) {
+        meta.category = "product";
+        meta.message = "Some products are missing or inactive. Review items.";
+    } else if (text.includes("price") || text.includes("pricing") || text.includes("wholesale")) {
+        meta.category = "price";
+        meta.message = "Prices or pricing rules changed. Review line items.";
+    }
+
+    if (parsed && typeof parsed === "object") {
+        const detail = parsed.detail || parsed.items || parsed.non_field_errors || parsed.error || null;
+        if (detail) {
+            meta.detail = typeof detail === "string" ? detail : JSON.stringify(detail);
+        }
+        if (parsed.items && Array.isArray(parsed.items)) {
+            meta.product_ids = parsed.items.map(i => i.product || i.product_id).filter(Boolean);
+            meta.skus = parsed.items.map(i => i.sku).filter(Boolean);
+        }
+    }
+
+    return meta;
+}
+
+function renderDraftError(meta, fallback) {
+    if (!meta && !fallback) return "";
+    const message = meta?.message || fallback || "Sync failed.";
+    const detail = meta?.detail && meta?.detail !== message ? meta.detail : "";
+    const labelMap = {
+        stock: "Stock",
+        product: "Product",
+        price: "Pricing",
+        auth: "Auth",
+        unknown: "Error",
+    };
+    const label = labelMap[meta?.category || "unknown"] || "Error";
+    return `
+        <div class="draft-error">
+            <span class="error-label">${label}</span>
+            <span class="error-text">${esc(message)}</span>
+            ${detail ? `<div class="error-detail">${esc(detail)}</div>` : ""}
+        </div>
+    `;
+}
+
 async function renderOfflineDraftsList() {
     if (!els.offlineDraftsList) return;
     if (els.offlineDraftsSync) {
@@ -1797,9 +2096,13 @@ async function renderOfflineDraftsList() {
         const total = fmtPrice(draft.snapshot?.total || 0);
         const created = formatDateTime(draft.created_at);
         const status = renderOfflineDraftStatus(draft.status);
-        const error = draft.error ? `<div class="draft-error">${esc(draft.error)}</div>` : "";
+        const errorMeta = draft.error_meta || null;
+        const error = draft.error ? renderDraftError(errorMeta, draft.error) : "";
         const canRetry = ["failed", "queued", "draft_offline"].includes(draft.status);
         const canReopen = draft.status !== "synced";
+        const retryLabel = draft.status === "syncing" ? "Retrying…" : "Retry";
+        const resolveLabel = draft.status === "failed" ? "Resolve" : "Reopen";
+        const retryDisabled = !canRetry || draft.status === "syncing";
         return `
             <div class="draft-item">
                 <div class="draft-meta">
@@ -1811,8 +2114,8 @@ async function renderOfflineDraftsList() {
                     ${error}
                 </div>
                 <div class="draft-actions">
-                    <button class="btn-secondary btn-xs" data-offline-draft-open="${draft.local_id}" ${canReopen ? "" : "disabled"}>Reopen</button>
-                    <button class="btn-ghost btn-xs" data-offline-draft-sync="${draft.local_id}" ${canRetry ? "" : "disabled"}>Retry</button>
+                    <button class="btn-secondary btn-xs" data-offline-draft-open="${draft.local_id}" ${canReopen ? "" : "disabled"}>${resolveLabel}</button>
+                    <button class="btn-ghost btn-xs" data-offline-draft-sync="${draft.local_id}" ${retryDisabled ? "disabled" : ""}>${retryLabel}</button>
                     <button class="btn-ghost btn-xs" data-offline-draft-delete="${draft.local_id}">Delete</button>
                 </div>
             </div>
@@ -1833,6 +2136,10 @@ function closeOfflineDraftsModal() {
 
 async function syncSingleDraft(localId) {
     if (!localId) return;
+    if (offlineSyncing) {
+        toast("Sync already in progress", "info");
+        return;
+    }
     if (!navigator.onLine) {
         toast("You are offline. Connect to sync.", "warning");
         setOfflineMode(true);
@@ -1867,6 +2174,10 @@ async function syncSingleDraft(localId) {
     }
     const syncing = { ...draft, status: "syncing", updated_at: new Date().toISOString() };
     await idbPut(OFFLINE_DRAFT_STORE, syncing);
+    offlineSyncing = true;
+    offlineSyncBackground = false;
+    await renderOfflineDraftsList();
+    await updateOfflineStatusUI();
     try {
         const payload = {
             ...draft.payload,
@@ -1884,19 +2195,24 @@ async function syncSingleDraft(localId) {
             updated_at: new Date().toISOString(),
             server_sale_id: sale?.id || draft.server_sale_id || null,
             error: "",
+            error_meta: null,
         };
         await idbPut(OFFLINE_DRAFT_STORE, synced);
         toast("Draft synced", "success");
     } catch (err) {
+        const meta = buildSyncErrorMeta(err);
         const failed = {
             ...draft,
             status: "failed",
             updated_at: new Date().toISOString(),
-            error: err?.message || "Sync failed",
+            error: meta.message || err?.message || "Sync failed",
+            error_meta: meta,
         };
         await idbPut(OFFLINE_DRAFT_STORE, failed);
-        toast("Draft sync failed", "error");
+        toast(meta.message || "Draft sync failed", "error");
     }
+    offlineSyncing = false;
+    offlineSyncBackground = false;
     await renderOfflineDraftsList();
     await updateOfflineStatusUI();
 }
@@ -1964,12 +2280,16 @@ async function reopenOfflineDraft(localId) {
             return;
         }
         const unit = (product.units || []).find(u => u.id === item.unit_id) || getBaseUnit(product);
+        const hasIssue = (draft.error_meta?.product_ids || []).includes(item.product_id)
+            || (draft.error_meta?.skus || []).includes(item.sku);
         cart.push({
             product,
             unit,
             qty: item.quantity,
             unit_price_snapshot: item.unit_price,
             total_price_snapshot: item.line_total,
+            offline_issue: hasIssue,
+            offline_issue_reason: draft.error_meta?.message || "",
         });
     });
     if (missingCount) {
@@ -2143,6 +2463,7 @@ async function syncOfflineDrafts({ manual = false } = {}) {
         return;
     }
     offlineSyncing = true;
+    offlineSyncBackground = !manual;
     await updateOfflineStatusUI();
     let drafts = [];
     try {
@@ -2150,6 +2471,7 @@ async function syncOfflineDrafts({ manual = false } = {}) {
     } catch (err) {
         console.warn("Unable to load offline drafts:", err);
     }
+    let failedCount = 0;
     for (const draft of drafts) {
         if (draft.status === "synced") continue;
         if (!draft.correlation_id || !isValidUuid(draft.correlation_id)) {
@@ -2177,25 +2499,32 @@ async function syncOfflineDrafts({ manual = false } = {}) {
                 updated_at: new Date().toISOString(),
                 server_sale_id: sale?.id || draft.server_sale_id || null,
                 error: "",
+                error_meta: null,
             };
             await idbPut(OFFLINE_DRAFT_STORE, synced);
         } catch (err) {
+            const meta = buildSyncErrorMeta(err);
             const failed = {
                 ...draft,
                 status: "failed",
                 updated_at: new Date().toISOString(),
-                error: err?.message || "Sync failed",
+                error: meta.message || err?.message || "Sync failed",
+                error_meta: meta,
             };
             await idbPut(OFFLINE_DRAFT_STORE, failed);
+            failedCount += 1;
         }
     }
     offlineSyncing = false;
+    offlineSyncBackground = false;
     await updateOfflineStatusUI();
     if (els.offlineDraftsModal && !els.offlineDraftsModal.classList.contains("hidden")) {
         await renderOfflineDraftsList();
     }
     if (manual) {
         toast("Draft sync complete", "success");
+    } else if (failedCount > 0) {
+        toast("Some drafts failed to sync. Review in Drafts.", "warning");
     }
 }
 
@@ -2207,9 +2536,11 @@ function initOfflineSupport() {
     window.addEventListener("online", () => {
         setOfflineMode(false);
         syncOfflineDrafts();
+        startBackgroundDraftSync();
     });
     window.addEventListener("offline", () => {
         setOfflineMode(true);
+        stopBackgroundDraftSync();
     });
     if (els.offlineSyncBtn) {
         els.offlineSyncBtn.addEventListener("click", () => {
@@ -2217,6 +2548,41 @@ function initOfflineSupport() {
         });
     }
     updateOfflineStatusUI();
+    if (navigator.onLine) {
+        startBackgroundDraftSync();
+    }
+}
+
+async function hasPendingOfflineDrafts() {
+    if (!canUseOfflineStore()) return false;
+    try {
+        const drafts = await idbGetAll(OFFLINE_DRAFT_STORE);
+        return drafts.some(d => d.status !== "synced");
+    } catch (err) {
+        return false;
+    }
+}
+
+function startBackgroundDraftSync() {
+    if (offlineSyncTimer) return;
+    if (!navigator.onLine) return;
+    if (!API_TOKEN) return;
+    offlineSyncTimer = setInterval(async () => {
+        if (!navigator.onLine) return;
+        if (offlineSyncing) return;
+        const hasPending = await hasPendingOfflineDrafts();
+        if (!hasPending) {
+            stopBackgroundDraftSync();
+            return;
+        }
+        syncOfflineDrafts({ manual: false });
+    }, 20000);
+}
+
+function stopBackgroundDraftSync() {
+    if (!offlineSyncTimer) return;
+    clearInterval(offlineSyncTimer);
+    offlineSyncTimer = null;
 }
 
 function normalizePaginated(data) {
@@ -2599,6 +2965,12 @@ function setBackOfficeSection(section) {
     if (els.backofficeProductSection) {
         els.backofficeProductSection.classList.toggle("hidden", backOfficeActiveSection !== "products");
     }
+    if (els.backofficeSupplierSection) {
+        els.backofficeSupplierSection.classList.toggle("hidden", backOfficeActiveSection !== "suppliers");
+    }
+    if (els.backofficePurchaseSection) {
+        els.backofficePurchaseSection.classList.toggle("hidden", backOfficeActiveSection !== "purchases");
+    }
     if (els.backofficeCustomerSection) {
         els.backofficeCustomerSection.classList.toggle("hidden", backOfficeActiveSection !== "customers");
     }
@@ -2622,6 +2994,12 @@ function setBackOfficeSection(section) {
     }
     if (backOfficeActiveSection === "customers") {
         loadBackOfficeCustomers();
+    }
+    if (backOfficeActiveSection === "suppliers") {
+        loadBackOfficeSuppliers();
+    }
+    if (backOfficeActiveSection === "purchases") {
+        loadBackOfficePurchases();
     }
     if (backOfficeActiveSection === "staff") {
         loadBackOfficeStaff();
@@ -2724,6 +3102,724 @@ async function loadBackOfficeCustomers() {
             }
         }
     }
+}
+
+async function loadBackOfficeSuppliers() {
+    if (!canAccessBackOffice()) return;
+    try {
+        const endpoint = withParams("/suppliers/", {
+            limit: backOfficeSupplierLimit,
+            offset: backOfficeSupplierOffset,
+            search: backOfficeSupplierQuery,
+            include_inactive: "1",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficeSupplierPage = page;
+        backOfficeSuppliers = ensureArray(page, "backOfficeSuppliers");
+        renderBackOfficeSuppliers();
+        updatePager({
+            prevEl: els.backofficeSupplierPrev,
+            nextEl: els.backofficeSupplierNext,
+            pageEl: els.backofficeSupplierPage,
+            offset: backOfficeSupplierOffset,
+            limit: backOfficeSupplierLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        if (els.backofficeSupplierTable) {
+            const tbody = els.backofficeSupplierTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="6">Failed to load suppliers</td></tr>`;
+            }
+        }
+    }
+}
+
+async function loadSupplierOptionsForProductForm() {
+    if (!canAccessBackOffice()) return;
+    try {
+        const endpoint = withParams("/suppliers/", {
+            limit: 200,
+            offset: 0,
+            search: "",
+            include_inactive: "1",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        supplierOptions = ensureArray(page, "supplierOptions");
+        renderSupplierOptions();
+    } catch (err) {
+        supplierOptions = [];
+        renderSupplierOptions();
+    }
+}
+
+function renderSupplierOptions() {
+    if (!supplierOptions.length) {
+        if (els.productSupplierSelect) {
+            els.productSupplierSelect.innerHTML = `<option value="">No suppliers found</option>`;
+        }
+    }
+    const currentPurchaseSupplier = els.backofficePurchasesSupplier?.value || "";
+    const currentPurchaseFormSupplier = els.purchaseSupplier?.value || "";
+    const options = [
+        `<option value="">Select supplier</option>`,
+        ...supplierOptions.map(s => {
+            const inactive = s.is_active === false ? " (Inactive)" : "";
+            return `<option value="${s.id}">${esc(s.name)}${inactive}</option>`;
+        }),
+    ];
+    if (els.productSupplierSelect) {
+        els.productSupplierSelect.innerHTML = supplierOptions.length
+            ? options.join("")
+            : `<option value="">No suppliers found</option>`;
+    }
+    if (els.purchaseSupplier) {
+        els.purchaseSupplier.innerHTML = supplierOptions.length
+            ? options.join("")
+            : `<option value="">No suppliers found</option>`;
+        if (currentPurchaseFormSupplier) {
+            els.purchaseSupplier.value = currentPurchaseFormSupplier;
+        }
+    }
+    if (els.backofficePurchasesSupplier) {
+        const filterOptions = [
+            `<option value="">All suppliers</option>`,
+            ...supplierOptions.map(s => `<option value="${s.id}">${esc(s.name)}</option>`),
+        ];
+        els.backofficePurchasesSupplier.innerHTML = supplierOptions.length
+            ? filterOptions.join("")
+            : `<option value="">All suppliers</option>`;
+        if (currentPurchaseSupplier) {
+            els.backofficePurchasesSupplier.value = currentPurchaseSupplier;
+        }
+    }
+}
+
+async function loadProductSupplierLinks(productId) {
+    if (!productId) {
+        productSupplierLinks = [];
+        renderProductSupplierLinks();
+        return;
+    }
+    const data = await apiFetch(`/inventory/products/${productId}/suppliers/`);
+    productSupplierLinks = ensureArray(data, "productSupplierLinks");
+    renderProductSupplierLinks();
+}
+
+function renderProductSupplierLinks() {
+    if (!els.productSuppliersList) return;
+    if (!editingProductId) {
+        els.productSuppliersList.innerHTML = `<div class="muted">Save the product before linking suppliers.</div>`;
+        if (els.productSupplierAdd) els.productSupplierAdd.disabled = true;
+        return;
+    }
+    if (els.productSupplierAdd) els.productSupplierAdd.disabled = false;
+    if (!productSupplierLinks.length) {
+        els.productSuppliersList.innerHTML = `<div class="muted">No suppliers linked.</div>`;
+        return;
+    }
+    els.productSuppliersList.innerHTML = productSupplierLinks.map(link => {
+        const supplierName = link.supplier?.name || "Supplier";
+        return `
+            <div class="supplier-link-row" data-link-id="${link.id}">
+                <div>
+                    <strong>${esc(supplierName)}</strong>
+                    <div class="muted">${link.supplier?.email || "—"}</div>
+                </div>
+                <div class="supplier-link-fields">
+                    <input class="summary-input link-sku" placeholder="Supplier SKU" value="${esc(link.supplier_sku || "")}">
+                    <input class="summary-input link-price" type="number" step="0.01" placeholder="Supplier price" value="${link.supplier_price ?? ""}">
+                    <label class="checkbox-row">
+                        <input type="checkbox" class="link-primary" ${link.is_primary ? "checked" : ""}>
+                        Primary
+                    </label>
+                    <input class="summary-input link-notes" placeholder="Notes" value="${esc(link.notes || "")}">
+                </div>
+                <div class="supplier-link-actions">
+                    <button class="btn-secondary btn-xs" data-link-action="save">Save</button>
+                    <button class="btn-ghost btn-xs" data-link-action="remove">Unlink</button>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+async function linkSupplierToProduct() {
+    if (!editingProductId) {
+        toast("Save the product before linking suppliers.", "info");
+        return;
+    }
+    const supplierId = els.productSupplierSelect?.value || "";
+    if (!supplierId) {
+        toast("Select a supplier first.", "error");
+        return;
+    }
+    try {
+        const isPrimary = productSupplierLinks.length === 0;
+        await apiRequest(`/inventory/products/${editingProductId}/suppliers/link/`, {
+            method: "POST",
+            body: { supplier_id: supplierId, is_primary: isPrimary },
+        });
+        toast("Supplier linked", "success");
+        await loadProductSupplierLinks(editingProductId);
+    } catch (err) {
+        toast(`Link failed: ${err.message}`, "error");
+    }
+}
+
+async function saveProductSupplierLink(linkId, rowEl) {
+    if (!editingProductId || !linkId || !rowEl) return;
+    const payload = {
+        supplier_sku: rowEl.querySelector(".link-sku")?.value || "",
+        supplier_price: rowEl.querySelector(".link-price")?.value || "",
+        is_primary: rowEl.querySelector(".link-primary")?.checked || false,
+        notes: rowEl.querySelector(".link-notes")?.value || "",
+    };
+    try {
+        await apiRequest(`/inventory/products/${editingProductId}/suppliers/${linkId}/`, {
+            method: "PUT",
+            body: payload,
+        });
+        toast("Supplier link updated", "success");
+        await loadProductSupplierLinks(editingProductId);
+    } catch (err) {
+        toast(`Update failed: ${err.message}`, "error");
+    }
+}
+
+// ——— Back Office Purchases ———
+async function loadBackOfficePurchases() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await Promise.all([
+            loadBackOfficeBranches(),
+            loadSupplierOptionsForProductForm(),
+        ]);
+        const endpoint = withParams("/purchases/", {
+            limit: backOfficePurchasesLimit,
+            offset: backOfficePurchasesOffset,
+            search: backOfficePurchasesQuery,
+            status: els.backofficePurchasesStatus?.value || "",
+            supplier: els.backofficePurchasesSupplier?.value || "",
+            branch: els.backofficePurchasesBranch?.value || "",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficePurchasesPage = page;
+        backOfficePurchases = ensureArray(page, "backOfficePurchases");
+        renderBackOfficePurchases();
+        updatePager({
+            prevEl: els.backofficePurchasesPrev,
+            nextEl: els.backofficePurchasesNext,
+            pageEl: els.backofficePurchasesPage,
+            offset: backOfficePurchasesOffset,
+            limit: backOfficePurchasesLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        if (els.backofficePurchasesTable) {
+            const tbody = els.backofficePurchasesTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="9">Failed to load purchase orders</td></tr>`;
+            }
+        }
+    }
+}
+
+function renderBackOfficePurchases() {
+    if (!els.backofficePurchasesTable) return;
+    const tbody = els.backofficePurchasesTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficePurchases;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="9">No purchase orders found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(po => {
+        const statusBadge = renderStatusBadge(po.status);
+        const ordered = po.ordered_quantity ?? 0;
+        const received = po.received_quantity ?? 0;
+        const expected = po.expected_date ? formatShortDate(po.expected_date) : "—";
+        const updated = po.updated_at ? formatDateTime(po.updated_at) : "—";
+        const canReceive = ["ordered", "partial"].includes((po.status || "").toLowerCase());
+        const actionLabel = po.status === "draft" ? "Edit" : "View";
+        return `
+            <tr>
+                <td>${esc(po.po_number || "—")}</td>
+                <td>${esc(po.supplier?.name || "—")}</td>
+                <td>${esc(po.branch?.name || "—")}</td>
+                <td>${statusBadge}</td>
+                <td>${ordered}</td>
+                <td>${received}</td>
+                <td>${expected}</td>
+                <td>${updated}</td>
+                <td>
+                    <button class="btn-ghost btn-xs" onclick="openPurchaseForm('${po.id}')">${actionLabel}</button>
+                    ${canReceive ? `<button class="btn-secondary btn-xs" onclick="openPurchaseReceiveModal('${po.id}')">Receive</button>` : ""}
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function ensurePurchaseProductsLoaded() {
+    if (!backOfficeProducts.length) {
+        await loadBackOfficeProducts();
+    }
+}
+
+function renderPurchaseProductOptions(selected = "") {
+    if (!els.purchaseLineProduct) return;
+    const options = [
+        `<option value="">Select product</option>`,
+        ...backOfficeProducts.map(product => `<option value="${product.id}">${esc(product.name)} (${esc(product.sku)})</option>`),
+    ];
+    els.purchaseLineProduct.innerHTML = options.join("");
+    if (selected) {
+        els.purchaseLineProduct.value = selected;
+    }
+}
+
+async function openPurchaseForm(purchaseId = null) {
+    if (!els.purchaseFormModal) return;
+    editingPurchaseId = purchaseId;
+    currentPurchaseDetail = null;
+    if (els.purchaseFormError) els.purchaseFormError.textContent = "";
+    if (els.purchaseForm) els.purchaseForm.reset();
+
+    await Promise.all([
+        loadSupplierOptionsForProductForm(),
+        loadBackOfficeBranches(),
+        ensurePurchaseProductsLoaded(),
+    ]);
+
+    renderPurchaseProductOptions();
+    resetPurchaseLineInputs();
+
+    if (!purchaseId) {
+        setPurchaseFormStatus("draft");
+        if (els.purchaseFormTitle) els.purchaseFormTitle.textContent = "New Purchase Order";
+        renderPurchaseLines([]);
+        updatePurchaseFormActions();
+        openOverlay(els.purchaseFormModal);
+        return;
+    }
+
+    try {
+        const detail = await apiFetch(`/purchases/${purchaseId}/`);
+        if (!detail) {
+            toast("Failed to load purchase order", "error");
+            return;
+        }
+        currentPurchaseDetail = detail;
+        if (els.purchaseFormTitle) els.purchaseFormTitle.textContent = `PO ${detail.po_number || ""}`.trim();
+        if (els.purchaseSupplier) els.purchaseSupplier.value = detail.supplier?.id || "";
+        if (els.purchaseBranch) els.purchaseBranch.value = detail.branch?.id || "";
+        if (els.purchaseExpectedDate) els.purchaseExpectedDate.value = detail.expected_date || "";
+        if (els.purchaseNotes) els.purchaseNotes.value = detail.notes || "";
+        setPurchaseFormStatus(detail.status || "draft");
+        await loadPurchaseSupplierPricing(detail.supplier?.id || "");
+        renderPurchaseLines(detail.lines || []);
+        updatePurchaseFormActions();
+        openOverlay(els.purchaseFormModal);
+    } catch (err) {
+        toast(`Failed to load PO: ${err.message}`, "error");
+    }
+}
+
+function closePurchaseForm() {
+    if (!els.purchaseFormModal) return;
+    closeOverlay(els.purchaseFormModal);
+    editingPurchaseId = null;
+    currentPurchaseDetail = null;
+    purchaseSupplierPrices = {};
+}
+
+function setPurchaseFormStatus(status) {
+    const normalized = (status || "draft").toString().toLowerCase();
+    if (!els.purchaseStatusPill) return;
+    els.purchaseStatusPill.className = `status-badge status-${normalized}`;
+    els.purchaseStatusPill.textContent = formatLabel(normalized);
+}
+
+function updatePurchaseFormActions() {
+    const status = (currentPurchaseDetail?.status || "draft").toLowerCase();
+    const isDraft = status === "draft";
+    const canReceive = ["ordered", "partial"].includes(status);
+    const hasPo = !!editingPurchaseId;
+
+    if (els.purchaseLineAdd) els.purchaseLineAdd.disabled = !isDraft || !hasPo;
+    if (els.purchaseMarkOrdered) {
+        els.purchaseMarkOrdered.disabled = !isDraft || !hasPo || !(currentPurchaseDetail?.lines || []).length;
+        els.purchaseMarkOrdered.classList.toggle("hidden", !isDraft || !hasPo);
+    }
+    if (els.purchaseReceiveOpen) {
+        els.purchaseReceiveOpen.disabled = !canReceive || !hasPo;
+        els.purchaseReceiveOpen.classList.toggle("hidden", !canReceive || !hasPo);
+    }
+}
+
+function resetPurchaseLineInputs() {
+    if (els.purchaseLineProduct) els.purchaseLineProduct.value = "";
+    if (els.purchaseLineQty) els.purchaseLineQty.value = "";
+    if (els.purchaseLineCost) els.purchaseLineCost.value = "";
+    if (els.purchaseLineNotes) els.purchaseLineNotes.value = "";
+}
+
+async function savePurchaseForm() {
+    if (!canAccessBackOffice()) return;
+    if (els.purchaseFormSave) {
+        els.purchaseFormSave.disabled = true;
+        els.purchaseFormSave.textContent = "Saving...";
+    }
+    if (els.purchaseFormError) els.purchaseFormError.textContent = "";
+    const payload = {
+        supplier_id: els.purchaseSupplier?.value || "",
+        branch_id: els.purchaseBranch?.value || "",
+        expected_date: els.purchaseExpectedDate?.value || "",
+        notes: els.purchaseNotes?.value || "",
+    };
+    try {
+        if (editingPurchaseId) {
+            await apiRequest(`/purchases/${editingPurchaseId}/update/`, { method: "PUT", body: payload });
+            toast("Purchase order updated", "success");
+        } else {
+            const result = await apiRequest(`/purchases/create/`, { method: "POST", body: payload });
+            editingPurchaseId = result.id;
+            toast("Purchase order created", "success");
+        }
+        if (editingPurchaseId) {
+            currentPurchaseDetail = await apiFetch(`/purchases/${editingPurchaseId}/`);
+            if (els.purchaseFormTitle && currentPurchaseDetail?.po_number) {
+                els.purchaseFormTitle.textContent = `PO ${currentPurchaseDetail.po_number}`;
+            }
+            setPurchaseFormStatus(currentPurchaseDetail?.status || "draft");
+            renderPurchaseLines(currentPurchaseDetail?.lines || []);
+            updatePurchaseFormActions();
+        }
+        await loadBackOfficePurchases();
+    } catch (err) {
+        if (els.purchaseFormError) {
+            els.purchaseFormError.textContent = err.message || "Save failed.";
+        }
+        toast(`Save failed: ${err.message}`, "error");
+    } finally {
+        if (els.purchaseFormSave) {
+            els.purchaseFormSave.disabled = false;
+            els.purchaseFormSave.textContent = "Save Purchase Order";
+        }
+    }
+}
+
+async function loadPurchaseSupplierPricing(supplierId) {
+    purchaseSupplierPrices = {};
+    if (!supplierId) return;
+    try {
+        const data = await apiFetch(`/suppliers/${supplierId}/products/`);
+        (data || []).forEach(link => {
+            if (!link.product?.id) return;
+            purchaseSupplierPrices[link.product.id] = link.supplier_price;
+        });
+        prefillPurchaseLineCost();
+    } catch (err) {
+        purchaseSupplierPrices = {};
+    }
+}
+
+function prefillPurchaseLineCost() {
+    if (!els.purchaseLineProduct || !els.purchaseLineCost) return;
+    const productId = els.purchaseLineProduct.value || "";
+    if (!productId) return;
+    const current = (els.purchaseLineCost.value || "").trim();
+    if (current) return;
+    const price = purchaseSupplierPrices[productId];
+    if (price !== undefined && price !== null && price !== "") {
+        els.purchaseLineCost.value = price;
+    }
+}
+
+function renderPurchaseLines(lines) {
+    if (!els.purchaseLinesList) return;
+    const status = (currentPurchaseDetail?.status || "draft").toLowerCase();
+    const isDraft = status === "draft";
+    if (!editingPurchaseId) {
+        els.purchaseLinesList.innerHTML = `<tr><td colspan="7" class="muted">Save the purchase order before adding lines.</td></tr>`;
+        return;
+    }
+    if (!lines || !lines.length) {
+        els.purchaseLinesList.innerHTML = `<tr><td colspan="7" class="muted">No lines added yet.</td></tr>`;
+        return;
+    }
+    els.purchaseLinesList.innerHTML = lines.map(line => {
+        const remaining = line.remaining_quantity ?? Math.max(0, (line.ordered_quantity || 0) - (line.received_quantity || 0));
+        return `
+            <tr data-line-id="${line.id}">
+                <td>
+                    <strong>${esc(line.product?.name || "Item")}</strong>
+                    <div class="muted">${esc(line.product?.sku || "")}</div>
+                </td>
+                <td><input class="summary-input line-ordered" type="number" min="1" ${isDraft ? "" : "disabled"} value="${line.ordered_quantity || 0}"></td>
+                <td>${line.received_quantity ?? 0}</td>
+                <td><input class="summary-input line-cost" type="number" step="0.01" ${isDraft ? "" : "disabled"} value="${line.unit_cost ?? ""}"></td>
+                <td>${remaining}</td>
+                <td><input class="summary-input line-notes" ${isDraft ? "" : "disabled"} value="${esc(line.notes || "")}"></td>
+                <td>
+                    <button class="btn-secondary btn-xs" data-line-action="save" ${isDraft ? "" : "disabled"}>Save</button>
+                    <button class="btn-ghost btn-xs" data-line-action="remove" ${isDraft ? "" : "disabled"}>Remove</button>
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function addPurchaseLine() {
+    if (!editingPurchaseId) {
+        toast("Save the purchase order before adding lines.", "info");
+        return;
+    }
+    if (!currentPurchaseDetail || (currentPurchaseDetail.status || "draft") !== "draft") {
+        toast("Lines can only be added while draft.", "error");
+        return;
+    }
+    const productId = els.purchaseLineProduct?.value || "";
+    const qtyRaw = (els.purchaseLineQty?.value || "").trim();
+    const costRaw = (els.purchaseLineCost?.value || "").trim();
+    const notes = (els.purchaseLineNotes?.value || "").trim();
+    if (!productId) {
+        toast("Select a product first.", "error");
+        return;
+    }
+    const qty = parseInt(qtyRaw, 10);
+    if (!Number.isInteger(qty) || qty <= 0) {
+        toast("Quantity must be a positive integer.", "error");
+        return;
+    }
+    try {
+        await apiRequest(`/purchases/${editingPurchaseId}/lines/add/`, {
+            method: "POST",
+            body: {
+                product_id: productId,
+                ordered_quantity: qty,
+                unit_cost: costRaw || null,
+                notes,
+            },
+        });
+        resetPurchaseLineInputs();
+        const detail = await apiFetch(`/purchases/${editingPurchaseId}/`);
+        currentPurchaseDetail = detail;
+        renderPurchaseLines(detail.lines || []);
+        updatePurchaseFormActions();
+        await loadBackOfficePurchases();
+        toast("Line added", "success");
+    } catch (err) {
+        toast(`Failed to add line: ${err.message}`, "error");
+    }
+}
+
+async function savePurchaseLine(lineId, rowEl) {
+    if (!editingPurchaseId || !lineId || !rowEl) return;
+    const orderedRaw = (rowEl.querySelector(".line-ordered")?.value || "").trim();
+    const unitCostRaw = (rowEl.querySelector(".line-cost")?.value || "").trim();
+    const notes = (rowEl.querySelector(".line-notes")?.value || "").trim();
+    const ordered = parseInt(orderedRaw, 10);
+    if (!Number.isInteger(ordered) || ordered <= 0) {
+        toast("Ordered quantity must be a positive integer.", "error");
+        return;
+    }
+    try {
+        await apiRequest(`/purchases/${editingPurchaseId}/lines/${lineId}/`, {
+            method: "PUT",
+            body: {
+                ordered_quantity: ordered,
+                unit_cost: unitCostRaw || null,
+                notes,
+            },
+        });
+        const detail = await apiFetch(`/purchases/${editingPurchaseId}/`);
+        currentPurchaseDetail = detail;
+        renderPurchaseLines(detail.lines || []);
+        updatePurchaseFormActions();
+        await loadBackOfficePurchases();
+        toast("Line updated", "success");
+    } catch (err) {
+        toast(`Update failed: ${err.message}`, "error");
+    }
+}
+
+async function removePurchaseLine(lineId) {
+    if (!editingPurchaseId || !lineId) return;
+    if (!confirm("Remove this line?")) return;
+    try {
+        await apiRequest(`/purchases/${editingPurchaseId}/lines/${lineId}/delete/`, { method: "DELETE" });
+        const detail = await apiFetch(`/purchases/${editingPurchaseId}/`);
+        currentPurchaseDetail = detail;
+        renderPurchaseLines(detail.lines || []);
+        updatePurchaseFormActions();
+        await loadBackOfficePurchases();
+        toast("Line removed", "success");
+    } catch (err) {
+        toast(`Remove failed: ${err.message}`, "error");
+    }
+}
+
+async function markPurchaseOrdered() {
+    if (!editingPurchaseId) return;
+    try {
+        await apiRequest(`/purchases/${editingPurchaseId}/mark-ordered/`, { method: "POST" });
+        const detail = await apiFetch(`/purchases/${editingPurchaseId}/`);
+        currentPurchaseDetail = detail;
+        setPurchaseFormStatus(detail.status || "ordered");
+        renderPurchaseLines(detail.lines || []);
+        updatePurchaseFormActions();
+        await loadBackOfficePurchases();
+        toast("Purchase order marked ordered", "success");
+    } catch (err) {
+        toast(`Mark ordered failed: ${err.message}`, "error");
+    }
+}
+
+function bindPurchaseLineActions() {
+    if (!els.purchaseLinesList) return;
+    els.purchaseLinesList.addEventListener("click", (event) => {
+        const action = event.target?.dataset?.lineAction;
+        if (!action) return;
+        const row = event.target.closest("tr");
+        const lineId = row?.dataset?.lineId;
+        if (!lineId) return;
+        if (action === "save") {
+            savePurchaseLine(lineId, row);
+        }
+        if (action === "remove") {
+            removePurchaseLine(lineId);
+        }
+    });
+}
+
+async function openPurchaseReceiveModal(purchaseId) {
+    if (!els.purchaseReceiveModal) return;
+    try {
+        const detail = await apiFetch(`/purchases/${purchaseId}/`);
+        if (!detail) {
+            toast("Failed to load purchase order", "error");
+            return;
+        }
+        purchaseReceiveTarget = detail;
+        renderPurchaseReceiveLines(detail);
+        if (els.purchaseReceiveError) els.purchaseReceiveError.textContent = "";
+        openOverlay(els.purchaseReceiveModal, { closeOthers: false });
+    } catch (err) {
+        toast(`Failed to load PO: ${err.message}`, "error");
+    }
+}
+
+function closePurchaseReceiveModal() {
+    if (!els.purchaseReceiveModal) return;
+    closeOverlay(els.purchaseReceiveModal);
+    purchaseReceiveTarget = null;
+}
+
+function renderPurchaseReceiveLines(detail) {
+    if (!els.purchaseReceiveList) return;
+    const poNumber = detail.po_number || "PO";
+    if (els.purchaseReceiveMeta) {
+        els.purchaseReceiveMeta.textContent = `${poNumber} • ${detail.supplier?.name || "Supplier"} • ${detail.branch?.name || "Branch"}`;
+    }
+    const lines = detail.lines || [];
+    if (!lines.length) {
+        els.purchaseReceiveList.innerHTML = `<tr><td colspan="5" class="muted">No lines to receive.</td></tr>`;
+        return;
+    }
+    els.purchaseReceiveList.innerHTML = lines.map(line => {
+        const remaining = line.remaining_quantity ?? Math.max(0, (line.ordered_quantity || 0) - (line.received_quantity || 0));
+        return `
+            <tr data-line-id="${line.id}">
+                <td>
+                    <strong>${esc(line.product?.name || "Item")}</strong>
+                    <div class="muted">${esc(line.product?.sku || "")}</div>
+                </td>
+                <td>${line.ordered_quantity ?? 0}</td>
+                <td>${line.received_quantity ?? 0}</td>
+                <td>${remaining}</td>
+                <td><input class="summary-input receive-qty" type="number" min="0" max="${remaining}" placeholder="0"></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function submitPurchaseReceive() {
+    if (!purchaseReceiveTarget?.id) return;
+    const rows = els.purchaseReceiveList?.querySelectorAll("tr") || [];
+    const lines = [];
+    rows.forEach(row => {
+        const lineId = row.dataset.lineId;
+        const qtyRaw = (row.querySelector(".receive-qty")?.value || "").trim();
+        if (!lineId || !qtyRaw) return;
+        const qty = parseInt(qtyRaw, 10);
+        if (Number.isInteger(qty) && qty > 0) {
+            lines.push({ line_id: lineId, received_quantity: qty });
+        }
+    });
+    if (!lines.length) {
+        if (els.purchaseReceiveError) els.purchaseReceiveError.textContent = "Enter at least one received quantity.";
+        return;
+    }
+    if (els.purchaseReceiveError) els.purchaseReceiveError.textContent = "";
+    try {
+        await apiRequest(`/purchases/${purchaseReceiveTarget.id}/receive/`, { method: "POST", body: { lines } });
+        toast("Stock received", "success");
+        closePurchaseReceiveModal();
+        if (editingPurchaseId === purchaseReceiveTarget.id) {
+            currentPurchaseDetail = await apiFetch(`/purchases/${editingPurchaseId}/`);
+            setPurchaseFormStatus(currentPurchaseDetail.status || "partial");
+            renderPurchaseLines(currentPurchaseDetail.lines || []);
+            updatePurchaseFormActions();
+        }
+        await loadBackOfficePurchases();
+    } catch (err) {
+        if (els.purchaseReceiveError) els.purchaseReceiveError.textContent = err.message || "Receive failed.";
+        toast(`Receive failed: ${err.message}`, "error");
+    }
+}
+
+async function removeProductSupplierLink(linkId) {
+    if (!editingProductId || !linkId) return;
+    const confirmed = confirm("Remove this supplier link?");
+    if (!confirmed) return;
+    try {
+        await apiRequest(`/inventory/products/${editingProductId}/suppliers/${linkId}/`, {
+            method: "DELETE",
+        });
+        toast("Supplier link removed", "success");
+        await loadProductSupplierLinks(editingProductId);
+    } catch (err) {
+        toast(`Remove failed: ${err.message}`, "error");
+    }
+}
+
+async function loadSupplierLinkedProducts(supplierId) {
+    if (!els.supplierLinkedProducts) return;
+    if (!supplierId) {
+        els.supplierLinkedProducts.textContent = "Save supplier to link products.";
+        return;
+    }
+    const data = await apiFetch(`/suppliers/${supplierId}/products/`);
+    const links = ensureArray(data, "supplierProducts");
+    if (!links.length) {
+        els.supplierLinkedProducts.textContent = "No products linked yet.";
+        return;
+    }
+    els.supplierLinkedProducts.innerHTML = links.map(link => {
+        const primary = link.is_primary ? `<span class="status-badge status-active">Primary</span>` : "";
+        return `
+            <div class="linked-product-row">
+                <div><strong>${esc(link.product?.name || "Product")}</strong></div>
+                <div class="muted">${esc(link.product?.sku || "—")}</div>
+                ${primary}
+            </div>
+        `;
+    }).join("");
 }
 
 async function loadBackOfficeStaff() {
@@ -2833,6 +3929,33 @@ function renderBackOfficeCustomers() {
                     ${approveBtn}
                     ${linkBtn}
                 </td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function renderBackOfficeSuppliers() {
+    if (!els.backofficeSupplierTable) return;
+    const tbody = els.backofficeSupplierTable.querySelector("tbody");
+    const rows = backOfficeSuppliers;
+    if (!tbody) return;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="6">No suppliers found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(supplier => {
+        const contact = supplier.contact_person || "—";
+        const phone = supplier.phone || "—";
+        const email = supplier.email || "—";
+        const status = supplier.is_active === false ? renderStatusBadge("inactive") : renderStatusBadge("active");
+        return `
+            <tr>
+                <td>${esc(supplier.name)}</td>
+                <td>${esc(contact)}</td>
+                <td>${esc(phone)}</td>
+                <td>${esc(email)}</td>
+                <td>${status}</td>
+                <td><button class="btn-ghost" onclick="openSupplierForm('${supplier.id}')">Edit</button></td>
             </tr>
         `;
     }).join("");
@@ -3858,6 +4981,7 @@ async function loadBackOfficeBranches() {
     const currentSalesBranch = els.backofficeSalesBranch?.value || "";
     const currentOrdersBranch = els.backofficeOrdersBranch?.value || "";
     const currentPaymentsBranch = els.backofficePaymentsBranch?.value || "";
+    const currentPurchaseBranch = els.backofficePurchasesBranch?.value || "";
     if (!els.productBranch) return;
     els.productBranch.innerHTML = `
         <option value="">Select branch (optional)</option>
@@ -3902,6 +5026,23 @@ async function loadBackOfficeBranches() {
         if (currentPaymentsBranch) {
             els.backofficePaymentsBranch.value = currentPaymentsBranch;
         }
+    }
+
+    if (els.backofficePurchasesBranch) {
+        els.backofficePurchasesBranch.innerHTML = `
+            <option value="">All branches</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+        if (currentPurchaseBranch) {
+            els.backofficePurchasesBranch.value = currentPurchaseBranch;
+        }
+    }
+
+    if (els.purchaseBranch) {
+        els.purchaseBranch.innerHTML = `
+            <option value="">Select branch</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
     }
 
     if (els.staffBranch) {
@@ -3995,6 +5136,8 @@ function openProductForm(productId = null) {
         if (els.productUnitCode) els.productUnitCode.value = "";
         if (els.productForm) els.productForm.dataset.baseUnitId = "";
         renderProductUnitRows([]);
+        productSupplierLinks = [];
+        renderProductSupplierLinks();
     } else {
         const product = backOfficeProducts.find(p => p.id === productId);
         if (!product) return;
@@ -4015,7 +5158,9 @@ function openProductForm(productId = null) {
         if (els.productBranch) els.productBranch.value = "";
         if (els.productStock) els.productStock.value = "";
         renderProductUnitRows((product.units || []).filter(u => !u.is_base_unit));
+        loadProductSupplierLinks(productId);
     }
+    loadSupplierOptionsForProductForm();
     openOverlay(els.productFormModal);
 }
 
@@ -4240,6 +5385,87 @@ async function saveCustomerForm() {
         if (els.customerFormSave) {
             els.customerFormSave.disabled = false;
             els.customerFormSave.textContent = "Save Customer";
+        }
+    }
+}
+
+function openSupplierForm(supplierId = null) {
+    if (!els.supplierFormModal) return;
+    editingSupplierId = supplierId;
+    if (els.supplierFormError) els.supplierFormError.textContent = "";
+    if (!supplierId) {
+        if (els.supplierFormTitle) els.supplierFormTitle.textContent = "Add Supplier";
+        if (els.supplierForm) els.supplierForm.reset();
+        if (els.supplierActive) els.supplierActive.checked = true;
+        loadSupplierLinkedProducts(null);
+    } else {
+        const supplier = backOfficeSuppliers.find(s => s.id === supplierId);
+        if (!supplier) return;
+        if (els.supplierFormTitle) els.supplierFormTitle.textContent = "Edit Supplier";
+        if (els.supplierName) els.supplierName.value = supplier.name || "";
+        if (els.supplierContact) els.supplierContact.value = supplier.contact_person || "";
+        if (els.supplierPhone) els.supplierPhone.value = supplier.phone || "";
+        if (els.supplierEmail) els.supplierEmail.value = supplier.email || "";
+        if (els.supplierAddress) els.supplierAddress.value = supplier.address || "";
+        if (els.supplierNotes) els.supplierNotes.value = supplier.notes || "";
+        if (els.supplierActive) els.supplierActive.checked = supplier.is_active !== false;
+        loadSupplierLinkedProducts(supplierId);
+    }
+    openOverlay(els.supplierFormModal);
+}
+
+function closeSupplierForm() {
+    if (!els.supplierFormModal) return;
+    closeOverlay(els.supplierFormModal);
+    editingSupplierId = null;
+}
+
+async function saveSupplierForm() {
+    if (!canAccessBackOffice()) return;
+    const name = els.supplierName?.value?.trim() || "";
+    const email = els.supplierEmail?.value?.trim() || "";
+    if (!name) {
+        if (els.supplierFormError) els.supplierFormError.textContent = "Name is required.";
+        toast("Name is required.", "error");
+        return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (els.supplierFormError) els.supplierFormError.textContent = "Enter a valid email address.";
+        toast("Enter a valid email address.", "error");
+        return;
+    }
+    if (els.supplierFormSave) {
+        els.supplierFormSave.disabled = true;
+        els.supplierFormSave.textContent = "Saving...";
+    }
+    const payload = {
+        name,
+        contact_person: els.supplierContact?.value?.trim() || "",
+        phone: els.supplierPhone?.value?.trim() || "",
+        email,
+        address: els.supplierAddress?.value?.trim() || "",
+        notes: els.supplierNotes?.value?.trim() || "",
+        is_active: !!els.supplierActive?.checked,
+    };
+    try {
+        if (editingSupplierId) {
+            await apiRequest(`/suppliers/${editingSupplierId}/`, { method: "PUT", body: payload });
+            toast("Supplier updated", "success");
+        } else {
+            await apiRequest(`/suppliers/create/`, { method: "POST", body: payload });
+            toast("Supplier created", "success");
+        }
+        closeSupplierForm();
+        await loadBackOfficeSuppliers();
+    } catch (err) {
+        if (els.supplierFormError) {
+            els.supplierFormError.textContent = err.message || "Save failed.";
+        }
+        toast(`Save failed: ${err.message}`, "error");
+    } finally {
+        if (els.supplierFormSave) {
+            els.supplierFormSave.disabled = false;
+            els.supplierFormSave.textContent = "Save Supplier";
         }
     }
 }
@@ -4822,11 +6048,16 @@ function renderCart() {
         const total = getItemLineTotal(item, unitPrice);
         const priceType = item.price_type_used ? item.price_type_used : "";
         const priceReason = item.pricing_reason ? item.pricing_reason : "";
-        const rowClass = activeSaleRowId === item.product.id ? "sale-entry-row active" : "sale-entry-row";
+        const rowClass = [
+            "sale-entry-row",
+            activeSaleRowId === item.product.id ? "active" : "",
+            item.offline_issue ? "needs-review" : "",
+        ].join(" ").trim();
         return `
             <tr class="${rowClass}" onclick="activateSaleRow('${item.product.id}')">
                 <td class="sale-entry-item">
                     <div class="sale-entry-name">${esc(item.product.name)}</div>
+                    ${item.offline_issue ? `<span class="issue-badge" title="${esc(item.offline_issue_reason || "")}">Review</span>` : ""}
                     ${priceType ? `<span class="price-badge ${priceType}" title="${esc(priceReason)}">${priceType}</span>` : ""}
                 </td>
                 <td class="sale-entry-sku">${esc(item.product.sku || "—")}</td>
@@ -8282,6 +9513,13 @@ function formatDateTime(value) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "—";
     return date.toLocaleString("en-KE", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatShortDate(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleDateString("en-KE", { year: "numeric", month: "short", day: "numeric" });
 }
 
 function formatStatus(status) {

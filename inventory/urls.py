@@ -12,6 +12,9 @@ from .views import (
     InventoryAdjustmentCreateView,
     ProductCreateView,
     ProductUpdateView,
+    ProductSupplierListView,
+    ProductSupplierLinkView,
+    ProductSupplierUpdateView,
 )
 
 urlpatterns = [
@@ -24,6 +27,9 @@ urlpatterns = [
     path("categories/<uuid:category_id>/", CategoryUpdateView.as_view(), name="categories_update"),
     path("products/create/", ProductCreateView.as_view(), name="product_create"),
     path("products/<uuid:product_id>/", ProductUpdateView.as_view(), name="product_update"),
+    path("products/<uuid:product_id>/suppliers/", ProductSupplierListView.as_view(), name="product_suppliers_list"),
+    path("products/<uuid:product_id>/suppliers/link/", ProductSupplierLinkView.as_view(), name="product_suppliers_link"),
+    path("products/<uuid:product_id>/suppliers/<uuid:link_id>/", ProductSupplierUpdateView.as_view(), name="product_suppliers_update"),
     path("stock/lookup/", InventoryStockLookupView.as_view(), name="inventory_stock_lookup"),
     path("adjustments/", InventoryAdjustmentListView.as_view(), name="inventory_adjustments_list"),
     path("adjustments/create/", InventoryAdjustmentCreateView.as_view(), name="inventory_adjustments_create"),

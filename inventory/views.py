@@ -11,7 +11,8 @@ import re
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
 from accounts.permissions import RolePermission
-from .models import Product, Category, ProductUnit, Inventory, StockMovement
+from .models import Product, Category, ProductUnit, Inventory, StockMovement, ProductSupplier
+from suppliers.models import Supplier
 from business.models import Branch
 from core.pagination import StandardLimitOffsetPagination
 
@@ -1024,3 +1025,120 @@ class InventoryAdjustmentCreateView(APIView):
             },
             status=201,
         )
+
+
+class ProductSupplierListView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request, product_id):
+        product = get_object_or_404(Product, id=product_id)
+        links = ProductSupplier.objects.filter(product=product).select_related("supplier").order_by("-is_primary", "supplier__name")
+        data = [
+            {
+                "id": str(link.id),
+                "product_id": str(product.id),
+                "supplier": {
+                    "id": str(link.supplier_id),
+                    "name": link.supplier.name,
+                    "phone": link.supplier.phone,
+                    "email": link.supplier.email,
+                    "contact_person": link.supplier.contact_person,
+                    "is_active": link.supplier.is_active,
+                },
+                "supplier_sku": link.supplier_sku,
+                "supplier_price": str(link.supplier_price) if link.supplier_price is not None else None,
+                "is_primary": link.is_primary,
+                "notes": link.notes,
+            }
+            for link in links
+        ]
+        return Response(data)
+
+
+class ProductSupplierLinkView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def post(self, request, product_id):
+        product = get_object_or_404(Product, id=product_id)
+        data = request.data or {}
+        errors = {}
+
+        supplier_id = data.get("supplier_id") or data.get("supplier")
+        supplier = Supplier.all_objects.filter(id=supplier_id).first() if supplier_id else None
+        if not supplier:
+            errors["supplier"] = "Supplier not found."
+
+        supplier_sku = str(data.get("supplier_sku") or "").strip()
+        notes = str(data.get("notes") or "").strip()
+
+        try:
+            supplier_price = _parse_decimal(data.get("supplier_price"), field="supplier_price")
+        except ValueError as exc:
+            errors["supplier_price"] = str(exc)
+            supplier_price = None
+
+        is_primary = _parse_bool(data.get("is_primary")) or False
+
+        if errors:
+            return Response(errors, status=400)
+
+        if ProductSupplier.objects.filter(product=product, supplier=supplier).exists():
+            return Response({"detail": "Supplier already linked to this product."}, status=400)
+
+        if is_primary:
+            ProductSupplier.objects.filter(product=product, is_primary=True).update(is_primary=False)
+
+        link = ProductSupplier.objects.create(
+            product=product,
+            supplier=supplier,
+            supplier_sku=supplier_sku,
+            supplier_price=supplier_price,
+            is_primary=is_primary,
+            notes=notes,
+        )
+        return Response({"id": str(link.id)}, status=201)
+
+
+class ProductSupplierUpdateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def put(self, request, product_id, link_id):
+        product = get_object_or_404(Product, id=product_id)
+        link = get_object_or_404(ProductSupplier, id=link_id, product=product)
+        data = request.data or {}
+        errors = {}
+
+        supplier_sku = str(data.get("supplier_sku") or link.supplier_sku or "").strip()
+        notes = str(data.get("notes") or link.notes or "").strip()
+
+        try:
+            supplier_price = _parse_decimal(data.get("supplier_price"), field="supplier_price")
+        except ValueError as exc:
+            errors["supplier_price"] = str(exc)
+            supplier_price = None
+
+        is_primary = _parse_bool(data.get("is_primary"))
+        if is_primary is None:
+            is_primary = link.is_primary
+
+        if errors:
+            return Response(errors, status=400)
+
+        if is_primary and not link.is_primary:
+            ProductSupplier.objects.filter(product=product, is_primary=True).exclude(id=link.id).update(is_primary=False)
+
+        link.supplier_sku = supplier_sku
+        link.notes = notes
+        link.supplier_price = supplier_price
+        link.is_primary = is_primary
+        link.save()
+        return Response({"id": str(link.id)}, status=200)
+
+    def delete(self, request, product_id, link_id):
+        product = get_object_or_404(Product, id=product_id)
+        link = get_object_or_404(ProductSupplier, id=link_id, product=product)
+        link.delete()
+        return Response(status=204)

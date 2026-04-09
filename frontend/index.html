@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-09.1">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-09.6">
 </head>
 <body>
     <!-- Top Bar -->
@@ -746,6 +746,8 @@
             <div class="backoffice-body">
                 <aside class="backoffice-nav">
                     <button class="backoffice-tab active" data-section="products">Products</button>
+                    <button class="backoffice-tab" data-section="suppliers">Suppliers</button>
+                    <button class="backoffice-tab" data-section="purchases">Purchases</button>
                     <button class="backoffice-tab" data-section="customers">Customers</button>
                     <button class="backoffice-tab" data-section="sales">Sales</button>
                     <button class="backoffice-tab" data-section="orders">Orders</button>
@@ -790,6 +792,85 @@
                                     </tr>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                    <div id="backoffice-suppliers" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-supplier-search" class="summary-input" placeholder="Search name, phone, or email">
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-supplier-add" class="btn-primary">Add Supplier</button>
+                            </div>
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-supplier-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Contact</th>
+                                        <th>Phone</th>
+                                        <th>Email</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="backoffice-supplier-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="backoffice-supplier-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="backoffice-supplier-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-purchases" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-purchases-search" class="summary-input" placeholder="Search PO # or supplier">
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-purchase-add" class="btn-primary">New PO</button>
+                            </div>
+                        </div>
+                        <div class="backoffice-filters">
+                            <select id="backoffice-purchases-status" class="summary-select">
+                                <option value="">All statuses</option>
+                                <option value="draft">Draft</option>
+                                <option value="ordered">Ordered</option>
+                                <option value="partial">Partial</option>
+                                <option value="received">Received</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                            <select id="backoffice-purchases-supplier" class="summary-select">
+                                <option value="">All suppliers</option>
+                            </select>
+                            <select id="backoffice-purchases-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-purchases-table">
+                                <thead>
+                                    <tr>
+                                        <th>PO #</th>
+                                        <th>Supplier</th>
+                                        <th>Branch</th>
+                                        <th>Status</th>
+                                        <th>Ordered</th>
+                                        <th>Received</th>
+                                        <th>Expected</th>
+                                        <th>Updated</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="backoffice-purchases-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="backoffice-purchases-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="backoffice-purchases-next" class="btn-ghost" disabled>Next</button>
                         </div>
                     </div>
                     <div id="backoffice-customers" class="backoffice-section hidden">
@@ -1287,6 +1368,19 @@
                             <div id="product-units-list" class="unit-editor-list"></div>
                             <div class="unit-editor-hint">Base unit is defined above. Add cartons, bales, packs, etc. with conversion to base.</div>
                         </div>
+                        <div class="supplier-editor">
+                            <div class="supplier-editor-header">
+                                <span>Suppliers</span>
+                                <div class="supplier-editor-actions">
+                                    <select id="product-supplier-select" class="summary-select">
+                                        <option value="">Select supplier</option>
+                                    </select>
+                                    <button type="button" id="product-supplier-add" class="btn-ghost">Link</button>
+                                </div>
+                            </div>
+                            <div id="product-suppliers-list" class="supplier-editor-list"></div>
+                            <div class="supplier-editor-hint">Link suppliers to this product. Mark one as primary if needed.</div>
+                        </div>
                         <label>Branch
                             <select id="product-branch" class="summary-select">
                                 <option value="">Select branch (optional)</option>
@@ -1342,6 +1436,147 @@
                         <button type="submit" id="customer-form-save" class="btn-primary">Save Customer</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="supplier-form-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content product-form-modal">
+            <div class="modal-header">
+                <h3 id="supplier-form-title">Add Supplier</h3>
+                <button id="supplier-form-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <form id="supplier-form" class="product-form">
+                    <div class="form-grid">
+                        <label>Name<span class="required">*</span><input id="supplier-name" class="summary-input" required></label>
+                        <label>Contact Person<input id="supplier-contact" class="summary-input"></label>
+                        <label>Phone<input id="supplier-phone" class="summary-input"></label>
+                        <label>Email<input id="supplier-email" type="email" class="summary-input"></label>
+                        <label>Address<textarea id="supplier-address" class="summary-input" rows="2"></textarea></label>
+                        <label>Notes<textarea id="supplier-notes" class="summary-input" rows="2"></textarea></label>
+                        <label class="checkbox-row">
+                            <input id="supplier-active" type="checkbox" checked>
+                            Active
+                        </label>
+                    </div>
+                    <div class="linked-products">
+                        <div class="linked-products-header">Linked Products</div>
+                        <div id="supplier-linked-products" class="linked-products-list muted">Save supplier to link products.</div>
+                    </div>
+                    <div id="supplier-form-error" class="form-error"></div>
+                    <div class="form-actions">
+                        <button type="button" id="supplier-form-cancel" class="btn-ghost">Cancel</button>
+                        <button type="submit" id="supplier-form-save" class="btn-primary">Save Supplier</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="purchase-form-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content purchase-form-modal">
+            <div class="modal-header">
+                <h3 id="purchase-form-title">New Purchase Order</h3>
+                <button id="purchase-form-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <form id="purchase-form" class="product-form">
+                    <div class="form-grid">
+                        <label>Supplier<span class="required">*</span>
+                            <select id="purchase-supplier" class="summary-select" required>
+                                <option value="">Select supplier</option>
+                            </select>
+                        </label>
+                        <label>Branch<span class="required">*</span>
+                            <select id="purchase-branch" class="summary-select" required>
+                                <option value="">Select branch</option>
+                            </select>
+                        </label>
+                        <label>Expected Date
+                            <input id="purchase-expected-date" type="date" class="summary-input">
+                        </label>
+                        <label>Status
+                            <div id="purchase-status-pill" class="status-badge status-draft">Draft</div>
+                        </label>
+                        <label>Notes
+                            <textarea id="purchase-notes" class="summary-input" rows="2"></textarea>
+                        </label>
+                    </div>
+                    <div class="po-lines">
+                        <div class="po-lines-header">
+                            <div>
+                                <h4>Line Items</h4>
+                                <div class="muted">Add products and quantities to this PO.</div>
+                            </div>
+                            <div class="po-lines-actions">
+                                <button type="button" id="purchase-mark-ordered" class="btn-secondary">Mark Ordered</button>
+                                <button type="button" id="purchase-receive-open" class="btn-primary">Receive Stock</button>
+                            </div>
+                        </div>
+                        <div class="po-line-add">
+                            <select id="purchase-line-product" class="summary-select">
+                                <option value="">Select product</option>
+                            </select>
+                            <input id="purchase-line-qty" type="number" min="1" class="summary-input" placeholder="Qty">
+                            <input id="purchase-line-cost" type="number" step="0.01" class="summary-input" placeholder="Unit cost">
+                            <input id="purchase-line-notes" class="summary-input" placeholder="Notes (optional)">
+                            <button type="button" id="purchase-line-add" class="btn-ghost">Add Line</button>
+                        </div>
+                        <div class="backoffice-table-wrap po-lines-table-wrap">
+                            <table class="backoffice-table" id="purchase-lines-table">
+                                <thead>
+                                    <tr>
+                                        <th>Product</th>
+                                        <th>Ordered</th>
+                                        <th>Received</th>
+                                        <th>Unit Cost</th>
+                                        <th>Remaining</th>
+                                        <th>Notes</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="purchase-lines-list"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div id="purchase-form-error" class="form-error"></div>
+                    <div class="form-actions">
+                        <button type="button" id="purchase-form-cancel" class="btn-ghost">Cancel</button>
+                        <button type="submit" id="purchase-form-save" class="btn-primary">Save Purchase Order</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="purchase-receive-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content purchase-receive-modal">
+            <div class="modal-header">
+                <h3>Receive Stock</h3>
+                <button id="purchase-receive-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <div id="purchase-receive-meta" class="muted">Select quantities to receive.</div>
+                <div class="backoffice-table-wrap po-receive-table-wrap">
+                    <table class="backoffice-table" id="purchase-receive-table">
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th>Ordered</th>
+                                <th>Received</th>
+                                <th>Remaining</th>
+                                <th>Receive Now</th>
+                            </tr>
+                        </thead>
+                        <tbody id="purchase-receive-list"></tbody>
+                    </table>
+                </div>
+                <div id="purchase-receive-error" class="form-error"></div>
+                <div class="form-actions">
+                    <button type="button" id="purchase-receive-cancel" class="btn-ghost">Cancel</button>
+                    <button type="button" id="purchase-receive-submit" class="btn-primary">Submit Receipt</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1475,6 +1710,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-09.1"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-09.6"></script>
 </body>
 </html>

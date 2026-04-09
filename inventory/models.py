@@ -83,6 +83,41 @@ class ProductUnit(BaseModel):
 
     def __str__(self):
         return f"{self.product.name} ({self.unit_code})"
+
+
+class ProductSupplier(BaseModel):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="supplier_links",
+    )
+    supplier = models.ForeignKey(
+        "suppliers.Supplier",
+        on_delete=models.CASCADE,
+        related_name="product_links",
+    )
+    supplier_sku = models.CharField(max_length=64, blank=True, default="")
+    supplier_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    is_primary = models.BooleanField(default=False)
+    notes = models.TextField(blank=True, default="")
+
+    class Meta:
+        verbose_name = "Product Supplier"
+        verbose_name_plural = "Product Suppliers"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "supplier"],
+                name="uniq_product_supplier",
+            ),
+            models.UniqueConstraint(
+                fields=["product"],
+                condition=Q(is_primary=True),
+                name="uniq_product_primary_supplier",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.product} → {self.supplier}"
     
 class Inventory(BaseModel):
     branch = models.ForeignKey(
