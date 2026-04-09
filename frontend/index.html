@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-08.2">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-09.1">
 </head>
 <body>
     <!-- Top Bar -->
@@ -75,6 +75,13 @@
                 <div class="panel-title">
                     <h1>Sale Entry</h1>
                     <p class="panel-subtitle">Review and confirm line items before payment.</p>
+                </div>
+                <div id="offline-status" class="offline-status hidden">
+                    <span class="offline-dot" aria-hidden="true"></span>
+                    <span id="offline-status-text">Offline mode: drafts saved locally.</span>
+                    <span id="offline-sync-count" class="offline-count"></span>
+                    <button id="offline-drafts-btn" type="button" class="btn-ghost btn-xs">Drafts</button>
+                    <button id="offline-sync-btn" type="button" class="btn-ghost btn-xs hidden">Sync Drafts</button>
                 </div>
                 <div class="search-wrapper">
                     <span class="search-icon">⌕</span>
@@ -240,6 +247,25 @@
             <div class="modal-body">
                 <video id="inventory-scan-video" class="scan-video" autoplay playsinline></video>
                 <div id="inventory-scan-status" class="scan-status">Point the camera at a barcode.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Offline Drafts Modal -->
+    <div id="offline-drafts-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content drafts-modal">
+            <div class="modal-header">
+                <h3>Offline Drafts</h3>
+                <button id="offline-drafts-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <div class="modal-body">
+                    <div class="drafts-header">
+                        <div class="muted">Review, retry, or reopen offline drafts.</div>
+                        <button id="offline-drafts-sync" type="button" class="btn-secondary btn-xs">Sync All</button>
+                    </div>
+                    <div id="offline-drafts-list" class="drafts-list"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -1449,6 +1475,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-08.2"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-09.1"></script>
 </body>
 </html>

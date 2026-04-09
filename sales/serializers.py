@@ -42,11 +42,13 @@ class SaleSerializer(serializers.ModelSerializer):
 
     items = SaleItemSerializer(many=True)
     payments = serializers.SerializerMethodField(read_only=True)
+    correlation_id = serializers.UUIDField(required=False, allow_null=True)
 
     class Meta:
         model = Sale
         fields = [
             "id",
+            "correlation_id",
             "branch",
             "customer",
             "sale_type",
@@ -148,8 +150,18 @@ class SaleSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Status must be draft or held.")
         return value
 
+    def validate_correlation_id(self, value):
+        if self.instance is not None and value and value != self.instance.correlation_id:
+            raise serializers.ValidationError("Correlation ID cannot be changed.")
+        return value
+
     @transaction.atomic
     def create(self, validated_data):
+        correlation_id = validated_data.get("correlation_id")
+        if correlation_id:
+            existing = Sale.objects.filter(correlation_id=correlation_id).first()
+            if existing:
+                return existing
         items_data = validated_data.pop("items", [])
         if not items_data:
             raise serializers.ValidationError("At least one item is required.")

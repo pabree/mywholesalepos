@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-08.2";
+const APP_BUILD = "2026-04-09.1";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -142,6 +142,16 @@ let mpesaPendingPayment = null;
 let mpesaPollTimer = null;
 let mpesaPollAttempts = 0;
 let autoPrintedSales = new Set();
+let offlineMode = !navigator.onLine;
+let offlineSyncing = false;
+let currentOfflineDraftId = null;
+let offlineDraftCount = 0;
+let currentOfflineDraftCorrelationId = null;
+
+const OFFLINE_DB_NAME = "pos_offline_v1";
+const OFFLINE_DB_VERSION = 1;
+const OFFLINE_CACHE_STORE = "cache";
+const OFFLINE_DRAFT_STORE = "drafts";
 
 const HELD_SALES_LIMIT = 20;
 const CUSTOMER_ORDERS_LIMIT = 20;
@@ -179,6 +189,15 @@ const els = {
     clock:           document.getElementById("clock"),
     productSearch:   document.getElementById("product-search"),
     productSearchResults: document.getElementById("product-search-results"),
+    offlineStatus: document.getElementById("offline-status"),
+    offlineStatusText: document.getElementById("offline-status-text"),
+    offlineSyncBtn: document.getElementById("offline-sync-btn"),
+    offlineSyncCount: document.getElementById("offline-sync-count"),
+    offlineDraftsBtn: document.getElementById("offline-drafts-btn"),
+    offlineDraftsModal: document.getElementById("offline-drafts-modal"),
+    offlineDraftsClose: document.getElementById("offline-drafts-close"),
+    offlineDraftsList: document.getElementById("offline-drafts-list"),
+    offlineDraftsSync: document.getElementById("offline-drafts-sync"),
     categoryFilters: document.getElementById("category-filters"),
     productImportTools: document.getElementById("product-import-tools"),
     productImportTemplate: document.getElementById("download-product-template"),
@@ -686,6 +705,26 @@ document.addEventListener("click", (e) => {
 });
 customerOrdersLog("[customer-orders] delegated listener attached");
 
+document.addEventListener("click", (e) => {
+    const openDraft = e.target.closest("[data-offline-draft-open]");
+    if (openDraft) {
+        e.preventDefault();
+        reopenOfflineDraft(openDraft.dataset.offlineDraftOpen);
+        return;
+    }
+    const syncDraft = e.target.closest("[data-offline-draft-sync]");
+    if (syncDraft) {
+        e.preventDefault();
+        syncSingleDraft(syncDraft.dataset.offlineDraftSync);
+        return;
+    }
+    const deleteDraft = e.target.closest("[data-offline-draft-delete]");
+    if (deleteDraft) {
+        e.preventDefault();
+        deleteOfflineDraft(deleteDraft.dataset.offlineDraftDelete);
+    }
+});
+
 function registerStaffServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
     const host = window.location.hostname;
@@ -730,6 +769,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupStaffInstallPrompt();
     renderExpenseCategoryOptions();
     setupOverlayInteractions();
+    initOfflineSupport();
 
     els.productSearch.addEventListener("input", () => {
         searchResultIndex = -1;
@@ -813,6 +853,18 @@ document.addEventListener("DOMContentLoaded", () => {
             event.preventDefault();
             focusAlertsDetails();
         });
+    }
+    if (els.offlineDraftsBtn) {
+        els.offlineDraftsBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            openOfflineDraftsModal();
+        });
+    }
+    if (els.offlineDraftsClose) {
+        els.offlineDraftsClose.addEventListener("click", () => closeOfflineDraftsModal());
+    }
+    if (els.offlineDraftsSync) {
+        els.offlineDraftsSync.addEventListener("click", () => syncOfflineDrafts({ manual: true }));
     }
     focusSearchInput();
     if (els.backofficeCloseBtn) {
@@ -1572,6 +1624,601 @@ async function apiFetch(endpoint) {
     }
 }
 
+// ——— Offline Support ———
+function canUseOfflineStore() {
+    return typeof indexedDB !== "undefined";
+}
+
+function openOfflineDB() {
+    if (!canUseOfflineStore()) return Promise.reject(new Error("IndexedDB unavailable"));
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(OFFLINE_CACHE_STORE)) {
+                db.createObjectStore(OFFLINE_CACHE_STORE, { keyPath: "key" });
+            }
+            if (!db.objectStoreNames.contains(OFFLINE_DRAFT_STORE)) {
+                const store = db.createObjectStore(OFFLINE_DRAFT_STORE, { keyPath: "local_id" });
+                store.createIndex("status", "status", { unique: false });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbGet(storeName, key) {
+    const db = await openOfflineDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, "readonly");
+        const store = tx.objectStore(storeName);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbPut(storeName, value) {
+    const db = await openOfflineDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, "readwrite");
+        const store = tx.objectStore(storeName);
+        const req = store.put(value);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbGetAll(storeName) {
+    const db = await openOfflineDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, "readonly");
+        const store = tx.objectStore(storeName);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbDelete(storeName, key) {
+    const db = await openOfflineDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, "readwrite");
+        const store = tx.objectStore(storeName);
+        const req = store.delete(key);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function cacheOfflineData(key, data) {
+    if (!canUseOfflineStore()) return;
+    try {
+        await idbPut(OFFLINE_CACHE_STORE, {
+            key,
+            data,
+            updated_at: new Date().toISOString(),
+        });
+    } catch (err) {
+        console.warn("Offline cache write failed:", err);
+    }
+}
+
+async function readOfflineCache(key) {
+    if (!canUseOfflineStore()) return null;
+    try {
+        const entry = await idbGet(OFFLINE_CACHE_STORE, key);
+        return entry?.data || null;
+    } catch (err) {
+        console.warn("Offline cache read failed:", err);
+        return null;
+    }
+}
+
+function setOfflineMode(value) {
+    offlineMode = value;
+    document.body.classList.toggle("offline", offlineMode);
+    updateOfflineStatusUI();
+}
+
+async function updateOfflineStatusUI() {
+    if (!els.offlineStatus) return;
+    let pendingCount = 0;
+    if (canUseOfflineStore()) {
+        try {
+            const drafts = await idbGetAll(OFFLINE_DRAFT_STORE);
+            pendingCount = drafts.filter(d => d.status !== "synced").length;
+        } catch (err) {
+            console.warn("Unable to read offline drafts:", err);
+        }
+    }
+    offlineDraftCount = pendingCount;
+    const shouldShow = offlineMode || pendingCount > 0;
+    els.offlineStatus.classList.toggle("hidden", !shouldShow);
+    if (!shouldShow) return;
+
+    let message = "Offline mode: drafts saved locally.";
+    if (!offlineMode && pendingCount > 0) {
+        message = `Drafts pending sync.`;
+    }
+    if (offlineMode && pendingCount > 0) {
+        message = `Offline: ${pendingCount} draft${pendingCount === 1 ? "" : "s"} saved locally.`;
+    }
+    if (!offlineMode && pendingCount === 0 && offlineSyncing) {
+        message = "Syncing drafts...";
+    } else if (offlineSyncing) {
+        message = "Syncing drafts...";
+    }
+
+    if (els.offlineStatusText) els.offlineStatusText.textContent = message;
+    if (els.offlineSyncCount) {
+        els.offlineSyncCount.textContent = pendingCount > 0 ? `${pendingCount} pending` : "";
+    }
+    if (els.offlineSyncBtn) {
+        const canSync = navigator.onLine && pendingCount > 0 && !offlineSyncing;
+        els.offlineSyncBtn.classList.toggle("hidden", !canSync);
+    }
+}
+
+function renderOfflineDraftStatus(status) {
+    const normalized = (status || "draft_offline").toLowerCase();
+    const labelMap = {
+        draft_offline: "Draft (offline)",
+        queued: "Queued",
+        syncing: "Syncing",
+        failed: "Failed",
+        synced: "Synced",
+    };
+    const label = labelMap[normalized] || "Draft";
+    return `<span class="status-badge status-draft status-draft-${normalized}">${label}</span>`;
+}
+
+async function renderOfflineDraftsList() {
+    if (!els.offlineDraftsList) return;
+    if (els.offlineDraftsSync) {
+        els.offlineDraftsSync.disabled = !navigator.onLine || !API_TOKEN;
+    }
+    let drafts = [];
+    try {
+        drafts = await idbGetAll(OFFLINE_DRAFT_STORE);
+    } catch (err) {
+        els.offlineDraftsList.innerHTML = `<div class="muted">Offline drafts unavailable.</div>`;
+        return;
+    }
+    drafts.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+    if (!drafts.length) {
+        els.offlineDraftsList.innerHTML = `<div class="muted">No offline drafts saved.</div>`;
+        return;
+    }
+    els.offlineDraftsList.innerHTML = drafts.map(draft => {
+        const customer = customers.find(c => c.id === draft.customer_id);
+        const customerName = customer ? customer.name : (draft.customer_id ? "Customer" : "Walk-in");
+        const total = fmtPrice(draft.snapshot?.total || 0);
+        const created = formatDateTime(draft.created_at);
+        const status = renderOfflineDraftStatus(draft.status);
+        const error = draft.error ? `<div class="draft-error">${esc(draft.error)}</div>` : "";
+        const canRetry = ["failed", "queued", "draft_offline"].includes(draft.status);
+        const canReopen = draft.status !== "synced";
+        return `
+            <div class="draft-item">
+                <div class="draft-meta">
+                    <div class="draft-title">${esc(customerName)} • ${total}</div>
+                    <div class="draft-sub">${created}</div>
+                </div>
+                <div class="draft-status">
+                    ${status}
+                    ${error}
+                </div>
+                <div class="draft-actions">
+                    <button class="btn-secondary btn-xs" data-offline-draft-open="${draft.local_id}" ${canReopen ? "" : "disabled"}>Reopen</button>
+                    <button class="btn-ghost btn-xs" data-offline-draft-sync="${draft.local_id}" ${canRetry ? "" : "disabled"}>Retry</button>
+                    <button class="btn-ghost btn-xs" data-offline-draft-delete="${draft.local_id}">Delete</button>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+async function openOfflineDraftsModal() {
+    if (!els.offlineDraftsModal) return;
+    await renderOfflineDraftsList();
+    openOverlay(els.offlineDraftsModal);
+}
+
+function closeOfflineDraftsModal() {
+    if (!els.offlineDraftsModal) return;
+    closeOverlay(els.offlineDraftsModal);
+}
+
+async function syncSingleDraft(localId) {
+    if (!localId) return;
+    if (!navigator.onLine) {
+        toast("You are offline. Connect to sync.", "warning");
+        setOfflineMode(true);
+        return;
+    }
+    if (!API_TOKEN) {
+        toast("Log in to sync drafts.", "warning");
+        return;
+    }
+    let draft = null;
+    try {
+        draft = await idbGet(OFFLINE_DRAFT_STORE, localId);
+    } catch (err) {
+        toast("Unable to load draft", "error");
+        return;
+    }
+    if (!draft) {
+        toast("Draft not found", "error");
+        return;
+    }
+    if (!draft.correlation_id || !isValidUuid(draft.correlation_id)) {
+        const correlationId = generateUuid();
+        draft = {
+            ...draft,
+            correlation_id: correlationId,
+            payload: {
+                ...(draft.payload || {}),
+                correlation_id: correlationId,
+            },
+        };
+        await idbPut(OFFLINE_DRAFT_STORE, draft);
+    }
+    const syncing = { ...draft, status: "syncing", updated_at: new Date().toISOString() };
+    await idbPut(OFFLINE_DRAFT_STORE, syncing);
+    try {
+        const payload = {
+            ...draft.payload,
+            correlation_id: draft.correlation_id || draft.payload?.correlation_id || null,
+        };
+        let sale;
+        if (draft.server_sale_id) {
+            sale = await updateSale(draft.server_sale_id, payload);
+        } else {
+            sale = await createSale(payload);
+        }
+        const synced = {
+            ...draft,
+            status: "synced",
+            updated_at: new Date().toISOString(),
+            server_sale_id: sale?.id || draft.server_sale_id || null,
+            error: "",
+        };
+        await idbPut(OFFLINE_DRAFT_STORE, synced);
+        toast("Draft synced", "success");
+    } catch (err) {
+        const failed = {
+            ...draft,
+            status: "failed",
+            updated_at: new Date().toISOString(),
+            error: err?.message || "Sync failed",
+        };
+        await idbPut(OFFLINE_DRAFT_STORE, failed);
+        toast("Draft sync failed", "error");
+    }
+    await renderOfflineDraftsList();
+    await updateOfflineStatusUI();
+}
+
+async function ensureOfflineProductsLoaded() {
+    if (allProducts.length) return true;
+    const cached = await readOfflineCache("products");
+    if (cached) {
+        allProducts = cached;
+        buildCategoryFilters();
+        renderProducts();
+        return true;
+    }
+    return false;
+}
+
+async function ensureOfflineCustomersLoaded() {
+    if (customers.length) return true;
+    const cached = await readOfflineCache("customers");
+    if (cached) {
+        customers = cached;
+        els.customerSelect.innerHTML = customers.length
+            ? customers.map(c => `<option value="${c.id}">${c.name}</option>`).join("")
+            : `<option value="">No customers found</option>`;
+        return true;
+    }
+    return false;
+}
+
+async function ensureOfflineBranchesLoaded() {
+    if (branches.length) return true;
+    const cached = await readOfflineCache("branches");
+    if (cached) {
+        branches = cached;
+        els.branchSelect.innerHTML = branches.length
+            ? branches.map(b => `<option value="${b.id}">${b.name} — ${b.location}</option>`).join("")
+            : `<option value="">No branches found</option>`;
+        return true;
+    }
+    return false;
+}
+
+async function reopenOfflineDraft(localId) {
+    if (!localId) return;
+    let draft = null;
+    try {
+        draft = await idbGet(OFFLINE_DRAFT_STORE, localId);
+    } catch (err) {
+        toast("Unable to load draft", "error");
+        return;
+    }
+    if (!draft) {
+        toast("Draft not found", "error");
+        return;
+    }
+    await ensureOfflineProductsLoaded();
+    await ensureOfflineCustomersLoaded();
+    await ensureOfflineBranchesLoaded();
+    cart = [];
+    let missingCount = 0;
+    (draft.snapshot?.items || []).forEach(item => {
+        const product = allProducts.find(p => p.id === item.product_id);
+        if (!product) {
+            missingCount += 1;
+            return;
+        }
+        const unit = (product.units || []).find(u => u.id === item.unit_id) || getBaseUnit(product);
+        cart.push({
+            product,
+            unit,
+            qty: item.quantity,
+            unit_price_snapshot: item.unit_price,
+            total_price_snapshot: item.line_total,
+        });
+    });
+    if (missingCount) {
+        toast(`${missingCount} items missing locally. Products list may be outdated.`, "warning");
+    }
+    currentSaleId = draft.server_sale_id || null;
+    currentOfflineDraftId = draft.local_id;
+    currentOfflineDraftCorrelationId = draft.correlation_id || draft.payload?.correlation_id || null;
+    currentSaleType = draft.sale_type || "retail";
+    if (els.saleTypeSelect) els.saleTypeSelect.value = currentSaleType;
+    if (els.branchSelect && draft.branch_id) {
+        els.branchSelect.value = draft.branch_id;
+    }
+    if (els.customerSelect && draft.customer_id) {
+        els.customerSelect.value = draft.customer_id;
+    }
+    if (els.discountInput) els.discountInput.value = parseFloat(draft.payload?.discount || 0) || 0;
+    if (els.amountPaid) els.amountPaid.value = parseFloat(draft.payload?.amount_paid || 0) || 0;
+    amountPaidDirty = true;
+    if (els.creditToggle) {
+        els.creditToggle.checked = !!draft.is_credit_sale;
+        handleCreditToggle(true);
+    }
+    if (els.assignedTo && draft.assigned_to) {
+        els.assignedTo.value = draft.assigned_to;
+    }
+    if (els.dueDate && draft.due_date) {
+        els.dueDate.value = draft.due_date;
+    }
+    renderCart();
+    updateTotals();
+    closeOfflineDraftsModal();
+    toast("Draft loaded into sale entry", "success");
+}
+
+async function deleteOfflineDraft(localId) {
+    if (!localId) return;
+    const confirmed = confirm("Delete this local draft? This cannot be undone.");
+    if (!confirmed) return;
+    try {
+        await idbDelete(OFFLINE_DRAFT_STORE, localId);
+        if (currentOfflineDraftId === localId) {
+            currentOfflineDraftId = null;
+        }
+        await renderOfflineDraftsList();
+        await updateOfflineStatusUI();
+    } catch (err) {
+        toast("Unable to delete draft", "error");
+    }
+}
+
+function isNetworkError(err) {
+    if (!err) return false;
+    if (!navigator.onLine) return true;
+    const msg = (err.message || "").toLowerCase();
+    return err.name === "TypeError" || msg.includes("failed to fetch") || msg.includes("network");
+}
+
+function generateUuid() {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function isValidUuid(value) {
+    if (!value) return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function buildOfflineDraftSnapshot(payload) {
+    const subtotal = parseCurrency(els.subtotal?.textContent || "0");
+    const tax = parseCurrency(els.taxAmount?.textContent || "0");
+    const discount = parseFloat(els.discountInput?.value || "0") || 0;
+    const total = parseCurrency(els.grandTotal?.textContent || "0");
+    const amountPaid = parseFloat(els.amountPaid?.value || "0") || 0;
+    const items = cart.map(item => {
+        const unitPrice = parseFloat(getItemUnitPrice(item)) || 0;
+        const totalPrice = parseFloat(getItemLineTotal(item, unitPrice)) || 0;
+        return {
+            product_id: item.product.id,
+            product_name: item.product.name,
+            sku: item.product.sku || "",
+            unit_id: item.unit?.id || null,
+            unit_code: item.unit?.unit_code || item.unit?.unit_name || "",
+            quantity: item.qty,
+            unit_price: unitPrice,
+            line_total: totalPrice,
+        };
+    });
+    return {
+        payload,
+        snapshot: {
+            subtotal,
+            tax,
+            discount,
+            total,
+            amount_paid: amountPaid,
+            items,
+        },
+    };
+}
+
+async function saveOfflineDraft({ reason = "", forceNew = false } = {}) {
+    if (!canUseOfflineStore()) {
+        toast("Offline drafts not supported in this browser", "error");
+        return null;
+    }
+    const payload = buildPayload({ status: "draft" });
+    const snapshot = buildOfflineDraftSnapshot(payload);
+    const now = new Date().toISOString();
+    let localId = !forceNew && currentOfflineDraftId ? currentOfflineDraftId : null;
+    let existing = null;
+    if (localId) {
+        try {
+            existing = await idbGet(OFFLINE_DRAFT_STORE, localId);
+        } catch (err) {
+            existing = null;
+        }
+    }
+    let correlationId = existing?.correlation_id || currentOfflineDraftCorrelationId || null;
+    if (!correlationId) {
+        if (!localId || !isValidUuid(localId)) {
+            localId = generateUuid();
+        }
+        correlationId = localId;
+    }
+    if (!localId) {
+        localId = correlationId;
+    }
+    const draft = {
+        local_id: localId,
+        correlation_id: correlationId,
+        status: offlineMode ? "draft_offline" : "queued",
+        created_at: now,
+        updated_at: now,
+        branch_id: payload.branch || null,
+        customer_id: payload.customer || null,
+        sale_type: payload.sale_type || "retail",
+        is_credit_sale: !!payload.is_credit_sale,
+        assigned_to: payload.assigned_to || null,
+        due_date: payload.due_date || null,
+        payload: {
+            ...payload,
+            correlation_id: correlationId,
+        },
+        snapshot: snapshot.snapshot,
+        server_sale_id: currentSaleId || null,
+        error: reason ? String(reason) : "",
+    };
+    await idbPut(OFFLINE_DRAFT_STORE, draft);
+    currentOfflineDraftId = localId;
+    currentOfflineDraftCorrelationId = correlationId;
+    await updateOfflineStatusUI();
+    return draft;
+}
+
+async function syncOfflineDrafts({ manual = false } = {}) {
+    if (!canUseOfflineStore()) return;
+    if (offlineSyncing) return;
+    if (!API_TOKEN) {
+        if (manual) toast("Log in to sync drafts.", "warning");
+        return;
+    }
+    if (!navigator.onLine) {
+        if (manual) toast("You are offline. Connect to sync drafts.", "warning");
+        setOfflineMode(true);
+        return;
+    }
+    offlineSyncing = true;
+    await updateOfflineStatusUI();
+    let drafts = [];
+    try {
+        drafts = await idbGetAll(OFFLINE_DRAFT_STORE);
+    } catch (err) {
+        console.warn("Unable to load offline drafts:", err);
+    }
+    for (const draft of drafts) {
+        if (draft.status === "synced") continue;
+        if (!draft.correlation_id || !isValidUuid(draft.correlation_id)) {
+            const correlationId = generateUuid();
+            draft.correlation_id = correlationId;
+            draft.payload = { ...(draft.payload || {}), correlation_id: correlationId };
+            await idbPut(OFFLINE_DRAFT_STORE, draft);
+        }
+        const updating = { ...draft, status: "syncing", updated_at: new Date().toISOString() };
+        await idbPut(OFFLINE_DRAFT_STORE, updating);
+        try {
+            const payload = {
+                ...draft.payload,
+                correlation_id: draft.correlation_id || draft.payload?.correlation_id || null,
+            };
+            let sale;
+            if (draft.server_sale_id) {
+                sale = await updateSale(draft.server_sale_id, payload);
+            } else {
+                sale = await createSale(payload);
+            }
+            const synced = {
+                ...draft,
+                status: "synced",
+                updated_at: new Date().toISOString(),
+                server_sale_id: sale?.id || draft.server_sale_id || null,
+                error: "",
+            };
+            await idbPut(OFFLINE_DRAFT_STORE, synced);
+        } catch (err) {
+            const failed = {
+                ...draft,
+                status: "failed",
+                updated_at: new Date().toISOString(),
+                error: err?.message || "Sync failed",
+            };
+            await idbPut(OFFLINE_DRAFT_STORE, failed);
+        }
+    }
+    offlineSyncing = false;
+    await updateOfflineStatusUI();
+    if (els.offlineDraftsModal && !els.offlineDraftsModal.classList.contains("hidden")) {
+        await renderOfflineDraftsList();
+    }
+    if (manual) {
+        toast("Draft sync complete", "success");
+    }
+}
+
+function initOfflineSupport() {
+    if (!canUseOfflineStore()) return;
+    if (!navigator.onLine) {
+        setOfflineMode(true);
+    }
+    window.addEventListener("online", () => {
+        setOfflineMode(false);
+        syncOfflineDrafts();
+    });
+    window.addEventListener("offline", () => {
+        setOfflineMode(true);
+    });
+    if (els.offlineSyncBtn) {
+        els.offlineSyncBtn.addEventListener("click", () => {
+            syncOfflineDrafts({ manual: true });
+        });
+    }
+    updateOfflineStatusUI();
+}
+
 function normalizePaginated(data) {
     if (!data) {
         return { count: 0, next: null, previous: null, results: [] };
@@ -1689,7 +2336,21 @@ function updatePager({ prevEl, nextEl, pageEl, offset, limit, pageData }) {
 }
 
 async function loadBranches() {
-    branches = await apiFetch("/business/branches/") || [];
+    const data = await apiFetch("/business/branches/");
+    if (data && Array.isArray(data)) {
+        branches = data;
+        cacheOfflineData("branches", branches);
+    } else if (!navigator.onLine) {
+        const cached = await readOfflineCache("branches");
+        if (cached) {
+            branches = cached;
+            setOfflineMode(true);
+        } else {
+            branches = [];
+        }
+    } else {
+        branches = [];
+    }
     els.branchSelect.innerHTML = branches.length
         ? branches.map(b => `<option value="${b.id}">${b.name} — ${b.location}</option>`).join("")
         : `<option value="">No branches found</option>`;
@@ -1698,7 +2359,22 @@ async function loadBranches() {
 }
 
 async function loadCustomers() {
-    customers = ensureArray(await apiFetchAll("/customers/"), "customers");
+    const data = await apiFetchAll("/customers/");
+    const list = ensureArray(data, "customers");
+    if (list.length) {
+        customers = list;
+        cacheOfflineData("customers", customers);
+    } else if (!navigator.onLine) {
+        const cached = await readOfflineCache("customers");
+        if (cached) {
+            customers = cached;
+            setOfflineMode(true);
+        } else {
+            customers = [];
+        }
+    } else {
+        customers = list;
+    }
     els.customerSelect.innerHTML = customers.length
         ? customers.map(c => `<option value="${c.id}">${c.name}</option>`).join("")
         : `<option value="">No customers found</option>`;
@@ -1764,7 +2440,21 @@ async function loadAssignableUsers() {
 
 async function loadProducts() {
     const products = await apiFetchAll("/inventory/products/");
-    allProducts = ensureArray(products, "allProducts");
+    const list = ensureArray(products, "allProducts");
+    if (list.length) {
+        allProducts = list;
+        cacheOfflineData("products", allProducts);
+    } else if (!navigator.onLine) {
+        const cached = await readOfflineCache("products");
+        if (cached) {
+            allProducts = cached;
+            setOfflineMode(true);
+        } else {
+            allProducts = [];
+        }
+    } else {
+        allProducts = list;
+    }
     buildCategoryFilters();
     renderProducts();
 }
@@ -4091,9 +4781,9 @@ function removeFromCart(productId) {
     scheduleReprice();
 }
 
-async function clearCart() {
+async function clearCart({ skipServer = false } = {}) {
     resetMpesaPending();
-    if (currentSaleId) {
+    if (!skipServer && currentSaleId) {
         try {
             await cancelSale(currentSaleId);
         } catch (err) {
@@ -4104,6 +4794,8 @@ async function clearCart() {
     cart = [];
     currentSaleId = null;
     currentSaleMeta = null;
+    currentOfflineDraftId = null;
+    currentOfflineDraftCorrelationId = null;
     renderCart();
     updateTotals();
     els.discountInput.value = 0;
@@ -4341,6 +5033,9 @@ function buildPayload({ status } = {}) {
             quantity: item.qty,
         })),
     };
+    if (currentOfflineDraftCorrelationId) {
+        payload.correlation_id = currentOfflineDraftCorrelationId;
+    }
 
     if (isCredit) {
         payload.is_credit_sale = true;
@@ -4720,6 +5415,11 @@ function renderCreditSalesList(list, target) {
 async function syncDraftPricing() {
     if (!validateSaleInputs()) return;
     if (cart.length === 0) return;
+    if (!navigator.onLine) {
+        setOfflineMode(true);
+        await saveOfflineDraft({ reason: "offline" });
+        return;
+    }
 
     try {
         let saleData;
@@ -4735,6 +5435,10 @@ async function syncDraftPricing() {
         updateTotals();
     } catch (err) {
         console.error("Reprice failed:", err);
+        if (isNetworkError(err)) {
+            setOfflineMode(true);
+            await saveOfflineDraft({ reason: err.message || "offline" });
+        }
     }
 }
 
@@ -4789,6 +5493,16 @@ async function checkout() {
         posLog("[pos] checkout aborted: validation failed");
         return;
     }
+    if (!navigator.onLine) {
+        setOfflineMode(true);
+        await saveOfflineDraft({ reason: "offline" });
+        toast("Offline: sale saved as a local draft. Sync when online.", "warning");
+        currentSaleId = null;
+        currentSaleMeta = null;
+        currentSaleType = "retail";
+        await clearCart({ skipServer: true });
+        return;
+    }
 
     if (getSelectedPaymentMethod() === "mpesa") {
         await checkoutMpesa();
@@ -4825,7 +5539,17 @@ async function checkout() {
         await refreshCustomerOrdersAfterSaleComplete(saleId);
     } catch (err) {
         posLog("[pos] checkout error", err?.message || err);
-        toast(`Sale failed: ${err.message}`, "error");
+        if (isNetworkError(err)) {
+            setOfflineMode(true);
+            await saveOfflineDraft({ reason: err.message || "offline" });
+            toast("Offline: sale saved as a local draft. Sync when online.", "warning");
+            currentSaleId = null;
+            currentSaleMeta = null;
+            currentSaleType = "retail";
+            await clearCart({ skipServer: true });
+        } else {
+            toast(`Sale failed: ${err.message}`, "error");
+        }
     } finally {
         els.checkoutBtn.disabled = false;
         updateCheckoutButtonLabel();
@@ -4836,6 +5560,11 @@ async function checkoutMpesa() {
     const payload = buildPayload();
     const amountPaid = parseFloat(els.amountPaid.value) || 0;
     const phoneNumber = (els.mpesaPhone?.value || "").trim();
+    if (!navigator.onLine) {
+        toast("Offline: M-Pesa requires an internet connection", "error");
+        setOfflineMode(true);
+        return;
+    }
 
     if (!phoneNumber) {
         toast("M-Pesa phone number is required", "error");
@@ -4941,6 +5670,15 @@ async function holdSale() {
     const csrfToken = getCSRFToken();
 
     try {
+        if (!navigator.onLine) {
+            setOfflineMode(true);
+            await saveOfflineDraft({ reason: "offline" });
+            toast("Offline: draft saved locally.", "warning");
+            currentSaleId = null;
+            currentSaleType = "retail";
+            await clearCart({ skipServer: true });
+            return;
+        }
         let saleId = currentSaleId;
         if (saleId) {
             await updateSale(saleId, buildPayload());
@@ -4968,7 +5706,16 @@ async function holdSale() {
         clearCart();
         loadHeldSales();
     } catch (err) {
-        toast(`Hold failed: ${err.message}`, "error");
+        if (isNetworkError(err)) {
+            setOfflineMode(true);
+            await saveOfflineDraft({ reason: err.message || "offline" });
+            toast("Offline: draft saved locally.", "warning");
+            currentSaleId = null;
+            currentSaleType = "retail";
+            await clearCart({ skipServer: true });
+        } else {
+            toast(`Hold failed: ${err.message}`, "error");
+        }
     }
 }
 
@@ -7746,6 +8493,7 @@ function activateSaleRow(productId) {
 function applySaleDetailToCart(sale) {
     if (!sale || !Array.isArray(sale.items)) return;
     currentSaleId = sale.id;
+    currentOfflineDraftCorrelationId = null;
     currentSaleType = sale.sale_type || currentSaleType;
     els.saleTypeSelect.value = currentSaleType;
 
@@ -7900,6 +8648,9 @@ async function loadInitialData() {
         loadProducts(),
         loadHeldSales(),
     ]);
+    if (navigator.onLine) {
+        syncOfflineDrafts();
+    }
 }
 
 function handleUnauthorized() {
