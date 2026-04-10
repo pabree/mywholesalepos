@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-10.2";
+const APP_BUILD = "2026-04-10.9";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -107,6 +107,19 @@ let inventoryScanStream = null;
 let inventoryScanDetector = null;
 let inventoryScanActive = false;
 let inventoryScanLoopTimer = null;
+let posScanStream = null;
+let posScanDetector = null;
+let posScanActive = false;
+let posScanLoopTimer = null;
+let posScanLastValue = null;
+let posScanLastAt = 0;
+let mobileSearchTimer = null;
+let mobileSearchToken = 0;
+let mobileSearchResults = null;
+let mobileSearchLoading = false;
+let mobileSearchQuery = "";
+let mobileCustomerCreating = false;
+let lastMobileSaleId = null;
 let backOfficeSales = [];
 let backOfficeSalesQuery = "";
 let backOfficeSalesOffset = 0;
@@ -180,6 +193,7 @@ let offlineDraftCount = 0;
 let currentOfflineDraftCorrelationId = null;
 let offlineSyncTimer = null;
 let offlineSyncBackground = false;
+let activeMobileTab = "products";
 
 const OFFLINE_DB_NAME = "pos_offline_v1";
 const OFFLINE_DB_VERSION = 1;
@@ -427,6 +441,12 @@ const els = {
     inventoryScanClose: document.getElementById("inventory-scan-close"),
     inventoryScanVideo: document.getElementById("inventory-scan-video"),
     inventoryScanStatus: document.getElementById("inventory-scan-status"),
+    posScanBtn: document.getElementById("mobile-pos-scan-btn"),
+    posScanModal: document.getElementById("pos-scan-modal"),
+    posScanClose: document.getElementById("pos-scan-close"),
+    posScanVideo: document.getElementById("pos-scan-video"),
+    posScanStatus: document.getElementById("pos-scan-status"),
+    posScanCode: document.getElementById("pos-scan-code"),
     backofficeSalesSearch: document.getElementById("backoffice-sales-search"),
     backofficeSalesBranch: document.getElementById("backoffice-sales-branch"),
     backofficeSalesStatus: document.getElementById("backoffice-sales-status"),
@@ -734,6 +754,32 @@ const els = {
     returnsSubmitBtn: document.getElementById("returns-submit-btn"),
     returnsTotal: document.getElementById("returns-total"),
     returnsError: document.getElementById("returns-error"),
+    mobileRoleBanner: document.getElementById("mobile-role-banner"),
+    mobileProductsList: document.getElementById("mobile-products-list"),
+    mobileCartPanel: document.getElementById("mobile-cart-panel"),
+    mobileCartList: document.getElementById("mobile-cart-list"),
+    mobileCartCheckout: document.getElementById("mobile-cart-checkout"),
+    mobileSubtotal: document.getElementById("mobile-subtotal"),
+    mobileGrandTotal: document.getElementById("mobile-grand-total"),
+    mobileItemsCount: document.getElementById("mobile-items-count"),
+    mobileHeldPanel: document.getElementById("mobile-held-panel"),
+    mobileHeldList: document.getElementById("mobile-held-list"),
+    mobileHeldRefresh: document.getElementById("mobile-held-refresh"),
+    mobileNav: document.getElementById("mobile-pos-nav"),
+    mobileNavButtons: document.querySelectorAll("#mobile-pos-nav .mobile-nav-btn"),
+    mobileCustomerAdd: document.getElementById("mobile-customer-add"),
+    mobileCustomerCurrent: document.getElementById("mobile-customer-current"),
+    mobileCustomerModal: document.getElementById("mobile-customer-modal"),
+    mobileCustomerName: document.getElementById("mobile-customer-name"),
+    mobileCustomerSubmit: document.getElementById("mobile-customer-submit"),
+    mobileCustomerCancel: document.getElementById("mobile-customer-cancel"),
+    mobileCustomerError: document.getElementById("mobile-customer-error"),
+    mobileSuccessModal: document.getElementById("mobile-success-modal"),
+    mobileSuccessClose: document.getElementById("mobile-success-close"),
+    mobileSuccessBody: document.getElementById("mobile-success-body"),
+    mobileSuccessReceipt: document.getElementById("mobile-success-receipt"),
+    mobileSuccessNewSale: document.getElementById("mobile-success-new-sale"),
+    mobileSuccessProducts: document.getElementById("mobile-success-products"),
 };
 
 // ——— Overlay / Modal Helpers ———
@@ -935,6 +981,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderExpenseCategoryOptions();
     setupOverlayInteractions();
     initOfflineSupport();
+    initMobileNav();
     bindPurchaseLineActions();
 
     els.productSearch.addEventListener("input", () => {
@@ -1079,6 +1126,46 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (els.inventoryScanClose) {
         els.inventoryScanClose.addEventListener("click", closeInventoryScanModal);
+    }
+    if (els.posScanBtn) {
+        els.posScanBtn.addEventListener("click", () => {
+            if (!canPerformSales()) {
+                toast("Sales are not available for your role.", "error");
+                return;
+            }
+            openPosScanModal();
+        });
+    }
+    if (els.posScanClose) {
+        els.posScanClose.addEventListener("click", closePosScanModal);
+    }
+    if (els.mobileCustomerAdd) {
+        els.mobileCustomerAdd.addEventListener("click", openMobileCustomerModal);
+    }
+    if (els.mobileCustomerCancel) {
+        els.mobileCustomerCancel.addEventListener("click", closeMobileCustomerModal);
+    }
+    if (els.mobileCustomerSubmit) {
+        els.mobileCustomerSubmit.addEventListener("click", submitMobileCustomer);
+    }
+    if (els.mobileSuccessClose) {
+        els.mobileSuccessClose.addEventListener("click", closeMobileSuccessModal);
+    }
+    if (els.mobileSuccessReceipt) {
+        els.mobileSuccessReceipt.addEventListener("click", () => {
+            if (!lastMobileSaleId) return;
+            closeMobileSuccessModal();
+            showReceipt(lastMobileSaleId, { autoPrint: false });
+        });
+    }
+    if (els.mobileSuccessNewSale) {
+        els.mobileSuccessNewSale.addEventListener("click", mobileNewSale);
+    }
+    if (els.mobileSuccessProducts) {
+        els.mobileSuccessProducts.addEventListener("click", () => {
+            closeMobileSuccessModal();
+            setMobileTab("products");
+        });
     }
     if (els.inventoryAdjustBranch) {
         els.inventoryAdjustBranch.addEventListener("change", () => {
@@ -1794,8 +1881,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         scheduleReprice();
     });
-    els.customerSelect.addEventListener("change", scheduleReprice);
-    els.branchSelect.addEventListener("change", scheduleReprice);
+    els.customerSelect.addEventListener("change", () => {
+        scheduleReprice();
+        updateMobileCustomerLabel();
+    });
+    els.branchSelect.addEventListener("change", () => {
+        scheduleReprice();
+        loadProducts();
+    });
     els.discountInput.addEventListener("input", () => {
         updateTotals();
         scheduleReprice();
@@ -2032,6 +2125,185 @@ function startClock() {
     };
     update();
     setInterval(update, 1000);
+}
+
+// ——— Mobile POS Nav ———
+function isMobileLayout() {
+    return window.matchMedia && window.matchMedia("(max-width: 900px)").matches;
+}
+
+function setMobileTab(tab) {
+    if (!tab) return;
+    activeMobileTab = tab;
+    if (isMobileLayout()) {
+        document.body.dataset.mobileTab = tab;
+    }
+    if (els.mobileNavButtons && els.mobileNavButtons.length) {
+        els.mobileNavButtons.forEach(btn => {
+            const active = btn.dataset.tab === tab;
+            btn.classList.toggle("active", active);
+        });
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function initMobileNav() {
+    if (els.mobileNavButtons && els.mobileNavButtons.length) {
+        els.mobileNavButtons.forEach(btn => {
+            btn.addEventListener("click", () => setMobileTab(btn.dataset.tab));
+        });
+    }
+    if (els.mobileCartCheckout) {
+        els.mobileCartCheckout.addEventListener("click", () => setMobileTab("checkout"));
+    }
+    if (els.mobileHeldRefresh) {
+        els.mobileHeldRefresh.addEventListener("click", () => loadHeldSales());
+    }
+
+    const apply = () => {
+        if (isMobileLayout()) {
+            if (!document.body.dataset.mobileTab) {
+                setMobileTab(activeMobileTab);
+            } else {
+                setMobileTab(document.body.dataset.mobileTab);
+            }
+        } else {
+            document.body.removeAttribute("data-mobile-tab");
+        }
+        updateMobileRoleBanner();
+    };
+    apply();
+    window.addEventListener("resize", () => {
+        requestAnimationFrame(apply);
+    });
+}
+
+function updateMobileRoleBanner() {
+    if (!els.mobileRoleBanner) return;
+    const blocked = !canPerformSales();
+    if (!isMobileLayout()) {
+        els.mobileRoleBanner.classList.add("hidden");
+        return;
+    }
+    if (blocked) {
+        els.mobileRoleBanner.textContent = "Sales are not available for your role.";
+        els.mobileRoleBanner.classList.remove("hidden");
+    } else {
+        els.mobileRoleBanner.classList.add("hidden");
+    }
+}
+
+function openMobileCustomerModal() {
+    if (!els.mobileCustomerModal) return;
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
+    if (!canCreateCustomer()) {
+        toast("Only supervisors or admins can create customers.", "error");
+        return;
+    }
+    if (els.mobileCustomerError) els.mobileCustomerError.textContent = "";
+    if (els.mobileCustomerName) els.mobileCustomerName.value = "";
+    openOverlay(els.mobileCustomerModal, { closeOthers: false });
+    requestAnimationFrame(() => {
+        els.mobileCustomerName?.focus();
+    });
+}
+
+function closeMobileCustomerModal() {
+    closeOverlay(els.mobileCustomerModal);
+}
+
+async function submitMobileCustomer() {
+    if (mobileCustomerCreating) return;
+    if (!canCreateCustomer()) {
+        toast("Only supervisors or admins can create customers.", "error");
+        return;
+    }
+    const name = (els.mobileCustomerName?.value || "").trim();
+    if (!name) {
+        if (els.mobileCustomerError) els.mobileCustomerError.textContent = "Name is required.";
+        return;
+    }
+    mobileCustomerCreating = true;
+    if (els.mobileCustomerError) els.mobileCustomerError.textContent = "";
+    if (els.mobileCustomerSubmit) {
+        els.mobileCustomerSubmit.disabled = true;
+        els.mobileCustomerSubmit.textContent = "Creating...";
+    }
+    try {
+        const res = await apiRequest("/customers/create/", {
+            method: "POST",
+            body: { name },
+        });
+        const id = res?.id;
+        if (!id) throw new Error("Customer creation failed");
+        const newCustomer = { id, name };
+        customers = [newCustomer, ...customers];
+        renderCustomerOptions();
+        if (els.customerSelect) {
+            els.customerSelect.value = id;
+        }
+        updateMobileCustomerLabel();
+        toast("Customer created", "success");
+        closeMobileCustomerModal();
+    } catch (err) {
+        const msg = err.message || "Unable to create customer.";
+        if (els.mobileCustomerError) els.mobileCustomerError.textContent = msg;
+        toast(msg, "error");
+    } finally {
+        mobileCustomerCreating = false;
+        if (els.mobileCustomerSubmit) {
+            els.mobileCustomerSubmit.disabled = false;
+            els.mobileCustomerSubmit.textContent = "Create Customer";
+        }
+    }
+}
+
+function openMobileSuccessModal() {
+    if (!els.mobileSuccessModal) return;
+    openOverlay(els.mobileSuccessModal, { closeOthers: false });
+}
+
+function closeMobileSuccessModal() {
+    closeOverlay(els.mobileSuccessModal);
+}
+
+async function showMobileSuccess(saleId) {
+    if (!saleId || !els.mobileSuccessBody) return;
+    lastMobileSaleId = saleId;
+    const sale = await apiFetch(`/sales/${saleId}/`);
+    const customerName = sale?.customer ? getCustomerName(sale.customer) : "—";
+    const method = sale?.payment_mode ? formatPaymentMode(sale.payment_mode) : "Cash";
+    const total = sale?.grand_total ?? "0.00";
+    const saleNumber = shortOrderId(saleId);
+    els.mobileSuccessBody.innerHTML = `
+        <div><strong>Sale #${saleNumber}</strong></div>
+        <div>Customer: <strong>${esc(customerName)}</strong></div>
+        <div>Total: <strong>${fmtPrice(total)}</strong></div>
+        <div>Payment: <strong>${esc(method)}</strong></div>
+    `;
+    openMobileSuccessModal();
+}
+
+function mobileNewSale() {
+    closeMobileSuccessModal();
+    resetMpesaPending();
+    clearCart({ skipServer: true });
+    currentSaleId = null;
+    currentSaleType = "retail";
+    if (els.saleTypeSelect) {
+        els.saleTypeSelect.value = "retail";
+    }
+    if (els.creditToggle) {
+        els.creditToggle.checked = false;
+    }
+    handleCreditToggle(true);
+    repriceTimer && clearTimeout(repriceTimer);
+    loadProducts();
+    loadHeldSales();
+    setMobileTab("products");
 }
 
 // ——— Data Loading ———
@@ -2977,11 +3249,24 @@ async function loadCustomers() {
     } else {
         customers = list;
     }
+    renderCustomerOptions();
+    if (heldSalesCache.length) renderHeldSales(heldSalesCache);
+    renderLedgerCustomerOptions();
+}
+
+function renderCustomerOptions() {
+    if (!els.customerSelect) return;
     els.customerSelect.innerHTML = customers.length
         ? customers.map(c => `<option value="${c.id}">${c.name}</option>`).join("")
         : `<option value="">No customers found</option>`;
-    if (heldSalesCache.length) renderHeldSales(heldSalesCache);
-    renderLedgerCustomerOptions();
+    updateMobileCustomerLabel();
+}
+
+function updateMobileCustomerLabel() {
+    if (!els.mobileCustomerCurrent) return;
+    const selectedId = els.customerSelect?.value;
+    const selected = customers.find(c => c.id === selectedId);
+    els.mobileCustomerCurrent.textContent = selected ? selected.name : "—";
 }
 
 function renderExpenseBranchOptions() {
@@ -3041,7 +3326,9 @@ async function loadAssignableUsers() {
 }
 
 async function loadProducts() {
-    const products = await apiFetchAll("/inventory/products/");
+    const branchId = els.branchSelect?.value || "";
+    const endpoint = withParams("/inventory/products/", { branch: branchId });
+    const products = await apiFetchAll(endpoint);
     const list = ensureArray(products, "allProducts");
     if (list.length) {
         allProducts = list;
@@ -3059,6 +3346,9 @@ async function loadProducts() {
     }
     buildCategoryFilters();
     renderProducts();
+    if (isMobileLayout()) {
+        renderMobileProducts();
+    }
 }
 
 async function downloadProductTemplate() {
@@ -5665,6 +5955,145 @@ function stopInventoryScanner() {
     }
 }
 
+// ——— POS Barcode Scan (Mobile) ———
+function openPosScanModal() {
+    if (!els.posScanModal) return;
+    openOverlay(els.posScanModal, { closeOthers: false });
+    startPosScanner();
+}
+
+function closePosScanModal() {
+    stopPosScanner();
+    closeOverlay(els.posScanModal);
+}
+
+function setPosScanStatus(message = "", tone = "info") {
+    if (!els.posScanStatus) return;
+    els.posScanStatus.textContent = message;
+    els.posScanStatus.dataset.tone = tone;
+}
+
+function setPosScanCode(value = "") {
+    if (!els.posScanCode) return;
+    els.posScanCode.textContent = value ? `Detected: ${value}` : "";
+}
+
+async function startPosScanner() {
+    if (posScanActive) return;
+    if (!els.posScanVideo) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setPosScanStatus("Camera not supported on this device.", "error");
+        focusSearchInput();
+        return;
+    }
+    if (!("BarcodeDetector" in window)) {
+        setPosScanStatus("Barcode scanning is not supported in this browser.", "error");
+        focusSearchInput();
+        return;
+    }
+    try {
+        posScanDetector = new BarcodeDetector({
+            formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "code_93", "itf", "qr_code"],
+        });
+        posScanStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: "environment" } },
+            audio: false,
+        });
+        els.posScanVideo.srcObject = posScanStream;
+        await els.posScanVideo.play();
+        posScanActive = true;
+        posScanLastValue = null;
+        posScanLastAt = 0;
+        setPosScanStatus("Scanning... Hold steady.", "info");
+        setPosScanCode("");
+        runPosScanLoop();
+    } catch (err) {
+        setPosScanStatus("Camera permission denied or unavailable.", "error");
+        stopPosScanner();
+    }
+}
+
+function runPosScanLoop() {
+    if (!posScanActive || !posScanDetector || !els.posScanVideo) return;
+    if (posScanLoopTimer) clearTimeout(posScanLoopTimer);
+    posScanLoopTimer = setTimeout(async () => {
+        if (!posScanActive) return;
+        try {
+            const codes = await posScanDetector.detect(els.posScanVideo);
+            if (codes && codes.length) {
+                const value = codes[0].rawValue || codes[0].data || "";
+                if (value) {
+                    handlePosScanResult(value);
+                    return;
+                }
+            }
+        } catch (err) {
+            // ignore transient scan errors
+        }
+        runPosScanLoop();
+    }, 220);
+}
+
+function handlePosScanResult(value) {
+    const code = String(value || "").trim();
+    if (!code) return;
+    const now = Date.now();
+    if (posScanLastValue === code && now - posScanLastAt < 2000) {
+        runPosScanLoop();
+        return;
+    }
+    posScanLastValue = code;
+    posScanLastAt = now;
+    setPosScanCode(code);
+    if (!canPerformSales()) {
+        setPosScanStatus("Sales are not available for your role.", "error");
+        return;
+    }
+    const match = findExactSkuMatch(code);
+    if (match) {
+        addToCart(match.id);
+        stopPosScanner();
+        closeOverlay(els.posScanModal);
+        toast(`Scanned: ${code}`, "success");
+        return;
+    }
+    setPosScanStatus("Searching for product...", "info");
+    fetchMobileSearch(code)
+        .then(() => {
+            const results = Array.isArray(mobileSearchResults) ? mobileSearchResults : [];
+            const found = results.find(p => (p.sku || "").toLowerCase() === code.toLowerCase());
+            if (found) {
+                addToCart(found.id);
+                stopPosScanner();
+                closeOverlay(els.posScanModal);
+                toast(`Scanned: ${code}`, "success");
+                return;
+            }
+            setPosScanStatus("No matching product found. Try again.", "error");
+            runPosScanLoop();
+        })
+        .catch(() => {
+            setPosScanStatus("No matching product found. Try again.", "error");
+            runPosScanLoop();
+        });
+}
+
+function stopPosScanner() {
+    posScanActive = false;
+    if (posScanLoopTimer) {
+        clearTimeout(posScanLoopTimer);
+        posScanLoopTimer = null;
+    }
+    if (posScanStream) {
+        posScanStream.getTracks().forEach(track => track.stop());
+        posScanStream = null;
+    }
+    if (els.posScanVideo) {
+        els.posScanVideo.pause();
+        els.posScanVideo.srcObject = null;
+    }
+}
+
 function getInventoryAdjustMode() {
     if (!els.inventoryAdjustMode) return "manual";
     const selected = Array.from(els.inventoryAdjustMode).find(input => input.checked);
@@ -6828,14 +7257,22 @@ function updateSearchResults({ forceOpen = false, keepOpen = false } = {}) {
     const shouldOpen = forceOpen || keepOpen || (!!query && filtered.length > 0);
     searchResultsOpen = shouldOpen;
 
+    if (isMobileLayout()) {
+        scheduleMobileSearch(query);
+    } else {
+        resetMobileSearch();
+    }
+
     if (!shouldOpen || !query) {
         hideSearchResults();
+        renderMobileProducts();
         return;
     }
 
     if (!searchResults.length) {
         els.productSearchResults.innerHTML = `<div class="search-result-empty">No matches</div>`;
         els.productSearchResults.classList.remove("hidden");
+        renderMobileProducts();
         return;
     }
 
@@ -6856,6 +7293,104 @@ function updateSearchResults({ forceOpen = false, keepOpen = false } = {}) {
         `;
     }).join("");
     els.productSearchResults.classList.remove("hidden");
+    renderMobileProducts();
+}
+
+function renderMobileProducts() {
+    if (!els.mobileProductsList) return;
+    const query = (els.productSearch?.value || "").trim().toLowerCase();
+    const hasQuery = Boolean(query);
+    const list = isMobileLayout() && hasQuery && Array.isArray(mobileSearchResults)
+        ? mobileSearchResults
+        : lastFilteredProducts.slice(0, 20);
+
+    if (mobileSearchLoading) {
+        els.mobileProductsList.innerHTML = `<div class="sale-entry-empty">Searching...</div>`;
+        return;
+    }
+
+    if (!list.length) {
+        const message = hasQuery ? "No matching products." : "Start typing to search products.";
+        els.mobileProductsList.innerHTML = `<div class="sale-entry-empty">${message}</div>`;
+        return;
+    }
+
+    els.mobileProductsList.innerHTML = list.map((p) => {
+        const stockValue = Number(p.stock || 0);
+        const stockClass = stockValue <= 0 ? "stock-out" : stockValue <= 10 ? "stock-low" : "stock-ok";
+        const stockLabel = stockValue <= 0 ? "Out of stock" : `${stockValue} in stock`;
+        const canSell = canPerformSales();
+        return `
+            <div class="mobile-product-card">
+                <div class="mobile-product-main">
+                    <div class="mobile-product-name">${esc(p.name)}</div>
+                    <div class="mobile-product-sku">SKU: ${esc(p.sku || "—")}</div>
+                    <div class="mobile-product-stock ${stockClass}">${stockLabel}</div>
+                </div>
+                <div class="mobile-product-meta">
+                    <div class="mobile-product-price">${fmtPrice(p.selling_price)}</div>
+                    <button class="mobile-product-action" ${canSell ? "" : "disabled"} onclick="addToCart('${p.id}')">Add</button>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+function resetMobileSearch() {
+    if (mobileSearchTimer) {
+        clearTimeout(mobileSearchTimer);
+        mobileSearchTimer = null;
+    }
+    mobileSearchToken += 1;
+    mobileSearchResults = null;
+    mobileSearchLoading = false;
+    mobileSearchQuery = "";
+}
+
+function scheduleMobileSearch(query) {
+    if (!isMobileLayout()) return;
+    const trimmed = (query || "").trim().toLowerCase();
+    if (!trimmed) {
+        resetMobileSearch();
+        renderMobileProducts();
+        return;
+    }
+    if (mobileSearchQuery === trimmed && mobileSearchResults !== null) {
+        return;
+    }
+    mobileSearchQuery = trimmed;
+    if (mobileSearchTimer) clearTimeout(mobileSearchTimer);
+    mobileSearchLoading = true;
+    renderMobileProducts();
+    mobileSearchTimer = setTimeout(() => {
+        fetchMobileSearch(trimmed);
+    }, 320);
+}
+
+async function fetchMobileSearch(query) {
+    const token = ++mobileSearchToken;
+    const branchId = els.branchSelect?.value || "";
+    const endpoint = withParams("/inventory/products/", {
+        branch: branchId,
+        search: query,
+        limit: 20,
+        offset: 0,
+    });
+    mobileSearchLoading = true;
+    try {
+        const data = await apiFetch(endpoint);
+        if (token !== mobileSearchToken) return;
+        const page = normalizePaginated(data);
+        mobileSearchResults = ensureArray(page, "mobile_search_results");
+    } catch (err) {
+        if (token !== mobileSearchToken) return;
+        mobileSearchResults = [];
+    } finally {
+        if (token === mobileSearchToken) {
+            mobileSearchLoading = false;
+            renderMobileProducts();
+        }
+    }
 }
 
 function hideSearchResults() {
@@ -6870,6 +7405,7 @@ function hideSearchResults() {
 function clearSearchInput() {
     if (!els.productSearch) return;
     els.productSearch.value = "";
+    updateSearchResults();
 }
 
 function focusSearchInput() {
@@ -6896,6 +7432,10 @@ function selectSearchResult(productId) {
 
 // ——— Cart ———
 function addToCart(productId) {
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
     const product = ensureArray(allProducts, "allProducts").find(p => p.id === productId);
     if (!product) return;
     const baseUnit = getBaseUnit(product);
@@ -6929,6 +7469,10 @@ function addToCart(productId) {
 }
 
 function updateQty(productId, delta) {
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
     const item = cart.find(i => i.product.id === productId);
     if (!item) return;
 
@@ -6948,6 +7492,10 @@ function updateQty(productId, delta) {
 }
 
 function removeFromCart(productId) {
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
     cart = cart.filter(i => i.product.id !== productId);
     if (activeSaleRowId === productId) {
         activeSaleRowId = null;
@@ -6958,6 +7506,10 @@ function removeFromCart(productId) {
 }
 
 async function clearCart({ skipServer = false } = {}) {
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
     resetMpesaPending();
     if (!skipServer && currentSaleId) {
         try {
@@ -6990,9 +7542,11 @@ function renderCart() {
             <tr class="sale-entry-empty">
                 <td colspan="7">No items yet. Use search to add products.</td>
             </tr>`;
+        renderMobileCart();
         return;
     }
 
+    const canSell = canPerformSales();
     els.cartItems.innerHTML = cart.map(item => {
         const unitPrice = getItemUnitPrice(item);
         const total = getItemLineTotal(item, unitPrice);
@@ -7013,16 +7567,48 @@ function renderCart() {
                 <td class="sale-entry-sku">${esc(item.product.sku || "—")}</td>
                 <td class="sale-entry-unit">${renderUnitSelect(item)}</td>
                 <td class="sale-entry-qty">
-                    <button class="qty-btn" onclick="event.stopPropagation(); updateQty('${item.product.id}', -1)">−</button>
+                    <button class="qty-btn" ${canSell ? "" : "disabled"} onclick="event.stopPropagation(); updateQty('${item.product.id}', -1)">−</button>
                     <span class="qty-value">${item.qty}</span>
-                    <button class="qty-btn" onclick="event.stopPropagation(); updateQty('${item.product.id}', 1)">+</button>
+                    <button class="qty-btn" ${canSell ? "" : "disabled"} onclick="event.stopPropagation(); updateQty('${item.product.id}', 1)">+</button>
                 </td>
                 <td class="sale-entry-price">${fmtPrice(unitPrice)}</td>
                 <td class="sale-entry-total">${fmtPrice(total)}</td>
                 <td class="sale-entry-action">
-                    <button class="cart-item-remove" onclick="event.stopPropagation(); removeFromCart('${item.product.id}')" title="Remove">✕</button>
+                    <button class="cart-item-remove" ${canSell ? "" : "disabled"} onclick="event.stopPropagation(); removeFromCart('${item.product.id}')" title="Remove">✕</button>
                 </td>
             </tr>`;
+    }).join("");
+    renderMobileCart();
+}
+
+function renderMobileCart() {
+    if (!els.mobileCartList) return;
+    if (!cart.length) {
+        els.mobileCartList.innerHTML = `<div class="sale-entry-empty">Cart is empty.</div>`;
+        return;
+    }
+
+    const canSell = canPerformSales();
+    els.mobileCartList.innerHTML = cart.map(item => {
+        const unitPrice = getItemUnitPrice(item);
+        const total = getItemLineTotal(item, unitPrice);
+        const unitLabel = item.unit?.unit_name || item.unit?.unit_code || "unit";
+        return `
+            <div class="mobile-cart-item">
+                <div class="mobile-cart-meta">
+                    <div class="mobile-cart-name">${esc(item.product.name)}</div>
+                    <div class="mobile-cart-sub">SKU: ${esc(item.product.sku || "—")} • ${esc(unitLabel)}</div>
+                    <div class="mobile-cart-sub">${fmtPrice(unitPrice)} each</div>
+                </div>
+                <div class="mobile-cart-controls">
+                    <button class="qty-btn" ${canSell ? "" : "disabled"} onclick="updateQty('${item.product.id}', -1)">−</button>
+                    <span class="qty-value">${item.qty}</span>
+                    <button class="qty-btn" ${canSell ? "" : "disabled"} onclick="updateQty('${item.product.id}', 1)">+</button>
+                    <button class="cart-item-remove" ${canSell ? "" : "disabled"} onclick="removeFromCart('${item.product.id}')" title="Remove">✕</button>
+                    <div class="mobile-cart-total">${fmtPrice(total)}</div>
+                </div>
+            </div>
+        `;
     }).join("");
 }
 
@@ -7156,11 +7742,15 @@ function updateTotals() {
     const tax = grandTotal * TAX_RATE / (1 + TAX_RATE);
     const amountPaid = parseFloat(els.amountPaid.value) || 0;
     const change = amountPaid - grandTotal;
+    const itemsCount = cart.reduce((sum, item) => sum + (item.qty || 0), 0);
 
     els.subtotal.textContent = fmtPrice(subtotal);
     els.taxAmount.textContent = fmtPrice(tax);
     els.grandTotal.textContent = fmtPrice(grandTotal);
     els.changeAmount.textContent = fmtPrice(Math.max(0, change));
+    if (els.mobileSubtotal) els.mobileSubtotal.textContent = fmtPrice(subtotal);
+    if (els.mobileGrandTotal) els.mobileGrandTotal.textContent = fmtPrice(grandTotal);
+    if (els.mobileItemsCount) els.mobileItemsCount.textContent = itemsCount;
 
     const empty = cart.length === 0;
     const canSell = canPerformSales();
@@ -7657,6 +8247,10 @@ async function cancelSale(saleId) {
 
 // ——— Checkout ———
 async function checkout() {
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
     posLog("[pos] checkout click", {
         saleId: currentSaleId,
         branch: els.branchSelect.value,
@@ -7714,7 +8308,11 @@ async function checkout() {
         currentSaleId = null;
         currentSaleMeta = null;
         currentSaleType = "retail";
-        showReceipt(saleId, { autoPrint: true });
+        if (isMobileLayout()) {
+            showMobileSuccess(saleId);
+        } else {
+            showReceipt(saleId, { autoPrint: true });
+        }
         loadProducts();
         loadHeldSales();
         await refreshCustomerOrdersAfterSaleComplete(saleId);
@@ -7738,6 +8336,10 @@ async function checkout() {
 }
 
 async function checkoutMpesa() {
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
     const payload = buildPayload();
     const amountPaid = parseFloat(els.amountPaid.value) || 0;
     const phoneNumber = (els.mpesaPhone?.value || "").trim();
@@ -7825,7 +8427,11 @@ async function pollMpesaPayment(paymentId) {
                 currentSaleId = null;
                 currentSaleMeta = null;
                 currentSaleType = "retail";
-                showReceipt(statusData.sale_id, { autoPrint: true });
+                if (isMobileLayout()) {
+                    showMobileSuccess(statusData.sale_id);
+                } else {
+                    showReceipt(statusData.sale_id, { autoPrint: true });
+                }
                 loadProducts();
                 loadHeldSales();
                 await refreshCustomerOrdersAfterSaleComplete(statusData.sale_id);
@@ -7845,6 +8451,10 @@ async function pollMpesaPayment(paymentId) {
 
 // ——— Hold Sale ———
 async function holdSale() {
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
     if (!validateSaleInputs()) return;
 
     const payload = buildPayload({ status: "held" });
@@ -10723,9 +11333,12 @@ async function loadHeldSales() {
 }
 
 function renderHeldSales(heldSales) {
-    if (!els.heldSalesList) return;
+    const targetLists = [els.heldSalesList, els.mobileHeldList].filter(Boolean);
+    if (!targetLists.length) return;
     if (!heldSales.length) {
-        els.heldSalesList.innerHTML = `<div class="held-empty">No held sales</div>`;
+        targetLists.forEach(list => {
+            list.innerHTML = `<div class="held-empty">No held sales</div>`;
+        });
         return;
     }
 
@@ -10739,10 +11352,13 @@ function renderHeldSales(heldSales) {
         return b ? b.name : "Branch";
     };
 
-    els.heldSalesList.innerHTML = heldSales.map(sale => {
+    const canSell = canPerformSales();
+    const html = heldSales.map(sale => {
         const total = sale.grand_total || "0.00";
+        const disabled = canSell ? "" : "disabled";
+        const disabledAttr = canSell ? "" : `aria-disabled="true"`;
         return `
-            <div class="held-item" onclick="resumeHeldSale('${sale.id}')">
+            <div class="held-item ${disabled}" ${disabledAttr} onclick="resumeHeldSale('${sale.id}')">
                 <div class="held-info">
                     <div class="held-title">${customerName(sale.customer)}</div>
                     <div class="held-meta">${branchName(sale.branch)} • ${sale.sale_type || "retail"} • ${new Date(sale.updated_at || sale.sale_date).toLocaleString()}</div>
@@ -10751,9 +11367,17 @@ function renderHeldSales(heldSales) {
             </div>
         `;
     }).join("");
+
+    targetLists.forEach(list => {
+        list.innerHTML = html;
+    });
 }
 
 async function resumeHeldSale(saleId) {
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
     let sale;
     try {
         sale = await resumeSale(saleId);
@@ -11297,6 +11921,10 @@ function canPerformSales() {
     return ["cashier", "salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }
 
+function canCreateCustomer() {
+    return ["salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
+}
+
 function canProcessReturns() {
     return ["cashier", "salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }
@@ -11319,6 +11947,17 @@ function applyRoleUI() {
     if (els.creditBtn) {
         els.creditBtn.disabled = !canSell;
     }
+    if (els.mobileCartCheckout) {
+        els.mobileCartCheckout.disabled = !canSell;
+    }
+    if (els.posScanBtn) {
+        els.posScanBtn.disabled = !canSell;
+    }
+    if (els.mobileCustomerAdd) {
+        els.mobileCustomerAdd.disabled = !canCreateCustomer();
+    }
+    updateMobileRoleBanner();
+    renderMobileProducts();
     if (els.returnsBtn) {
         const canReturn = canProcessReturns();
         els.returnsBtn.classList.toggle("btn-disabled", !canReturn);

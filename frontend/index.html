@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-10.2">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-10.9">
 </head>
 <body>
     <!-- Top Bar -->
@@ -70,6 +70,7 @@
 
     <!-- Main Content -->
     <main id="app">
+        <div id="mobile-role-banner" class="mobile-role-banner hidden"></div>
         <!-- LEFT: Sale Entry Panel -->
         <section id="products-panel" class="sale-entry-panel">
             <div class="panel-header">
@@ -89,7 +90,9 @@
                     <input type="text" id="product-search" placeholder="Scan barcode or search product..." autocomplete="off">
                     <div id="product-search-results" class="search-results hidden"></div>
                 </div>
+                <button id="mobile-pos-scan-btn" class="btn-secondary mobile-scan-btn" type="button">📷 Scan Barcode</button>
             </div>
+            <div id="mobile-products-list" class="mobile-products-list"></div>
             <div class="sale-entry-table-wrap">
                 <table class="sale-entry-table" id="sale-entry-table">
                     <thead>
@@ -112,11 +115,57 @@
             </div>
         </section>
 
+        <!-- MOBILE: Cart Panel -->
+        <section id="mobile-cart-panel" class="mobile-panel mobile-section" data-mobile-tab="cart">
+            <div class="panel-header">
+                <div>
+                    <h2>Cart</h2>
+                    <p class="panel-subtitle">Review items before checkout.</p>
+                </div>
+                <button id="mobile-cart-checkout" class="btn-secondary">Go to Checkout</button>
+            </div>
+            <div id="mobile-cart-list" class="mobile-cart-list">
+                <div class="sale-entry-empty">Cart is empty.</div>
+            </div>
+            <div class="mobile-cart-summary">
+                <div class="summary-row">
+                    <span>Items</span>
+                    <span id="mobile-items-count">0</span>
+                </div>
+                <div class="summary-row">
+                    <span>Subtotal</span>
+                    <span id="mobile-subtotal">0.00</span>
+                </div>
+                <div class="summary-row grand-total">
+                    <span>Total</span>
+                    <span id="mobile-grand-total">0.00</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- MOBILE: Held Sales -->
+        <section id="mobile-held-panel" class="mobile-panel mobile-section" data-mobile-tab="held">
+            <div class="panel-header">
+                <div>
+                    <h2>Held Sales</h2>
+                    <p class="panel-subtitle">Resume saved sales from the field.</p>
+                </div>
+                <button id="mobile-held-refresh" class="btn-ghost">Refresh</button>
+            </div>
+            <div id="mobile-held-list" class="held-list">
+                <div class="held-empty">No held sales</div>
+            </div>
+        </section>
+
         <!-- RIGHT: Cart Panel -->
         <section id="cart-panel">
             <div class="panel-header">
                 <h2>Current Sale</h2>
                 <button id="clear-cart-btn" class="btn-ghost" title="Clear cart">✕ Clear</button>
+            </div>
+            <div class="mobile-customer-row mobile-only">
+                <div class="mobile-customer-current">Customer: <strong id="mobile-customer-current">—</strong></div>
+                <button id="mobile-customer-add" class="btn-ghost btn-xs" type="button">+ New Customer</button>
             </div>
 
             <div class="cart-summary">
@@ -215,6 +264,13 @@
         </section>
     </main>
 
+    <nav id="mobile-pos-nav" class="mobile-pos-nav" aria-label="Mobile POS navigation">
+        <button class="mobile-nav-btn active" data-tab="products">Products</button>
+        <button class="mobile-nav-btn" data-tab="cart">Cart</button>
+        <button class="mobile-nav-btn" data-tab="checkout">Checkout</button>
+        <button class="mobile-nav-btn" data-tab="held">Held</button>
+    </nav>
+
     <!-- Receipt Modal -->
     <div id="receipt-modal" class="modal-overlay hidden" data-backdrop-close="true">
         <div class="modal-content receipt-modal">
@@ -248,6 +304,57 @@
             <div class="modal-body">
                 <video id="inventory-scan-video" class="scan-video" autoplay playsinline></video>
                 <div id="inventory-scan-status" class="scan-status">Point the camera at a barcode.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- POS Scan Modal -->
+    <div id="pos-scan-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content scan-modal">
+            <div class="modal-header">
+                <h3>Scan Barcode</h3>
+                <button id="pos-scan-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body">
+                <video id="pos-scan-video" class="scan-video" autoplay playsinline></video>
+                <div id="pos-scan-status" class="scan-status">Point the camera at a barcode.</div>
+                <div id="pos-scan-code" class="scan-status"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Quick Create Customer Modal -->
+    <div id="mobile-customer-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content mobile-customer-modal">
+            <div class="modal-header">
+                <h3>New Customer</h3>
+                <button id="mobile-customer-cancel" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="auth-section">
+                    <label for="mobile-customer-name">Customer Name</label>
+                    <input id="mobile-customer-name" class="modal-input" placeholder="e.g. Kiongozi Shop">
+                </div>
+                <div id="mobile-customer-error" class="form-error"></div>
+                <button id="mobile-customer-submit" class="btn-primary full-width">Create Customer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Sale Success Modal -->
+    <div id="mobile-success-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content mobile-success-modal">
+            <div class="modal-header">
+                <h3>Sale Completed</h3>
+                <button id="mobile-success-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="mobile-success-body" class="mobile-success-body"></div>
+                <div class="modal-actions">
+                    <button id="mobile-success-receipt" class="btn-secondary">View Receipt</button>
+                    <button id="mobile-success-new-sale" class="btn-primary">New Sale</button>
+                    <button id="mobile-success-products" class="btn-ghost">Back to Products</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1936,6 +2043,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-10.2"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-10.9"></script>
 </body>
 </html>

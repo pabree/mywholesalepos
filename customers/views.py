@@ -75,7 +75,7 @@ def _parse_bool(value):
 
 class CustomerCreateView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"supervisor", "admin"}
+    allowed_roles = {"salesperson", "supervisor", "admin"}
 
     def post(self, request):
         data = request.data or {}
