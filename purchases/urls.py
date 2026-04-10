@@ -9,6 +9,12 @@ from .views import (
     PurchaseOrderLineDeleteView,
     PurchaseOrderMarkOrderedView,
     PurchaseOrderReceiveView,
+    PurchaseOrderReceiptsView,
+    PurchaseOrderCancelView,
+    PurchaseOrderCreateBillView,
+    SupplierBillListView,
+    SupplierBillDetailView,
+    SupplierBillCancelView,
 )
 
 urlpatterns = [
@@ -21,4 +27,10 @@ urlpatterns = [
     path("<uuid:purchase_id>/lines/<uuid:line_id>/delete/", PurchaseOrderLineDeleteView.as_view(), name="purchase_line_delete"),
     path("<uuid:purchase_id>/mark-ordered/", PurchaseOrderMarkOrderedView.as_view(), name="purchase_mark_ordered"),
     path("<uuid:purchase_id>/receive/", PurchaseOrderReceiveView.as_view(), name="purchase_receive"),
+    path("<uuid:purchase_id>/receipts/", PurchaseOrderReceiptsView.as_view(), name="purchase_receipts"),
+    path("<uuid:purchase_id>/cancel/", PurchaseOrderCancelView.as_view(), name="purchase_cancel"),
+    path("bills/", SupplierBillListView.as_view(), name="supplier_bill_list"),
+    path("bills/<uuid:bill_id>/", SupplierBillDetailView.as_view(), name="supplier_bill_detail"),
+    path("bills/<uuid:bill_id>/cancel/", SupplierBillCancelView.as_view(), name="supplier_bill_cancel"),
+    path("<uuid:purchase_id>/create-bill/", PurchaseOrderCreateBillView.as_view(), name="purchase_create_bill"),
 ]

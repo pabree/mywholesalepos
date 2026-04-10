@@ -10,6 +10,7 @@ from accounts.permissions import RolePermission
 from core.pagination import StandardLimitOffsetPagination
 from .models import Supplier
 from inventory.models import ProductSupplier
+from purchases.models import SupplierBill, SupplierLedgerEntry
 from .serializers import SupplierSerializer
 
 
@@ -154,4 +155,94 @@ class SupplierProductsView(APIView):
             }
             for link in links
         ]
+        return Response(data)
+
+
+class SupplierLedgerView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request, supplier_id):
+        supplier = get_object_or_404(Supplier.all_objects, id=supplier_id)
+        branch_id = request.query_params.get("branch")
+        entry_type = (request.query_params.get("entry_type") or "").strip().lower()
+
+        qs = SupplierLedgerEntry.objects.select_related("branch", "bill", "created_by").filter(supplier=supplier)
+        if branch_id:
+            qs = qs.filter(branch_id=branch_id)
+        if entry_type:
+            qs = qs.filter(entry_type=entry_type)
+
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+
+        data = []
+        for entry in page:
+            user = entry.created_by
+            if user:
+                name = (getattr(user, "get_full_name", None) or (lambda: ""))()
+                display = name or getattr(user, "username", "") or getattr(user, "email", "") or "—"
+            else:
+                display = "—"
+            data.append({
+                "id": str(entry.id),
+                "entry_type": entry.entry_type,
+                "direction": entry.direction,
+                "amount": str(entry.amount),
+                "reference": entry.reference,
+                "bill": {
+                    "id": str(entry.bill_id) if entry.bill_id else None,
+                    "bill_number": entry.bill.bill_number if entry.bill else None,
+                },
+                "branch": {
+                    "id": str(entry.branch_id),
+                    "name": entry.branch.branch_name if entry.branch else None,
+                },
+                "notes": entry.notes,
+                "created_at": entry.created_at.isoformat() if entry.created_at else None,
+                "created_by": display,
+            })
+        if page is not qs:
+            return paginator.get_paginated_response(data)
+        return Response(data)
+
+
+class SupplierBalancesView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request, supplier_id):
+        supplier = get_object_or_404(Supplier.all_objects, id=supplier_id)
+        branch_id = request.query_params.get("branch")
+
+        qs = SupplierBill.objects.select_related("branch").filter(supplier=supplier).exclude(status="cancelled")
+        if branch_id:
+            qs = qs.filter(branch_id=branch_id)
+
+        open_qs = qs.filter(status__in=["open", "partial"])
+
+        totals = qs.aggregate(
+            total_billed=models.Sum("total_amount"),
+            total_paid=models.Sum("amount_paid"),
+        )
+        open_totals = open_qs.aggregate(
+            outstanding=models.Sum("balance_due"),
+        )
+
+        last_bill = qs.order_by("-bill_date").first()
+
+        data = {
+            "supplier": {
+                "id": str(supplier.id),
+                "name": supplier.name,
+            },
+            "branch_id": branch_id,
+            "outstanding_balance": str(open_totals["outstanding"] or 0),
+            "open_bills_count": open_qs.count(),
+            "total_bills_count": qs.count(),
+            "total_billed": str(totals["total_billed"] or 0),
+            "total_paid": str(totals["total_paid"] or 0),
+            "last_bill_date": last_bill.bill_date.isoformat() if last_bill and last_bill.bill_date else None,
+        }
         return Response(data)

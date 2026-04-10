@@ -462,6 +462,15 @@ class ProductUpdateView(APIView):
 def _normalize_header(value):
     return (str(value).strip().lower() if value is not None else "")
 
+def _normalize_category_name(value):
+    if value is None:
+        return ""
+    name = str(value).strip()
+    if not name:
+        return ""
+    name = re.sub(r"\s+", " ", name)
+    return name.title()
+
 
 def _parse_decimal(value, *, field):
     if value is None or str(value).strip() == "":
@@ -726,7 +735,8 @@ class ProductImportView(APIView):
 
             sku = str(cell_value("sku") or "").strip()
             name = str(cell_value("name") or "").strip()
-            category_name = str(cell_value("category") or "").strip()
+            raw_category = cell_value("category")
+            category_name = _normalize_category_name(raw_category)
 
             if not sku:
                 add_error("sku", "Missing SKU")
@@ -798,7 +808,9 @@ class ProductImportView(APIView):
                 continue
 
             with transaction.atomic():
-                category, _ = Category.objects.get_or_create(name=category_name)
+                category = Category.objects.filter(name__iexact=category_name).first()
+                if not category:
+                    category = Category.objects.create(name=category_name)
                 product, created = Product.objects.get_or_create(
                     sku=sku,
                     defaults={

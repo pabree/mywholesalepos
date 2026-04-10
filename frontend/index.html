@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-09.6">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-10.2">
 </head>
 <body>
     <!-- Top Bar -->
@@ -59,6 +59,7 @@
             <button id="logout-btn" class="btn-ghost" title="Log out">Log Out</button>
             <button id="credit-btn" class="btn-ghost" title="Credit Center">Credit</button>
             <button id="customer-orders-btn" type="button" class="btn-ghost" title="Customer Orders">Customer Orders</button>
+            <button id="delivery-run-btn" type="button" class="btn-ghost hidden" title="My Delivery Run">Delivery Run</button>
             <button id="ledger-btn" type="button" class="btn-ghost" title="Financial Overview">Finance</button>
             <button id="returns-btn" type="button" class="btn-ghost" title="Returns / Refunds">Returns</button>
             <button id="backoffice-btn" type="button" class="btn-ghost" title="Back Office">Back Office</button>
@@ -751,6 +752,7 @@
                     <button class="backoffice-tab" data-section="customers">Customers</button>
                     <button class="backoffice-tab" data-section="sales">Sales</button>
                     <button class="backoffice-tab" data-section="orders">Orders</button>
+                    <button class="backoffice-tab" data-section="delivery">Delivery Runs</button>
                     <button class="backoffice-tab" data-section="payments">Payments</button>
                     <button class="backoffice-tab" data-section="ledger" id="backoffice-ledger-tab">Ledger</button>
                     <button class="backoffice-tab" data-section="staff">Staff</button>
@@ -825,52 +827,104 @@
                         </div>
                     </div>
                     <div id="backoffice-purchases" class="backoffice-section hidden">
-                        <div class="backoffice-toolbar">
-                            <div class="backoffice-search">
-                                <input type="text" id="backoffice-purchases-search" class="summary-input" placeholder="Search PO # or supplier">
+                        <div class="backoffice-subnav">
+                            <button class="backoffice-subtab active" data-purchases-tab="orders">Purchase Orders</button>
+                            <button class="backoffice-subtab" data-purchases-tab="bills">Bills</button>
+                        </div>
+                        <div id="backoffice-purchases-orders" class="backoffice-subsection">
+                            <div class="backoffice-toolbar">
+                                <div class="backoffice-search">
+                                    <input type="text" id="backoffice-purchases-search" class="summary-input" placeholder="Search PO # or supplier">
+                                </div>
+                                <div class="backoffice-actions">
+                                    <button id="backoffice-purchase-add" class="btn-primary">New PO</button>
+                                </div>
                             </div>
-                            <div class="backoffice-actions">
-                                <button id="backoffice-purchase-add" class="btn-primary">New PO</button>
+                            <div class="backoffice-filters">
+                                <select id="backoffice-purchases-status" class="summary-select">
+                                    <option value="">All statuses</option>
+                                    <option value="draft">Draft</option>
+                                    <option value="ordered">Ordered</option>
+                                    <option value="partial">Partial</option>
+                                    <option value="received">Received</option>
+                                    <option value="cancelled">Cancelled</option>
+                                </select>
+                                <select id="backoffice-purchases-supplier" class="summary-select">
+                                    <option value="">All suppliers</option>
+                                </select>
+                                <select id="backoffice-purchases-branch" class="summary-select">
+                                    <option value="">All branches</option>
+                                </select>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="backoffice-purchases-table">
+                                    <thead>
+                                        <tr>
+                                            <th>PO #</th>
+                                            <th>Supplier</th>
+                                            <th>Branch</th>
+                                            <th>Status</th>
+                                            <th>Ordered</th>
+                                            <th>Received</th>
+                                            <th>Expected</th>
+                                            <th>Updated</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pagination-controls">
+                                <button id="backoffice-purchases-prev" class="btn-ghost" disabled>Prev</button>
+                                <span id="backoffice-purchases-page" class="pagination-meta">Page 1 of 1</span>
+                                <button id="backoffice-purchases-next" class="btn-ghost" disabled>Next</button>
                             </div>
                         </div>
-                        <div class="backoffice-filters">
-                            <select id="backoffice-purchases-status" class="summary-select">
-                                <option value="">All statuses</option>
-                                <option value="draft">Draft</option>
-                                <option value="ordered">Ordered</option>
-                                <option value="partial">Partial</option>
-                                <option value="received">Received</option>
-                                <option value="cancelled">Cancelled</option>
-                            </select>
-                            <select id="backoffice-purchases-supplier" class="summary-select">
-                                <option value="">All suppliers</option>
-                            </select>
-                            <select id="backoffice-purchases-branch" class="summary-select">
-                                <option value="">All branches</option>
-                            </select>
-                        </div>
-                        <div class="backoffice-table-wrap">
-                            <table class="backoffice-table" id="backoffice-purchases-table">
-                                <thead>
-                                    <tr>
-                                        <th>PO #</th>
-                                        <th>Supplier</th>
-                                        <th>Branch</th>
-                                        <th>Status</th>
-                                        <th>Ordered</th>
-                                        <th>Received</th>
-                                        <th>Expected</th>
-                                        <th>Updated</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <div class="pagination-controls">
-                            <button id="backoffice-purchases-prev" class="btn-ghost" disabled>Prev</button>
-                            <span id="backoffice-purchases-page" class="pagination-meta">Page 1 of 1</span>
-                            <button id="backoffice-purchases-next" class="btn-ghost" disabled>Next</button>
+                        <div id="backoffice-purchases-bills" class="backoffice-subsection hidden">
+                            <div class="backoffice-toolbar">
+                                <div class="backoffice-search">
+                                    <input type="text" id="backoffice-bills-search" class="summary-input" placeholder="Search bill #, supplier, or PO">
+                                </div>
+                            </div>
+                            <div class="backoffice-filters">
+                                <select id="backoffice-bills-status" class="summary-select">
+                                    <option value="">All statuses</option>
+                                    <option value="open">Open</option>
+                                    <option value="partial">Partial</option>
+                                    <option value="paid">Paid</option>
+                                    <option value="cancelled">Cancelled</option>
+                                    <option value="draft">Draft</option>
+                                </select>
+                                <select id="backoffice-bills-supplier" class="summary-select">
+                                    <option value="">All suppliers</option>
+                                </select>
+                                <select id="backoffice-bills-branch" class="summary-select">
+                                    <option value="">All branches</option>
+                                </select>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="backoffice-bills-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Bill #</th>
+                                            <th>Supplier</th>
+                                            <th>Branch</th>
+                                            <th>Status</th>
+                                            <th>PO #</th>
+                                            <th>Total</th>
+                                            <th>Balance</th>
+                                            <th>Bill Date</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pagination-controls">
+                                <button id="backoffice-bills-prev" class="btn-ghost" disabled>Prev</button>
+                                <span id="backoffice-bills-page" class="pagination-meta">Page 1 of 1</span>
+                                <button id="backoffice-bills-next" class="btn-ghost" disabled>Next</button>
+                            </div>
                         </div>
                     </div>
                     <div id="backoffice-customers" class="backoffice-section hidden">
@@ -1056,6 +1110,53 @@
                             <button id="backoffice-orders-prev" class="btn-ghost" disabled>Prev</button>
                             <span id="backoffice-orders-page" class="pagination-meta">Page 1 of 1</span>
                             <button id="backoffice-orders-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-delivery" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <input type="text" id="backoffice-delivery-search" class="summary-input" placeholder="Search order or customer">
+                            </div>
+                        </div>
+                        <div class="backoffice-filters">
+                            <select id="backoffice-delivery-status" class="summary-select">
+                                <option value="">All statuses</option>
+                                <option value="assigned">Assigned</option>
+                                <option value="picked_up">Picked up</option>
+                                <option value="en_route">En route</option>
+                                <option value="arrived">Arrived</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="failed">Failed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                            <select id="backoffice-delivery-person" class="summary-select">
+                                <option value="">All delivery persons</option>
+                            </select>
+                            <select id="backoffice-delivery-branch" class="summary-select">
+                                <option value="">All branches</option>
+                            </select>
+                        </div>
+                        <div class="backoffice-table-wrap">
+                            <table class="backoffice-table" id="backoffice-delivery-table">
+                                <thead>
+                                    <tr>
+                                        <th>Order</th>
+                                        <th>Customer</th>
+                                        <th>Delivery Person</th>
+                                        <th>Branch</th>
+                                        <th>Status</th>
+                                        <th>Last Ping</th>
+                                        <th>Last Location</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <button id="backoffice-delivery-prev" class="btn-ghost" disabled>Prev</button>
+                            <span id="backoffice-delivery-page" class="pagination-meta">Page 1 of 1</span>
+                            <button id="backoffice-delivery-next" class="btn-ghost" disabled>Next</button>
                         </div>
                     </div>
                     <div id="backoffice-payments" class="backoffice-section hidden">
@@ -1321,6 +1422,63 @@
         </div>
     </div>
 
+    <div id="backoffice-delivery-detail-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content sale-detail-modal">
+            <div class="modal-header">
+                <h3>Delivery Run</h3>
+                <button id="backoffice-delivery-detail-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll" id="backoffice-delivery-detail-body">
+                <div class="muted">Select a run to view details.</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="delivery-run-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content delivery-run-modal">
+            <div class="modal-header">
+                <h3>My Delivery Run</h3>
+                <button id="delivery-run-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <div id="delivery-run-meta" class="muted">Loading delivery run...</div>
+                <div class="delivery-run-actions">
+                    <button id="delivery-run-start" class="btn-primary">Start Run</button>
+                    <button id="delivery-run-location" class="btn-secondary">Send Location</button>
+                    <select id="delivery-run-status" class="summary-select">
+                        <option value="">Update status…</option>
+                        <option value="picked_up">Picked up</option>
+                        <option value="en_route">En route</option>
+                        <option value="arrived">Arrived</option>
+                    </select>
+                    <button id="delivery-run-status-submit" class="btn-ghost">Update Status</button>
+                    <button id="delivery-run-complete" class="btn-primary">Complete</button>
+                    <button id="delivery-run-fail" class="btn-danger">Fail</button>
+                </div>
+                <div id="delivery-run-pod" class="delivery-run-pod hidden">
+                    <div class="pod-title">Proof of Delivery</div>
+                    <div class="pod-grid">
+                        <label>Recipient Name<span class="required">*</span>
+                            <input id="delivery-pod-name" class="summary-input" placeholder="Received by" required>
+                        </label>
+                        <label>Recipient Phone
+                            <input id="delivery-pod-phone" class="summary-input" placeholder="07XXXXXXXX">
+                        </label>
+                        <label class="pod-notes">Delivery Notes
+                            <textarea id="delivery-pod-notes" class="summary-input" rows="3" placeholder="Optional notes"></textarea>
+                        </label>
+                    </div>
+                    <div class="pod-actions">
+                        <button id="delivery-pod-submit" class="btn-primary">Submit Proof</button>
+                        <button id="delivery-pod-cancel" class="btn-ghost">Cancel</button>
+                    </div>
+                </div>
+                <div id="delivery-run-history" class="delivery-run-history muted">No location history yet.</div>
+                <div id="delivery-run-error" class="form-error hidden"></div>
+            </div>
+        </div>
+    </div>
+
     <div id="backoffice-payment-detail-modal" class="modal-overlay hidden" data-backdrop-close="true">
         <div class="modal-content sale-detail-modal">
             <div class="modal-header">
@@ -1464,6 +1622,18 @@
                         <div class="linked-products-header">Linked Products</div>
                         <div id="supplier-linked-products" class="linked-products-list muted">Save supplier to link products.</div>
                     </div>
+                    <div class="supplier-financial">
+                        <div class="supplier-financial-header">Supplier Financials</div>
+                        <div id="supplier-balance" class="supplier-balance muted">Outstanding balance: —</div>
+                        <div class="supplier-financial-block">
+                            <div class="supplier-financial-subtitle">Recent Bills</div>
+                            <div id="supplier-bills-list" class="supplier-financial-list muted">Save supplier to view bills.</div>
+                        </div>
+                        <div class="supplier-financial-block">
+                            <div class="supplier-financial-subtitle">Ledger Entries</div>
+                            <div id="supplier-ledger-list" class="supplier-financial-list muted">Save supplier to view ledger activity.</div>
+                        </div>
+                    </div>
                     <div id="supplier-form-error" class="form-error"></div>
                     <div class="form-actions">
                         <button type="button" id="supplier-form-cancel" class="btn-ghost">Cancel</button>
@@ -1540,8 +1710,29 @@
                             </table>
                         </div>
                     </div>
+                    <div class="po-receipts">
+                        <div class="po-receipts-header">
+                            <h4>Receipt History</h4>
+                            <span class="muted">Partial receipts appear as separate entries.</span>
+                        </div>
+                        <div id="purchase-receipts-list" class="receipt-history-list muted">No receipts yet.</div>
+                    </div>
+                    <div class="po-bill">
+                        <div class="po-bill-header">
+                            <div>
+                                <h4>Supplier Bill</h4>
+                                <div class="muted">Create a bill after the PO is fully received.</div>
+                            </div>
+                            <div class="po-bill-actions">
+                                <button type="button" id="purchase-create-bill" class="btn-secondary btn-xs">Create Bill</button>
+                                <button type="button" id="purchase-view-bill" class="btn-ghost btn-xs hidden">View Bill</button>
+                            </div>
+                        </div>
+                        <div id="purchase-bill-meta" class="muted">No bill created yet.</div>
+                    </div>
                     <div id="purchase-form-error" class="form-error"></div>
                     <div class="form-actions">
+                        <button type="button" id="purchase-cancel-po" class="btn-danger">Cancel PO</button>
                         <button type="button" id="purchase-form-cancel" class="btn-ghost">Cancel</button>
                         <button type="submit" id="purchase-form-save" class="btn-primary">Save Purchase Order</button>
                     </div>
@@ -1576,6 +1767,41 @@
                 <div class="form-actions">
                     <button type="button" id="purchase-receive-cancel" class="btn-ghost">Cancel</button>
                     <button type="button" id="purchase-receive-submit" class="btn-primary">Submit Receipt</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="bill-detail-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content bill-detail-modal">
+            <div class="modal-header">
+                <h3 id="bill-detail-title">Supplier Bill</h3>
+                <button id="bill-detail-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <div class="bill-meta">
+                    <div id="bill-detail-status" class="status-badge status-open">Open</div>
+                    <div id="bill-detail-meta" class="muted"></div>
+                </div>
+                <div class="backoffice-table-wrap bill-lines-wrap">
+                    <table class="backoffice-table">
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th>Qty</th>
+                                <th>Unit Cost</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bill-detail-lines"></tbody>
+                    </table>
+                </div>
+                <div id="bill-detail-totals" class="bill-totals"></div>
+                <div id="bill-detail-notes" class="muted"></div>
+                <div id="bill-detail-error" class="form-error"></div>
+                <div class="form-actions">
+                    <button type="button" id="bill-detail-cancel" class="btn-danger">Cancel Bill</button>
+                    <button type="button" id="bill-detail-close-btn" class="btn-ghost">Close</button>
                 </div>
             </div>
         </div>
@@ -1710,6 +1936,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-09.6"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-10.2"></script>
 </body>
 </html>

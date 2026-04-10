@@ -71,6 +71,10 @@ def _serialize_run(run):
         "last_known_longitude": str(run.last_known_longitude) if run.last_known_longitude is not None else None,
         "last_ping_at": run.last_ping_at.isoformat() if run.last_ping_at else None,
         "notes": run.notes,
+        "recipient_name": run.recipient_name or None,
+        "recipient_phone": run.recipient_phone or None,
+        "delivery_notes": run.delivery_notes or None,
+        "delivered_at": run.delivered_at.isoformat() if run.delivered_at else None,
         "delivery_person": {
             "id": str(delivery_person.id) if delivery_person else None,
             "name": f"{delivery_person.first_name} {delivery_person.last_name}".strip() if delivery_person else None,
@@ -109,6 +113,31 @@ def _ensure_run_access(request, run):
     if _is_admin(request.user):
         return True
     return run.delivery_person_id == request.user.id
+
+
+def _sync_order_status_from_delivery_run(run, *, outcome):
+    """
+    Conservative order status sync for terminal run outcomes.
+    Only updates when the order is in a safe pre-delivery state.
+    """
+    if outcome not in {"delivered", "failed"}:
+        return False
+    if not run.order_id:
+        return False
+
+    order = CustomerOrder.objects.select_for_update().filter(id=run.order_id).first()
+    if not order:
+        return False
+
+    if outcome == "delivered":
+        if order.status == "out_for_delivery":
+            order.status = "delivered"
+            order.save(update_fields=["status", "updated_at"])
+            return True
+        return False
+
+    # No safe failure status exists for CustomerOrder yet.
+    return False
 
 
 class DeliveryRunListView(APIView):
@@ -159,23 +188,29 @@ class DeliveryRunCreateView(APIView):
     def post(self, request):
         data = request.data or {}
         order_id = data.get("order_id") or data.get("order")
-        delivery_person_id = data.get("delivery_person_id") or data.get("delivery_person")
         if not order_id:
             return Response({"order": "Order is required."}, status=400)
-        if not delivery_person_id:
-            return Response({"delivery_person": "Delivery person is required."}, status=400)
+        delivery_person_id = data.get("delivery_person_id") or data.get("delivery_person")
 
         order = get_object_or_404(CustomerOrder.objects.select_related("sale", "sale__customer"), id=order_id)
         if order.status in ("cancelled", "delivered"):
             return Response({"detail": "Cannot create a run for a cancelled or delivered order."}, status=400)
 
-        delivery_person = User.objects.filter(id=delivery_person_id, role="deliver_person", is_active=True).first()
-        if not delivery_person:
-            return Response({"delivery_person": "Delivery person not found."}, status=400)
-
         sale = order.sale
-        if sale.assigned_to and sale.assigned_to_id != delivery_person.id:
-            return Response({"delivery_person": "Order is assigned to a different user."}, status=400)
+        if not sale or not sale.assigned_to_id:
+            return Response(
+                {"detail": "Assign a delivery person to the order before creating a delivery run."},
+                status=400,
+            )
+
+        delivery_person = sale.assigned_to
+        if delivery_person.role != "deliver_person" or not delivery_person.is_active:
+            return Response({"detail": "Assigned delivery person is not available."}, status=400)
+        if delivery_person_id and str(delivery_person.id) != str(delivery_person_id):
+            return Response(
+                {"detail": "Delivery run must use the delivery person already assigned to this order."},
+                status=400,
+            )
 
         with transaction.atomic():
             try:
@@ -188,10 +223,6 @@ class DeliveryRunCreateView(APIView):
                 )
             except IntegrityError:
                 return Response({"detail": "A delivery run already exists for this order."}, status=400)
-
-            if not sale.assigned_to_id:
-                sale.assigned_to = delivery_person
-                sale.save(update_fields=["assigned_to", "updated_at"])
 
         return Response({"id": str(run.id)}, status=201)
 
@@ -303,6 +334,8 @@ class DeliveryRunStatusView(APIView):
             allowed = STATUS_TRANSITIONS.get(current, set())
             if next_status not in allowed:
                 return Response({"status": f"Cannot move run from {current} to {next_status}."}, status=400)
+            if next_status == "delivered":
+                return Response({"detail": "Use Complete Delivery to record proof of delivery."}, status=400)
 
             run.status = next_status
             if next_status == "delivered":
@@ -377,6 +410,10 @@ class DeliveryRunCompleteView(APIView):
             if run.status in TERMINAL_STATUSES:
                 return Response({"detail": "Run is already completed."}, status=400)
 
+            recipient_name = str(data.get("recipient_name") or "").strip()
+            if not recipient_name:
+                return Response({"recipient_name": "Recipient name is required."}, status=400)
+
             try:
                 lat = _parse_decimal(data.get("latitude"), field="latitude")
                 lng = _parse_decimal(data.get("longitude"), field="longitude")
@@ -385,6 +422,10 @@ class DeliveryRunCompleteView(APIView):
 
             run.status = "delivered"
             run.completed_at = timezone.now()
+            run.delivered_at = run.delivered_at or run.completed_at
+            run.recipient_name = recipient_name
+            run.recipient_phone = str(data.get("recipient_phone") or "").strip()
+            run.delivery_notes = str(data.get("delivery_notes") or "").strip()
             if lat is not None and lng is not None:
                 run.end_latitude = lat
                 run.end_longitude = lng
@@ -392,6 +433,7 @@ class DeliveryRunCompleteView(APIView):
                 run.last_known_longitude = lng
                 run.last_ping_at = timezone.now()
             run.save()
+            _sync_order_status_from_delivery_run(run, outcome="delivered")
         return Response({"id": str(run.id), "status": run.status}, status=200)
 
 
@@ -423,4 +465,5 @@ class DeliveryRunFailView(APIView):
                 run.last_known_longitude = lng
                 run.last_ping_at = timezone.now()
             run.save()
+            _sync_order_status_from_delivery_run(run, outcome="failed")
         return Response({"id": str(run.id), "status": run.status}, status=200)

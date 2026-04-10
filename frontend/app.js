@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-09.6";
+const APP_BUILD = "2026-04-10.2";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -63,10 +63,18 @@ let backOfficePurchasesQuery = "";
 let backOfficePurchasesOffset = 0;
 let backOfficePurchasesLimit = 20;
 let backOfficePurchasesPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficeBills = [];
+let backOfficeBillsQuery = "";
+let backOfficeBillsOffset = 0;
+let backOfficeBillsLimit = 20;
+let backOfficeBillsPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficePurchasesTab = "orders";
 let editingPurchaseId = null;
 let currentPurchaseDetail = null;
 let purchaseSupplierPrices = {};
 let purchaseReceiveTarget = null;
+let editingBillId = null;
+let currentBillDetail = null;
 let backOfficeCustomers = [];
 let backOfficeCustomerQuery = "";
 let editingCustomerId = null;
@@ -109,6 +117,12 @@ let backOfficeOrdersQuery = "";
 let backOfficeOrdersOffset = 0;
 let backOfficeOrdersLimit = 20;
 let backOfficeOrdersPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficeDeliveryRuns = [];
+let backOfficeDeliveryQuery = "";
+let backOfficeDeliveryOffset = 0;
+let backOfficeDeliveryLimit = 20;
+let backOfficeDeliveryPage = { count: 0, next: null, previous: null, results: [] };
+let currentDeliveryRun = null;
 let backOfficePayments = [];
 let backOfficePaymentsQuery = "";
 let backOfficePaymentsOffset = 0;
@@ -258,6 +272,7 @@ const els = {
     logoutBtn:       document.getElementById("logout-btn"),
     creditBtn:       document.getElementById("credit-btn"),
     customerOrdersBtn: document.getElementById("customer-orders-btn"),
+    deliveryRunBtn: document.getElementById("delivery-run-btn"),
     ledgerBtn:       document.getElementById("ledger-btn"),
     returnsBtn:      document.getElementById("returns-btn"),
     backofficeBtn:   document.getElementById("backoffice-btn"),
@@ -311,6 +326,26 @@ const els = {
     customerOrdersPrev: document.getElementById("customer-orders-prev"),
     customerOrdersNext: document.getElementById("customer-orders-next"),
     customerOrdersPage: document.getElementById("customer-orders-page"),
+    backofficeDeliveryDetailModal: document.getElementById("backoffice-delivery-detail-modal"),
+    backofficeDeliveryDetailClose: document.getElementById("backoffice-delivery-detail-close"),
+    backofficeDeliveryDetailBody: document.getElementById("backoffice-delivery-detail-body"),
+    deliveryRunModal: document.getElementById("delivery-run-modal"),
+    deliveryRunClose: document.getElementById("delivery-run-close"),
+    deliveryRunMeta: document.getElementById("delivery-run-meta"),
+    deliveryRunStart: document.getElementById("delivery-run-start"),
+    deliveryRunLocation: document.getElementById("delivery-run-location"),
+    deliveryRunStatus: document.getElementById("delivery-run-status"),
+    deliveryRunStatusSubmit: document.getElementById("delivery-run-status-submit"),
+    deliveryRunComplete: document.getElementById("delivery-run-complete"),
+    deliveryRunFail: document.getElementById("delivery-run-fail"),
+    deliveryRunHistory: document.getElementById("delivery-run-history"),
+    deliveryRunError: document.getElementById("delivery-run-error"),
+    deliveryRunPod: document.getElementById("delivery-run-pod"),
+    deliveryPodName: document.getElementById("delivery-pod-name"),
+    deliveryPodPhone: document.getElementById("delivery-pod-phone"),
+    deliveryPodNotes: document.getElementById("delivery-pod-notes"),
+    deliveryPodSubmit: document.getElementById("delivery-pod-submit"),
+    deliveryPodCancel: document.getElementById("delivery-pod-cancel"),
     ledgerModal: document.getElementById("ledger-modal"),
     ledgerCloseBtn: document.getElementById("ledger-close-btn"),
     ledgerRefreshBtn: document.getElementById("ledger-refresh-btn"),
@@ -352,6 +387,7 @@ const els = {
     backofficeInventorySection: document.getElementById("backoffice-inventory"),
     backofficeSalesSection: document.getElementById("backoffice-sales"),
     backofficeOrdersSection: document.getElementById("backoffice-orders"),
+    backofficeDeliverySection: document.getElementById("backoffice-delivery"),
     backofficePaymentsSection: document.getElementById("backoffice-payments"),
     backofficeSetupSection: document.getElementById("backoffice-setup"),
     backofficeSetupTabs: document.querySelectorAll(".backoffice-subtab"),
@@ -410,6 +446,14 @@ const els = {
     backofficeOrdersNext: document.getElementById("backoffice-orders-next"),
     backofficeOrdersPage: document.getElementById("backoffice-orders-page"),
     backofficeOrdersExport: document.getElementById("backoffice-orders-export"),
+    backofficeDeliverySearch: document.getElementById("backoffice-delivery-search"),
+    backofficeDeliveryStatus: document.getElementById("backoffice-delivery-status"),
+    backofficeDeliveryPerson: document.getElementById("backoffice-delivery-person"),
+    backofficeDeliveryBranch: document.getElementById("backoffice-delivery-branch"),
+    backofficeDeliveryTable: document.getElementById("backoffice-delivery-table"),
+    backofficeDeliveryPrev: document.getElementById("backoffice-delivery-prev"),
+    backofficeDeliveryNext: document.getElementById("backoffice-delivery-next"),
+    backofficeDeliveryPage: document.getElementById("backoffice-delivery-page"),
     backofficePaymentsSearch: document.getElementById("backoffice-payments-search"),
     backofficePaymentsBranch: document.getElementById("backoffice-payments-branch"),
     backofficePaymentsMethod: document.getElementById("backoffice-payments-method"),
@@ -436,6 +480,17 @@ const els = {
     backofficePurchasesNext: document.getElementById("backoffice-purchases-next"),
     backofficePurchasesPage: document.getElementById("backoffice-purchases-page"),
     backofficePurchaseAdd: document.getElementById("backoffice-purchase-add"),
+    backofficePurchasesTabs: document.querySelectorAll("[data-purchases-tab]"),
+    backofficePurchasesOrders: document.getElementById("backoffice-purchases-orders"),
+    backofficePurchasesBills: document.getElementById("backoffice-purchases-bills"),
+    backofficeBillsSearch: document.getElementById("backoffice-bills-search"),
+    backofficeBillsStatus: document.getElementById("backoffice-bills-status"),
+    backofficeBillsSupplier: document.getElementById("backoffice-bills-supplier"),
+    backofficeBillsBranch: document.getElementById("backoffice-bills-branch"),
+    backofficeBillsTable: document.getElementById("backoffice-bills-table"),
+    backofficeBillsPrev: document.getElementById("backoffice-bills-prev"),
+    backofficeBillsNext: document.getElementById("backoffice-bills-next"),
+    backofficeBillsPage: document.getElementById("backoffice-bills-page"),
     backofficeCustomerSearch: document.getElementById("backoffice-customer-search"),
     backofficeCustomerTable: document.getElementById("backoffice-customer-table"),
     backofficeCustomerAdd: document.getElementById("backoffice-customer-add"),
@@ -504,6 +559,9 @@ const els = {
     supplierNotes: document.getElementById("supplier-notes"),
     supplierActive: document.getElementById("supplier-active"),
     supplierLinkedProducts: document.getElementById("supplier-linked-products"),
+    supplierBalance: document.getElementById("supplier-balance"),
+    supplierBillsList: document.getElementById("supplier-bills-list"),
+    supplierLedgerList: document.getElementById("supplier-ledger-list"),
     purchaseFormModal: document.getElementById("purchase-form-modal"),
     purchaseForm: document.getElementById("purchase-form"),
     purchaseFormTitle: document.getElementById("purchase-form-title"),
@@ -511,6 +569,7 @@ const els = {
     purchaseFormCancel: document.getElementById("purchase-form-cancel"),
     purchaseFormSave: document.getElementById("purchase-form-save"),
     purchaseFormError: document.getElementById("purchase-form-error"),
+    purchaseCancelPo: document.getElementById("purchase-cancel-po"),
     purchaseSupplier: document.getElementById("purchase-supplier"),
     purchaseBranch: document.getElementById("purchase-branch"),
     purchaseExpectedDate: document.getElementById("purchase-expected-date"),
@@ -531,6 +590,21 @@ const els = {
     purchaseReceiveList: document.getElementById("purchase-receive-list"),
     purchaseReceiveError: document.getElementById("purchase-receive-error"),
     purchaseReceiveMeta: document.getElementById("purchase-receive-meta"),
+    purchaseReceiptsList: document.getElementById("purchase-receipts-list"),
+    purchaseCreateBill: document.getElementById("purchase-create-bill"),
+    purchaseViewBill: document.getElementById("purchase-view-bill"),
+    purchaseBillMeta: document.getElementById("purchase-bill-meta"),
+    billDetailModal: document.getElementById("bill-detail-modal"),
+    billDetailClose: document.getElementById("bill-detail-close"),
+    billDetailCloseBtn: document.getElementById("bill-detail-close-btn"),
+    billDetailTitle: document.getElementById("bill-detail-title"),
+    billDetailStatus: document.getElementById("bill-detail-status"),
+    billDetailMeta: document.getElementById("bill-detail-meta"),
+    billDetailLines: document.getElementById("bill-detail-lines"),
+    billDetailTotals: document.getElementById("bill-detail-totals"),
+    billDetailNotes: document.getElementById("bill-detail-notes"),
+    billDetailError: document.getElementById("bill-detail-error"),
+    billDetailCancel: document.getElementById("bill-detail-cancel"),
     customerName: document.getElementById("customer-name"),
     customerRoute: document.getElementById("customer-route"),
     customerWholesale: document.getElementById("customer-wholesale"),
@@ -681,6 +755,10 @@ function getOverlayCloseHandler(id) {
             return closeReceiptModal;
         case "inventory-scan-modal":
             return closeInventoryScanModal;
+        case "delivery-run-modal":
+            return closeDeliveryRunModal;
+        case "backoffice-delivery-detail-modal":
+            return closeBackOfficeDeliveryDetail;
         default:
             return null;
     }
@@ -776,6 +854,12 @@ document.addEventListener("click", (e) => {
         customerOrdersLog("[customer-orders] button click", { target: e.target?.tagName });
         e.preventDefault();
         openCustomerOrdersModal();
+        return;
+    }
+    const deliveryRunBtn = e.target.closest("#delivery-run-btn");
+    if (deliveryRunBtn) {
+        e.preventDefault();
+        openDeliveryRunModal();
         return;
     }
     const ledgerBtn = e.target.closest("#ledger-btn");
@@ -1059,6 +1143,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (els.backofficePurchaseAdd) {
         els.backofficePurchaseAdd.addEventListener("click", () => openPurchaseForm());
     }
+    if (els.backofficePurchasesTabs) {
+        els.backofficePurchasesTabs.forEach(btn => {
+            btn.addEventListener("click", () => {
+                setBackOfficePurchasesTab(btn.dataset.purchasesTab || "orders");
+            });
+        });
+    }
     if (els.backofficePurchasesSearch) {
         els.backofficePurchasesSearch.addEventListener("input", () => {
             backOfficePurchasesQuery = els.backofficePurchasesSearch.value || "";
@@ -1096,6 +1187,45 @@ document.addEventListener("DOMContentLoaded", () => {
             if (backOfficePurchasesOffset + backOfficePurchasesLimit >= (backOfficePurchasesPage?.count || 0)) return;
             backOfficePurchasesOffset += backOfficePurchasesLimit;
             loadBackOfficePurchases();
+        });
+    }
+    if (els.backofficeBillsSearch) {
+        els.backofficeBillsSearch.addEventListener("input", () => {
+            backOfficeBillsQuery = els.backofficeBillsSearch.value || "";
+            backOfficeBillsOffset = 0;
+            loadBackOfficeBills();
+        });
+    }
+    if (els.backofficeBillsStatus) {
+        els.backofficeBillsStatus.addEventListener("change", () => {
+            backOfficeBillsOffset = 0;
+            loadBackOfficeBills();
+        });
+    }
+    if (els.backofficeBillsSupplier) {
+        els.backofficeBillsSupplier.addEventListener("change", () => {
+            backOfficeBillsOffset = 0;
+            loadBackOfficeBills();
+        });
+    }
+    if (els.backofficeBillsBranch) {
+        els.backofficeBillsBranch.addEventListener("change", () => {
+            backOfficeBillsOffset = 0;
+            loadBackOfficeBills();
+        });
+    }
+    if (els.backofficeBillsPrev) {
+        els.backofficeBillsPrev.addEventListener("click", () => {
+            if (backOfficeBillsOffset <= 0) return;
+            backOfficeBillsOffset = Math.max(0, backOfficeBillsOffset - backOfficeBillsLimit);
+            loadBackOfficeBills();
+        });
+    }
+    if (els.backofficeBillsNext) {
+        els.backofficeBillsNext.addEventListener("click", () => {
+            if (backOfficeBillsOffset + backOfficeBillsLimit >= (backOfficeBillsPage?.count || 0)) return;
+            backOfficeBillsOffset += backOfficeBillsLimit;
+            loadBackOfficeBills();
         });
     }
     if (els.backofficeCustomerBranch) {
@@ -1271,6 +1401,45 @@ document.addEventListener("DOMContentLoaded", () => {
             loadBackOfficeOrders();
         });
     }
+    if (els.backofficeDeliverySearch) {
+        els.backofficeDeliverySearch.addEventListener("input", () => {
+            backOfficeDeliveryQuery = els.backofficeDeliverySearch.value || "";
+            backOfficeDeliveryOffset = 0;
+            loadBackOfficeDeliveryRuns();
+        });
+    }
+    if (els.backofficeDeliveryStatus) {
+        els.backofficeDeliveryStatus.addEventListener("change", () => {
+            backOfficeDeliveryOffset = 0;
+            loadBackOfficeDeliveryRuns();
+        });
+    }
+    if (els.backofficeDeliveryPerson) {
+        els.backofficeDeliveryPerson.addEventListener("change", () => {
+            backOfficeDeliveryOffset = 0;
+            loadBackOfficeDeliveryRuns();
+        });
+    }
+    if (els.backofficeDeliveryBranch) {
+        els.backofficeDeliveryBranch.addEventListener("change", () => {
+            backOfficeDeliveryOffset = 0;
+            loadBackOfficeDeliveryRuns();
+        });
+    }
+    if (els.backofficeDeliveryPrev) {
+        els.backofficeDeliveryPrev.addEventListener("click", () => {
+            if (backOfficeDeliveryOffset <= 0) return;
+            backOfficeDeliveryOffset = Math.max(0, backOfficeDeliveryOffset - backOfficeDeliveryLimit);
+            loadBackOfficeDeliveryRuns();
+        });
+    }
+    if (els.backofficeDeliveryNext) {
+        els.backofficeDeliveryNext.addEventListener("click", () => {
+            if (backOfficeDeliveryOffset + backOfficeDeliveryLimit >= (backOfficeDeliveryPage?.count || 0)) return;
+            backOfficeDeliveryOffset += backOfficeDeliveryLimit;
+            loadBackOfficeDeliveryRuns();
+        });
+    }
     if (els.backofficePaymentsSearch) {
         els.backofficePaymentsSearch.addEventListener("input", () => {
             backOfficePaymentsQuery = els.backofficePaymentsSearch.value || "";
@@ -1420,6 +1589,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (els.purchaseFormCancel) {
         els.purchaseFormCancel.addEventListener("click", closePurchaseForm);
     }
+    if (els.purchaseCancelPo) {
+        els.purchaseCancelPo.addEventListener("click", () => {
+            cancelPurchaseOrder(editingPurchaseId);
+        });
+    }
     if (els.purchaseForm) {
         els.purchaseForm.addEventListener("submit", (event) => {
             event.preventDefault();
@@ -1460,6 +1634,68 @@ document.addEventListener("DOMContentLoaded", () => {
     if (els.purchaseReceiveSubmit) {
         els.purchaseReceiveSubmit.addEventListener("click", () => {
             submitPurchaseReceive();
+        });
+    }
+    if (els.purchaseCreateBill) {
+        els.purchaseCreateBill.addEventListener("click", () => {
+            if (editingPurchaseId) createBillForPurchase(editingPurchaseId);
+        });
+    }
+    if (els.purchaseViewBill) {
+        els.purchaseViewBill.addEventListener("click", () => {
+            if (currentPurchaseDetail?.bill_id) openBillDetail(currentPurchaseDetail.bill_id);
+        });
+    }
+    if (els.billDetailClose) {
+        els.billDetailClose.addEventListener("click", closeBillDetail);
+    }
+    if (els.billDetailCloseBtn) {
+        els.billDetailCloseBtn.addEventListener("click", closeBillDetail);
+    }
+    if (els.billDetailCancel) {
+        els.billDetailCancel.addEventListener("click", () => {
+            if (editingBillId) cancelSupplierBill(editingBillId);
+        });
+    }
+    if (els.backofficeDeliveryDetailClose) {
+        els.backofficeDeliveryDetailClose.addEventListener("click", closeBackOfficeDeliveryDetail);
+    }
+    if (els.deliveryRunClose) {
+        els.deliveryRunClose.addEventListener("click", closeDeliveryRunModal);
+    }
+    if (els.deliveryRunStart) {
+        els.deliveryRunStart.addEventListener("click", () => {
+            if (currentDeliveryRun?.id) startDeliveryRun(currentDeliveryRun.id);
+        });
+    }
+    if (els.deliveryRunLocation) {
+        els.deliveryRunLocation.addEventListener("click", () => {
+            if (currentDeliveryRun?.id) sendDeliveryRunLocation(currentDeliveryRun.id);
+        });
+    }
+    if (els.deliveryRunStatusSubmit) {
+        els.deliveryRunStatusSubmit.addEventListener("click", () => {
+            if (currentDeliveryRun?.id) updateDeliveryRunStatus(currentDeliveryRun.id);
+        });
+    }
+    if (els.deliveryRunComplete) {
+        els.deliveryRunComplete.addEventListener("click", () => {
+            if (currentDeliveryRun?.id) openDeliveryProofForm();
+        });
+    }
+    if (els.deliveryRunFail) {
+        els.deliveryRunFail.addEventListener("click", () => {
+            if (currentDeliveryRun?.id) failDeliveryRun(currentDeliveryRun.id);
+        });
+    }
+    if (els.deliveryPodSubmit) {
+        els.deliveryPodSubmit.addEventListener("click", () => {
+            if (currentDeliveryRun?.id) submitDeliveryProof(currentDeliveryRun.id);
+        });
+    }
+    if (els.deliveryPodCancel) {
+        els.deliveryPodCancel.addEventListener("click", () => {
+            closeDeliveryProofForm();
         });
     }
     if (els.backofficeProductSearch) {
@@ -2986,6 +3222,9 @@ function setBackOfficeSection(section) {
     if (els.backofficeOrdersSection) {
         els.backofficeOrdersSection.classList.toggle("hidden", backOfficeActiveSection !== "orders");
     }
+    if (els.backofficeDeliverySection) {
+        els.backofficeDeliverySection.classList.toggle("hidden", backOfficeActiveSection !== "delivery");
+    }
     if (els.backofficePaymentsSection) {
         els.backofficePaymentsSection.classList.toggle("hidden", backOfficeActiveSection !== "payments");
     }
@@ -2999,7 +3238,7 @@ function setBackOfficeSection(section) {
         loadBackOfficeSuppliers();
     }
     if (backOfficeActiveSection === "purchases") {
-        loadBackOfficePurchases();
+        setBackOfficePurchasesTab(backOfficePurchasesTab || "orders");
     }
     if (backOfficeActiveSection === "staff") {
         loadBackOfficeStaff();
@@ -3013,11 +3252,33 @@ function setBackOfficeSection(section) {
     if (backOfficeActiveSection === "orders") {
         loadBackOfficeOrders();
     }
+    if (backOfficeActiveSection === "delivery") {
+        loadBackOfficeDeliveryRuns();
+    }
     if (backOfficeActiveSection === "payments") {
         loadBackOfficePayments();
     }
     if (backOfficeActiveSection === "setup") {
         setBackOfficeSetupSection(backOfficeSetupSection || "branches");
+    }
+}
+
+function setBackOfficePurchasesTab(tab) {
+    backOfficePurchasesTab = tab || "orders";
+    if (els.backofficePurchasesTabs) {
+        els.backofficePurchasesTabs.forEach(btn => btn.classList.toggle("active", btn.dataset.purchasesTab === backOfficePurchasesTab));
+    }
+    if (els.backofficePurchasesOrders) {
+        els.backofficePurchasesOrders.classList.toggle("hidden", backOfficePurchasesTab !== "orders");
+    }
+    if (els.backofficePurchasesBills) {
+        els.backofficePurchasesBills.classList.toggle("hidden", backOfficePurchasesTab !== "bills");
+    }
+    if (backOfficePurchasesTab === "orders") {
+        loadBackOfficePurchases();
+    }
+    if (backOfficePurchasesTab === "bills") {
+        loadBackOfficeBills();
     }
 }
 
@@ -3162,6 +3423,7 @@ function renderSupplierOptions() {
         }
     }
     const currentPurchaseSupplier = els.backofficePurchasesSupplier?.value || "";
+    const currentBillsSupplier = els.backofficeBillsSupplier?.value || "";
     const currentPurchaseFormSupplier = els.purchaseSupplier?.value || "";
     const options = [
         `<option value="">Select supplier</option>`,
@@ -3193,6 +3455,19 @@ function renderSupplierOptions() {
             : `<option value="">All suppliers</option>`;
         if (currentPurchaseSupplier) {
             els.backofficePurchasesSupplier.value = currentPurchaseSupplier;
+        }
+    }
+
+    if (els.backofficeBillsSupplier) {
+        const filterOptions = [
+            `<option value="">All suppliers</option>`,
+            ...supplierOptions.map(s => `<option value="${s.id}">${esc(s.name)}</option>`),
+        ];
+        els.backofficeBillsSupplier.innerHTML = supplierOptions.length
+            ? filterOptions.join("")
+            : `<option value="">All suppliers</option>`;
+        if (currentBillsSupplier) {
+            els.backofficeBillsSupplier.value = currentBillsSupplier;
         }
     }
 }
@@ -3344,6 +3619,9 @@ function renderBackOfficePurchases() {
         const expected = po.expected_date ? formatShortDate(po.expected_date) : "—";
         const updated = po.updated_at ? formatDateTime(po.updated_at) : "—";
         const canReceive = ["ordered", "partial"].includes((po.status || "").toLowerCase());
+        const canCancel = ["draft", "ordered"].includes((po.status || "").toLowerCase()) && received <= 0;
+        const canCreateBill = (po.status || "").toLowerCase() === "received" && !po.bill_id;
+        const hasBill = !!po.bill_id;
         const actionLabel = po.status === "draft" ? "Edit" : "View";
         return `
             <tr>
@@ -3358,6 +3636,80 @@ function renderBackOfficePurchases() {
                 <td>
                     <button class="btn-ghost btn-xs" onclick="openPurchaseForm('${po.id}')">${actionLabel}</button>
                     ${canReceive ? `<button class="btn-secondary btn-xs" onclick="openPurchaseReceiveModal('${po.id}')">Receive</button>` : ""}
+                    ${canCancel ? `<button class="btn-danger btn-xs" onclick="cancelPurchaseOrder('${po.id}')">Cancel</button>` : ""}
+                    ${canCreateBill ? `<button class="btn-primary btn-xs" onclick="createBillForPurchase('${po.id}')">Create Bill</button>` : ""}
+                    ${hasBill ? `<button class="btn-ghost btn-xs" onclick="openBillDetail('${po.bill_id}')">View Bill</button>` : ""}
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function loadBackOfficeBills() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await Promise.all([
+            loadBackOfficeBranches(),
+            loadSupplierOptionsForProductForm(),
+        ]);
+        const endpoint = withParams("/purchases/bills/", {
+            limit: backOfficeBillsLimit,
+            offset: backOfficeBillsOffset,
+            search: backOfficeBillsQuery,
+            status: els.backofficeBillsStatus?.value || "",
+            supplier: els.backofficeBillsSupplier?.value || "",
+            branch: els.backofficeBillsBranch?.value || "",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficeBillsPage = page;
+        backOfficeBills = ensureArray(page, "backOfficeBills");
+        renderBackOfficeBills();
+        updatePager({
+            prevEl: els.backofficeBillsPrev,
+            nextEl: els.backofficeBillsNext,
+            pageEl: els.backofficeBillsPage,
+            offset: backOfficeBillsOffset,
+            limit: backOfficeBillsLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        if (els.backofficeBillsTable) {
+            const tbody = els.backofficeBillsTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="9">Failed to load bills</td></tr>`;
+            }
+        }
+    }
+}
+
+function renderBackOfficeBills() {
+    if (!els.backofficeBillsTable) return;
+    const tbody = els.backofficeBillsTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeBills;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="9">No bills found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(bill => {
+        const statusBadge = renderStatusBadge(bill.status);
+        const total = bill.total_amount !== null && bill.total_amount !== undefined ? fmtPrice(bill.total_amount) : "—";
+        const balance = bill.balance_due !== null && bill.balance_due !== undefined ? fmtPrice(bill.balance_due) : "—";
+        const billDate = bill.bill_date ? formatShortDate(bill.bill_date) : "—";
+        const poNumber = bill.purchase_order?.po_number || "—";
+        return `
+            <tr>
+                <td>${esc(bill.bill_number || "—")}</td>
+                <td>${esc(bill.supplier?.name || "—")}</td>
+                <td>${esc(bill.branch?.name || "—")}</td>
+                <td>${statusBadge}</td>
+                <td>${esc(poNumber)}</td>
+                <td>${total}</td>
+                <td>${balance}</td>
+                <td>${billDate}</td>
+                <td>
+                    <button class="btn-ghost btn-xs" onclick="openBillDetail('${bill.id}')">View</button>
                 </td>
             </tr>
         `;
@@ -3402,6 +3754,8 @@ async function openPurchaseForm(purchaseId = null) {
         setPurchaseFormStatus("draft");
         if (els.purchaseFormTitle) els.purchaseFormTitle.textContent = "New Purchase Order";
         renderPurchaseLines([]);
+        renderPurchaseReceipts([]);
+        renderPurchaseBillSection(null);
         updatePurchaseFormActions();
         openOverlay(els.purchaseFormModal);
         return;
@@ -3422,6 +3776,8 @@ async function openPurchaseForm(purchaseId = null) {
         setPurchaseFormStatus(detail.status || "draft");
         await loadPurchaseSupplierPricing(detail.supplier?.id || "");
         renderPurchaseLines(detail.lines || []);
+        await loadPurchaseReceipts(detail.id);
+        renderPurchaseBillSection(detail);
         updatePurchaseFormActions();
         openOverlay(els.purchaseFormModal);
     } catch (err) {
@@ -3449,6 +3805,10 @@ function updatePurchaseFormActions() {
     const isDraft = status === "draft";
     const canReceive = ["ordered", "partial"].includes(status);
     const hasPo = !!editingPurchaseId;
+    const canCancel = ["draft", "ordered"].includes(status)
+        && (currentPurchaseDetail?.received_quantity || 0) <= 0;
+    const hasBill = !!currentPurchaseDetail?.bill_id;
+    const canCreateBill = status === "received" && hasPo && !hasBill;
 
     if (els.purchaseLineAdd) els.purchaseLineAdd.disabled = !isDraft || !hasPo;
     if (els.purchaseMarkOrdered) {
@@ -3458,6 +3818,17 @@ function updatePurchaseFormActions() {
     if (els.purchaseReceiveOpen) {
         els.purchaseReceiveOpen.disabled = !canReceive || !hasPo;
         els.purchaseReceiveOpen.classList.toggle("hidden", !canReceive || !hasPo);
+    }
+    if (els.purchaseCancelPo) {
+        els.purchaseCancelPo.disabled = !canCancel || !hasPo;
+        els.purchaseCancelPo.classList.toggle("hidden", !canCancel || !hasPo);
+    }
+    if (els.purchaseCreateBill) {
+        els.purchaseCreateBill.disabled = !canCreateBill;
+        els.purchaseCreateBill.classList.toggle("hidden", !canCreateBill);
+    }
+    if (els.purchaseViewBill) {
+        els.purchaseViewBill.classList.toggle("hidden", !hasBill);
     }
 }
 
@@ -3470,6 +3841,10 @@ function resetPurchaseLineInputs() {
 
 async function savePurchaseForm() {
     if (!canAccessBackOffice()) return;
+    if (editingPurchaseId && ["received", "cancelled"].includes((currentPurchaseDetail?.status || "").toLowerCase())) {
+        toast("This purchase order is read-only.", "error");
+        return;
+    }
     if (els.purchaseFormSave) {
         els.purchaseFormSave.disabled = true;
         els.purchaseFormSave.textContent = "Saving...";
@@ -3497,6 +3872,8 @@ async function savePurchaseForm() {
             }
             setPurchaseFormStatus(currentPurchaseDetail?.status || "draft");
             renderPurchaseLines(currentPurchaseDetail?.lines || []);
+            await loadPurchaseReceipts(editingPurchaseId);
+            renderPurchaseBillSection(currentPurchaseDetail);
             updatePurchaseFormActions();
         }
         await loadBackOfficePurchases();
@@ -3618,6 +3995,208 @@ async function addPurchaseLine() {
     }
 }
 
+async function loadPurchaseReceipts(purchaseId) {
+    if (!purchaseId) {
+        renderPurchaseReceipts([]);
+        return;
+    }
+    try {
+        const data = await apiFetch(`/purchases/${purchaseId}/receipts/`);
+        renderPurchaseReceipts(ensureArray(data, "purchaseReceipts"));
+    } catch (err) {
+        renderPurchaseReceipts([], { error: true });
+    }
+}
+
+function renderPurchaseReceipts(receipts, { error = false } = {}) {
+    if (!els.purchaseReceiptsList) return;
+    if (error) {
+        els.purchaseReceiptsList.innerHTML = `<div class="muted">Failed to load receipt history.</div>`;
+        return;
+    }
+    if (!receipts.length) {
+        els.purchaseReceiptsList.innerHTML = `<div class="muted">No receipts yet.</div>`;
+        return;
+    }
+    els.purchaseReceiptsList.innerHTML = receipts.map(entry => `
+        <div class="receipt-history-row">
+            <div>
+                <div class="receipt-title">${esc(entry.product_name || "Item")} <span class="muted">(${esc(entry.product_sku || "—")})</span></div>
+                <div class="receipt-meta">
+                    <span>${formatDateTime(entry.received_at)}</span>
+                    <span>•</span>
+                    <span>${esc(entry.received_by || "—")}</span>
+                    <span>•</span>
+                    <span>${esc(entry.branch_name || "—")}</span>
+                </div>
+            </div>
+            <div class="receipt-qty">+${entry.quantity ?? 0}</div>
+        </div>
+    `).join("");
+}
+
+function renderPurchaseBillSection(detail) {
+    if (!els.purchaseBillMeta) return;
+    const billId = detail?.bill_id || null;
+    const billStatus = detail?.bill_status || "";
+    if (!detail) {
+        els.purchaseBillMeta.textContent = "No bill created yet.";
+        if (els.purchaseCreateBill) els.purchaseCreateBill.classList.add("hidden");
+        if (els.purchaseViewBill) els.purchaseViewBill.classList.add("hidden");
+        return;
+    }
+    if (billId) {
+        const statusBadge = renderStatusBadge(billStatus || "open");
+        els.purchaseBillMeta.innerHTML = `Bill linked • ${statusBadge}`;
+        if (els.purchaseViewBill) els.purchaseViewBill.classList.remove("hidden");
+        if (els.purchaseCreateBill) els.purchaseCreateBill.classList.add("hidden");
+    } else {
+        els.purchaseBillMeta.textContent = detail.status === "received"
+            ? "No bill created yet. You can create one now."
+            : "Bills can be created once the PO is fully received.";
+        if (els.purchaseViewBill) els.purchaseViewBill.classList.add("hidden");
+    }
+}
+
+async function createBillForPurchase(purchaseId) {
+    if (!purchaseId) return;
+    if (!confirm("Create a supplier bill for this purchase order?")) return;
+    try {
+        const result = await apiRequest(`/purchases/${purchaseId}/create-bill/`, {
+            method: "POST",
+            body: {},
+        });
+        toast("Supplier bill created", "success");
+        if (editingPurchaseId === purchaseId) {
+            currentPurchaseDetail = await apiFetch(`/purchases/${purchaseId}/`);
+            setPurchaseFormStatus(currentPurchaseDetail?.status || "received");
+            renderPurchaseLines(currentPurchaseDetail?.lines || []);
+            await loadPurchaseReceipts(purchaseId);
+            renderPurchaseBillSection(currentPurchaseDetail);
+            updatePurchaseFormActions();
+        }
+        await loadBackOfficePurchases();
+        await loadBackOfficeBills();
+        if (result?.id) {
+            openBillDetail(result.id);
+        }
+    } catch (err) {
+        toast(`Create bill failed: ${err.message}`, "error");
+    }
+}
+
+async function openBillDetail(billId) {
+    if (!els.billDetailModal || !billId) return;
+    editingBillId = billId;
+    currentBillDetail = null;
+    if (els.billDetailError) els.billDetailError.textContent = "";
+    try {
+        const detail = await apiFetch(`/purchases/bills/${billId}/`);
+        if (!detail) {
+            toast("Failed to load bill", "error");
+            return;
+        }
+        currentBillDetail = detail;
+        renderBillDetail(detail);
+        openOverlay(els.billDetailModal, { closeOthers: false });
+    } catch (err) {
+        if (els.billDetailError) els.billDetailError.textContent = err.message || "Failed to load bill.";
+        toast(`Failed to load bill: ${err.message}`, "error");
+    }
+}
+
+function closeBillDetail() {
+    if (!els.billDetailModal) return;
+    closeOverlay(els.billDetailModal);
+    editingBillId = null;
+    currentBillDetail = null;
+}
+
+function renderBillDetail(bill) {
+    if (!bill) return;
+    if (els.billDetailTitle) {
+        const label = bill.bill_number ? `Bill ${bill.bill_number}` : "Supplier Bill";
+        els.billDetailTitle.textContent = label;
+    }
+    if (els.billDetailStatus) {
+        els.billDetailStatus.className = `status-badge status-${(bill.status || "open").toLowerCase()}`;
+        els.billDetailStatus.textContent = formatLabel(bill.status || "open");
+    }
+    if (els.billDetailMeta) {
+        const metaParts = [
+            bill.supplier?.name || "Supplier",
+            bill.branch?.name || "Branch",
+            bill.purchase_order?.po_number ? `PO ${bill.purchase_order.po_number}` : null,
+            bill.bill_date ? formatShortDate(bill.bill_date) : null,
+        ].filter(Boolean);
+        els.billDetailMeta.textContent = metaParts.join(" • ");
+    }
+    if (els.billDetailLines) {
+        const lines = bill.lines || [];
+        if (!lines.length) {
+            els.billDetailLines.innerHTML = `<tr><td colspan="4" class="muted">No bill lines found.</td></tr>`;
+        } else {
+            els.billDetailLines.innerHTML = lines.map(line => `
+                <tr>
+                    <td>
+                        <strong>${esc(line.product?.name || line.description || "Item")}</strong>
+                        <div class="muted">${esc(line.product?.sku || "")}</div>
+                    </td>
+                    <td>${line.quantity ?? 0}</td>
+                    <td>${line.unit_cost ? fmtPrice(line.unit_cost) : "—"}</td>
+                    <td>${line.line_total ? fmtPrice(line.line_total) : "—"}</td>
+                </tr>
+            `).join("");
+        }
+    }
+    if (els.billDetailTotals) {
+        const subtotal = bill.subtotal !== null && bill.subtotal !== undefined ? fmtPrice(bill.subtotal) : "—";
+        const taxAmount = bill.tax_amount !== null && bill.tax_amount !== undefined ? fmtPrice(bill.tax_amount) : "—";
+        const totalAmount = bill.total_amount !== null && bill.total_amount !== undefined ? fmtPrice(bill.total_amount) : "—";
+        const amountPaid = bill.amount_paid !== null && bill.amount_paid !== undefined ? fmtPrice(bill.amount_paid) : "—";
+        const balanceDue = bill.balance_due !== null && bill.balance_due !== undefined ? fmtPrice(bill.balance_due) : "—";
+        els.billDetailTotals.innerHTML = `
+            <div class="bill-total-line"><span>Subtotal</span><strong>${subtotal}</strong></div>
+            <div class="bill-total-line"><span>Tax</span><strong>${taxAmount}</strong></div>
+            <div class="bill-total-line"><span>Total</span><strong>${totalAmount}</strong></div>
+            <div class="bill-total-line"><span>Paid</span><strong>${amountPaid}</strong></div>
+            <div class="bill-total-line"><span>Balance</span><strong>${balanceDue}</strong></div>
+        `;
+    }
+    if (els.billDetailNotes) {
+        els.billDetailNotes.textContent = bill.notes ? `Notes: ${bill.notes}` : "";
+    }
+    if (els.billDetailCancel) {
+        const status = (bill.status || "").toLowerCase();
+        const canCancel = !["cancelled", "paid"].includes(status) && (!bill.amount_paid || Number(bill.amount_paid) <= 0);
+        els.billDetailCancel.classList.toggle("hidden", !canCancel);
+        els.billDetailCancel.disabled = !canCancel;
+    }
+}
+
+async function cancelSupplierBill(billId) {
+    if (!billId) return;
+    if (!confirm("Cancel this supplier bill?")) return;
+    try {
+        await apiRequest(`/purchases/bills/${billId}/cancel/`, { method: "POST" });
+        toast("Bill cancelled", "success");
+        const detail = await apiFetch(`/purchases/bills/${billId}/`);
+        currentBillDetail = detail;
+        renderBillDetail(detail);
+        await loadBackOfficeBills();
+        if (currentPurchaseDetail?.bill_id === billId) {
+            currentPurchaseDetail = await apiFetch(`/purchases/${currentPurchaseDetail.id}/`);
+            renderPurchaseBillSection(currentPurchaseDetail);
+        }
+        if (editingSupplierId) {
+            loadSupplierFinancials(editingSupplierId);
+        }
+    } catch (err) {
+        toast(`Cancel failed: ${err.message}`, "error");
+        if (els.billDetailError) els.billDetailError.textContent = err.message || "Cancel failed.";
+    }
+}
+
 async function savePurchaseLine(lineId, rowEl) {
     if (!editingPurchaseId || !lineId || !rowEl) return;
     const orderedRaw = (rowEl.querySelector(".line-ordered")?.value || "").trim();
@@ -3672,11 +4251,32 @@ async function markPurchaseOrdered() {
         currentPurchaseDetail = detail;
         setPurchaseFormStatus(detail.status || "ordered");
         renderPurchaseLines(detail.lines || []);
+        renderPurchaseBillSection(detail);
         updatePurchaseFormActions();
         await loadBackOfficePurchases();
         toast("Purchase order marked ordered", "success");
     } catch (err) {
         toast(`Mark ordered failed: ${err.message}`, "error");
+    }
+}
+
+async function cancelPurchaseOrder(purchaseId) {
+    if (!purchaseId) return;
+    if (!confirm("Cancel this purchase order?")) return;
+    try {
+        await apiRequest(`/purchases/${purchaseId}/cancel/`, { method: "POST" });
+        toast("Purchase order cancelled", "success");
+        if (editingPurchaseId === purchaseId) {
+            currentPurchaseDetail = await apiFetch(`/purchases/${purchaseId}/`);
+            setPurchaseFormStatus(currentPurchaseDetail?.status || "cancelled");
+            renderPurchaseLines(currentPurchaseDetail?.lines || []);
+            await loadPurchaseReceipts(purchaseId);
+            renderPurchaseBillSection(currentPurchaseDetail);
+            updatePurchaseFormActions();
+        }
+        await loadBackOfficePurchases();
+    } catch (err) {
+        toast(`Cancel failed: ${err.message}`, "error");
     }
 }
 
@@ -3774,6 +4374,8 @@ async function submitPurchaseReceive() {
             currentPurchaseDetail = await apiFetch(`/purchases/${editingPurchaseId}/`);
             setPurchaseFormStatus(currentPurchaseDetail.status || "partial");
             renderPurchaseLines(currentPurchaseDetail.lines || []);
+            await loadPurchaseReceipts(editingPurchaseId);
+            renderPurchaseBillSection(currentPurchaseDetail);
             updatePurchaseFormActions();
         }
         await loadBackOfficePurchases();
@@ -3820,6 +4422,88 @@ async function loadSupplierLinkedProducts(supplierId) {
             </div>
         `;
     }).join("");
+}
+
+function resetSupplierFinancials() {
+    if (els.supplierBalance) els.supplierBalance.textContent = "Outstanding balance: —";
+    if (els.supplierBillsList) els.supplierBillsList.textContent = "Save supplier to view bills.";
+    if (els.supplierLedgerList) els.supplierLedgerList.textContent = "Save supplier to view ledger activity.";
+}
+
+async function loadSupplierFinancials(supplierId) {
+    if (!supplierId) {
+        resetSupplierFinancials();
+        return;
+    }
+    if (els.supplierBalance) {
+        els.supplierBalance.textContent = "Outstanding balance: …";
+    }
+    try {
+        const balance = await apiFetch(`/suppliers/${supplierId}/balances/`);
+        if (els.supplierBalance) {
+            const outstanding = balance?.outstanding_balance ? fmtPrice(balance.outstanding_balance) : fmtPrice(0);
+            els.supplierBalance.textContent = `Outstanding balance: ${outstanding}`;
+        }
+    } catch (err) {
+        if (els.supplierBalance) els.supplierBalance.textContent = "Outstanding balance: —";
+    }
+
+    try {
+        const bills = await apiFetch(withParams("/purchases/bills/", {
+            supplier: supplierId,
+            limit: 5,
+            offset: 0,
+        }));
+        const billRows = ensureArray(normalizePaginated(bills), "supplierBills");
+        if (els.supplierBillsList) {
+            if (!billRows.length) {
+                els.supplierBillsList.textContent = "No bills yet.";
+            } else {
+                els.supplierBillsList.innerHTML = billRows.map(bill => `
+                    <div class="supplier-financial-item">
+                        <div>
+                            <strong>${esc(bill.bill_number || "Bill")}</strong>
+                            <div class="muted">${esc(bill.purchase_order?.po_number || "—")}</div>
+                        </div>
+                        <div>
+                            <div>${bill.total_amount !== null && bill.total_amount !== undefined ? fmtPrice(bill.total_amount) : "—"}</div>
+                            <div class="muted">${formatLabel(bill.status || "open")}</div>
+                        </div>
+                    </div>
+                `).join("");
+            }
+        }
+    } catch (err) {
+        if (els.supplierBillsList) els.supplierBillsList.textContent = "Failed to load bills.";
+    }
+
+    try {
+        const ledger = await apiFetch(withParams(`/suppliers/${supplierId}/ledger/`, {
+            limit: 5,
+            offset: 0,
+        }));
+        const ledgerRows = ensureArray(normalizePaginated(ledger), "supplierLedger");
+        if (els.supplierLedgerList) {
+            if (!ledgerRows.length) {
+                els.supplierLedgerList.textContent = "No ledger entries yet.";
+            } else {
+                els.supplierLedgerList.innerHTML = ledgerRows.map(entry => `
+                    <div class="supplier-financial-item">
+                        <div>
+                            <strong>${formatLabel(entry.entry_type || "entry")}</strong>
+                            <div class="muted">${formatShortDate(entry.created_at)} • ${esc(entry.reference || "—")}</div>
+                        </div>
+                        <div>
+                            <div>${entry.amount ? fmtPrice(entry.amount) : "—"}</div>
+                            <div class="muted">${formatLabel(entry.direction || "out")}</div>
+                        </div>
+                    </div>
+                `).join("");
+            }
+        }
+    } catch (err) {
+        if (els.supplierLedgerList) els.supplierLedgerList.textContent = "Failed to load ledger.";
+    }
 }
 
 async function loadBackOfficeStaff() {
@@ -4314,6 +4998,248 @@ function renderBackOfficeOrderDetail(order) {
         <div class="detail-section">
             <h4>Payments</h4>
             <div class="payment-history">${paymentsHtml}</div>
+        </div>
+        <div class="detail-section">
+            <h4>Delivery Run</h4>
+            <div id="order-delivery-run-actions" class="muted">Checking delivery run...</div>
+        </div>
+    `;
+
+    loadBackOfficeOrderRunActions(order);
+}
+
+async function loadBackOfficeOrderRunActions(order) {
+    if (!order) return;
+    const container = document.getElementById("order-delivery-run-actions");
+    if (!container) return;
+    if (!order.assigned_to?.id) {
+        container.innerHTML = `<div class="muted">Assign a delivery person to create a run.</div>`;
+        return;
+    }
+    container.innerHTML = `<div class="muted">Checking for existing run...</div>`;
+    const existingRun = await findDeliveryRunForOrder(order.id);
+    if (existingRun) {
+        container.innerHTML = `<button class="btn-secondary" data-view-run="${existingRun.id}">View Delivery Run</button>`;
+        const viewBtn = container.querySelector("[data-view-run]");
+        if (viewBtn) {
+            viewBtn.addEventListener("click", () => openBackOfficeDeliveryDetail(existingRun.id));
+        }
+        return;
+    }
+    container.innerHTML = `<button class="btn-primary" data-create-run="${order.id}">Create Delivery Run</button>`;
+    const createBtn = container.querySelector("[data-create-run]");
+    if (createBtn) {
+        createBtn.addEventListener("click", () => createDeliveryRunForOrder(order.id, order.assigned_to.id));
+    }
+}
+
+async function findDeliveryRunForOrder(orderId) {
+    if (!orderId) return null;
+    const data = await apiFetch(withParams("/delivery/runs/", {
+        search: orderId,
+        limit: 1,
+        offset: 0,
+    }));
+    const page = normalizePaginated(data);
+    const runs = ensureArray(page, "deliveryRuns");
+    return runs[0] || null;
+}
+
+async function createDeliveryRunForOrder(orderId, deliveryPersonId) {
+    if (!orderId || !deliveryPersonId) {
+        toast("Assign a delivery person first.", "error");
+        return;
+    }
+    try {
+        const res = await apiRequest("/delivery/runs/create/", {
+            method: "POST",
+            body: {
+                order_id: orderId,
+                delivery_person_id: deliveryPersonId,
+            },
+        });
+        toast("Delivery run created", "success");
+        if (res?.id) {
+            openBackOfficeDeliveryDetail(res.id);
+        }
+    } catch (err) {
+        if (err.message && err.message.includes("already exists")) {
+            const existing = await findDeliveryRunForOrder(orderId);
+            if (existing) {
+                openBackOfficeDeliveryDetail(existing.id);
+                return;
+            }
+        }
+        toast(`Create run failed: ${err.message}`, "error");
+    }
+}
+
+// ——— Back Office Delivery Runs ———
+async function loadBackOfficeDeliveryRuns() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await Promise.all([
+            loadBackOfficeBranches(),
+            loadBackOfficeDeliveryPeople(),
+        ]);
+        const endpoint = withParams("/delivery/runs/", {
+            limit: backOfficeDeliveryLimit,
+            offset: backOfficeDeliveryOffset,
+            search: backOfficeDeliveryQuery,
+            status: els.backofficeDeliveryStatus?.value || "",
+            branch: els.backofficeDeliveryBranch?.value || "",
+            delivery_person: els.backofficeDeliveryPerson?.value || "",
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficeDeliveryPage = page;
+        backOfficeDeliveryRuns = ensureArray(page, "backOfficeDeliveryRuns");
+        renderBackOfficeDeliveryRuns();
+        updatePager({
+            prevEl: els.backofficeDeliveryPrev,
+            nextEl: els.backofficeDeliveryNext,
+            pageEl: els.backofficeDeliveryPage,
+            offset: backOfficeDeliveryOffset,
+            limit: backOfficeDeliveryLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        console.error("Failed to load delivery runs", err);
+        if (els.backofficeDeliveryTable) {
+            const tbody = els.backofficeDeliveryTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="8">Failed to load delivery runs.</td></tr>`;
+            }
+        }
+    }
+}
+
+async function loadBackOfficeDeliveryPeople() {
+    if (!els.backofficeDeliveryPerson) return;
+    await ensureAssignableUsers();
+    const current = els.backofficeDeliveryPerson.value || "";
+    const deliveryUsers = assignableUsers.filter(u => normalizeRole(u.role) === "deliver_person");
+    const options = [
+        `<option value="">All delivery persons</option>`,
+        ...deliveryUsers.map(user => {
+            const label = `${user.display_name || user.username || "User"}`;
+            return `<option value="${user.id}">${esc(label)}</option>`;
+        }),
+    ];
+    els.backofficeDeliveryPerson.innerHTML = options.join("");
+    if (current) els.backofficeDeliveryPerson.value = current;
+}
+
+function renderBackOfficeDeliveryRuns() {
+    if (!els.backofficeDeliveryTable) return;
+    const tbody = els.backofficeDeliveryTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeDeliveryRuns;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="8">No delivery runs found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(run => {
+        const orderId = run.order?.id ? `#${shortOrderId(run.order.id)}` : "—";
+        const customerName = run.order?.customer_name || "—";
+        const deliveryPerson = run.delivery_person?.name || run.delivery_person?.username || "—";
+        const branchName = run.branch?.name || "—";
+        const statusBadge = renderDeliveryStatusBadge(run.status);
+        const lastPing = formatDateTime(run.last_ping_at);
+        const lastLocation = formatLocation(run.last_known_latitude, run.last_known_longitude);
+        return `
+            <tr>
+                <td>${orderId}</td>
+                <td>${esc(customerName)}</td>
+                <td>${esc(deliveryPerson)}</td>
+                <td>${esc(branchName)}</td>
+                <td>${statusBadge}</td>
+                <td>${lastPing}</td>
+                <td>${lastLocation}</td>
+                <td><button class="btn-ghost" onclick="openBackOfficeDeliveryDetail('${run.id}')">View</button></td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function openBackOfficeDeliveryDetail(runId) {
+    if (!runId || !els.backofficeDeliveryDetailModal) return;
+    els.backofficeDeliveryDetailBody.innerHTML = `<div class="muted">Loading delivery run...</div>`;
+    openOverlay(els.backofficeDeliveryDetailModal, { closeOthers: false });
+    try {
+        const [detail, history] = await Promise.all([
+            apiFetch(`/delivery/runs/${runId}/`),
+            apiFetch(`/delivery/runs/${runId}/history/`),
+        ]);
+        renderBackOfficeDeliveryDetail(detail, ensureArray(history, "deliveryRunHistory"));
+    } catch (err) {
+        els.backofficeDeliveryDetailBody.innerHTML = `<div class="muted">Failed to load delivery run.</div>`;
+    }
+}
+
+function closeBackOfficeDeliveryDetail() {
+    if (!els.backofficeDeliveryDetailModal) return;
+    closeOverlay(els.backofficeDeliveryDetailModal);
+}
+
+function renderBackOfficeDeliveryDetail(run, history = []) {
+    if (!els.backofficeDeliveryDetailBody) return;
+    if (!run) {
+        els.backofficeDeliveryDetailBody.innerHTML = `<div class="muted">Delivery run not found.</div>`;
+        return;
+    }
+    const orderId = run.order?.id ? `#${shortOrderId(run.order.id)}` : "—";
+    const saleId = run.order?.sale_id ? `#${shortOrderId(run.order.sale_id)}` : "—";
+    const customerName = run.order?.customer_name || "—";
+    const deliveryPerson = run.delivery_person?.name || run.delivery_person?.username || "—";
+    const branchName = run.branch?.name || "—";
+    const statusBadge = renderDeliveryStatusBadge(run.status);
+    const lastLocation = formatLocation(run.last_known_latitude, run.last_known_longitude);
+    const historyHtml = renderDeliveryRunHistoryList(history);
+    const orderAction = run.order?.id
+        ? `<div class="detail-actions"><button class="btn-secondary" onclick="openBackOfficeOrderDetail('${run.order.id}')">View Order</button></div>`
+        : "";
+    const proofSection = run.status === "delivered" || run.recipient_name
+        ? `
+        <div class="detail-section">
+            <h4>Proof of Delivery</h4>
+            <div class="detail-list">
+                <div class="detail-item"><span>Recipient</span><strong>${esc(run.recipient_name || "—")}</strong></div>
+                <div class="detail-item"><span>Phone</span><strong>${esc(run.recipient_phone || "—")}</strong></div>
+                <div class="detail-item"><span>Delivered At</span><strong>${formatDateTime(run.delivered_at || run.completed_at)}</strong></div>
+                <div class="detail-item"><span>Notes</span><strong>${esc(run.delivery_notes || "—")}</strong></div>
+            </div>
+        </div>
+        `
+        : "";
+
+    els.backofficeDeliveryDetailBody.innerHTML = `
+        <div class="detail-grid">
+            <div class="detail-card">
+                <div class="detail-row"><span>Order</span><strong>${orderId}</strong></div>
+                <div class="detail-row"><span>Sale</span><strong>${saleId}</strong></div>
+                <div class="detail-row"><span>Status</span><strong>${statusBadge}</strong></div>
+                <div class="detail-row"><span>Customer</span><strong>${esc(customerName)}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Delivery Person</span><strong>${esc(deliveryPerson)}</strong></div>
+                <div class="detail-row"><span>Branch</span><strong>${esc(branchName)}</strong></div>
+                <div class="detail-row"><span>Assigned</span><strong>${formatDateTime(run.assigned_at)}</strong></div>
+                <div class="detail-row"><span>Started</span><strong>${formatDateTime(run.started_at)}</strong></div>
+                <div class="detail-row"><span>Completed</span><strong>${formatDateTime(run.completed_at)}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Last Ping</span><strong>${formatDateTime(run.last_ping_at)}</strong></div>
+                <div class="detail-row"><span>Last Location</span><strong>${lastLocation}</strong></div>
+                <div class="detail-row"><span>Start</span><strong>${formatLocation(run.start_latitude, run.start_longitude)}</strong></div>
+                <div class="detail-row"><span>End</span><strong>${formatLocation(run.end_latitude, run.end_longitude)}</strong></div>
+            </div>
+        </div>
+        ${orderAction}
+        ${proofSection}
+        <div class="detail-section">
+            <h4>Route History</h4>
+            <div class="delivery-run-history">${historyHtml}</div>
         </div>
     `;
 }
@@ -4980,8 +5906,10 @@ async function loadBackOfficeBranches() {
     const currentCustomerBranch = els.backofficeCustomerBranch?.value || "";
     const currentSalesBranch = els.backofficeSalesBranch?.value || "";
     const currentOrdersBranch = els.backofficeOrdersBranch?.value || "";
+    const currentDeliveryBranch = els.backofficeDeliveryBranch?.value || "";
     const currentPaymentsBranch = els.backofficePaymentsBranch?.value || "";
     const currentPurchaseBranch = els.backofficePurchasesBranch?.value || "";
+    const currentBillsBranch = els.backofficeBillsBranch?.value || "";
     if (!els.productBranch) return;
     els.productBranch.innerHTML = `
         <option value="">Select branch (optional)</option>
@@ -5018,6 +5946,16 @@ async function loadBackOfficeBranches() {
         }
     }
 
+    if (els.backofficeDeliveryBranch) {
+        els.backofficeDeliveryBranch.innerHTML = `
+            <option value="">All branches</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+        if (currentDeliveryBranch) {
+            els.backofficeDeliveryBranch.value = currentDeliveryBranch;
+        }
+    }
+
     if (els.backofficePaymentsBranch) {
         els.backofficePaymentsBranch.innerHTML = `
             <option value="">All branches</option>
@@ -5035,6 +5973,16 @@ async function loadBackOfficeBranches() {
         `;
         if (currentPurchaseBranch) {
             els.backofficePurchasesBranch.value = currentPurchaseBranch;
+        }
+    }
+
+    if (els.backofficeBillsBranch) {
+        els.backofficeBillsBranch.innerHTML = `
+            <option value="">All branches</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+        if (currentBillsBranch) {
+            els.backofficeBillsBranch.value = currentBillsBranch;
         }
     }
 
@@ -5398,6 +6346,7 @@ function openSupplierForm(supplierId = null) {
         if (els.supplierForm) els.supplierForm.reset();
         if (els.supplierActive) els.supplierActive.checked = true;
         loadSupplierLinkedProducts(null);
+        resetSupplierFinancials();
     } else {
         const supplier = backOfficeSuppliers.find(s => s.id === supplierId);
         if (!supplier) return;
@@ -5410,6 +6359,7 @@ function openSupplierForm(supplierId = null) {
         if (els.supplierNotes) els.supplierNotes.value = supplier.notes || "";
         if (els.supplierActive) els.supplierActive.checked = supplier.is_active !== false;
         loadSupplierLinkedProducts(supplierId);
+        loadSupplierFinancials(supplierId);
     }
     openOverlay(els.supplierFormModal);
 }
@@ -7186,6 +8136,10 @@ function canApproveCustomerCredit() {
     return ["salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }
 
+function canAccessDeliveryRun() {
+    return ["deliver_person"].includes(normalizeRole(currentUserRole));
+}
+
 function openCustomerOrdersModal() {
     customerOrdersLog("[customer-orders] open modal click");
     customerOrdersLog("[customer-orders] auth", { hasToken: Boolean(API_TOKEN), hasUser: Boolean(currentUser), role: currentUserRole });
@@ -7209,6 +8163,373 @@ function openCustomerOrdersModal() {
 function closeCustomerOrdersModal() {
     if (!els.customerOrdersModal) return;
     closeOverlay(els.customerOrdersModal);
+}
+
+// ——— Delivery Run (Delivery Person) ———
+function openDeliveryRunModal() {
+    if (!els.deliveryRunModal) return;
+    if (!canAccessDeliveryRun()) {
+        toast("You do not have access to delivery runs", "error");
+        return;
+    }
+    currentDeliveryRun = null;
+    if (els.deliveryRunError) {
+        els.deliveryRunError.textContent = "";
+        els.deliveryRunError.classList.add("hidden");
+    }
+    if (els.deliveryRunMeta) {
+        els.deliveryRunMeta.innerHTML = `<div class="muted">Loading delivery run...</div>`;
+    }
+    if (els.deliveryRunHistory) {
+        els.deliveryRunHistory.classList.add("muted");
+        els.deliveryRunHistory.innerHTML = `No location history yet.`;
+    }
+    closeDeliveryProofForm();
+    openOverlay(els.deliveryRunModal, { closeOthers: false });
+    loadMyDeliveryRun();
+}
+
+function closeDeliveryRunModal() {
+    if (!els.deliveryRunModal) return;
+    closeOverlay(els.deliveryRunModal);
+    if (els.deliveryRunError) {
+        els.deliveryRunError.textContent = "";
+        els.deliveryRunError.classList.add("hidden");
+    }
+}
+
+async function loadMyDeliveryRun() {
+    if (!els.deliveryRunMeta) return;
+    try {
+        const endpoint = withParams("/delivery/runs/", {
+            active: 1,
+            limit: 1,
+            offset: 0,
+        });
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        const runs = ensureArray(page, "deliveryRuns");
+        const run = runs[0] || null;
+        if (!run) {
+            currentDeliveryRun = null;
+            els.deliveryRunMeta.innerHTML = `<div class="muted">No active delivery run assigned.</div>`;
+            renderDeliveryRunHistoryList([], els.deliveryRunHistory);
+            updateDeliveryRunActions(null);
+            return;
+        }
+        currentDeliveryRun = run;
+        renderDeliveryRunMeta(run);
+        updateDeliveryRunActions(run);
+        await loadDeliveryRunHistory(run.id, els.deliveryRunHistory);
+    } catch (err) {
+        els.deliveryRunMeta.innerHTML = `<div class="muted">Failed to load delivery run.</div>`;
+        setDeliveryRunError("Failed to load delivery run.");
+    }
+}
+
+function renderDeliveryRunMeta(run) {
+    if (!els.deliveryRunMeta || !run) return;
+    const statusBadge = renderDeliveryStatusBadge(run.status);
+    const orderId = run.order?.id ? `#${shortOrderId(run.order.id)}` : "—";
+    const customerName = run.order?.customer_name || "—";
+    const branchName = run.branch?.name || "—";
+    const lastLocation = formatLocation(run.last_known_latitude, run.last_known_longitude);
+    els.deliveryRunMeta.innerHTML = `
+        <div class="detail-grid">
+            <div class="detail-card">
+                <div class="detail-row"><span>Order</span><strong>${orderId}</strong></div>
+                <div class="detail-row"><span>Status</span><strong>${statusBadge}</strong></div>
+                <div class="detail-row"><span>Customer</span><strong>${esc(customerName)}</strong></div>
+                <div class="detail-row"><span>Branch</span><strong>${esc(branchName)}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Assigned</span><strong>${formatDateTime(run.assigned_at)}</strong></div>
+                <div class="detail-row"><span>Started</span><strong>${formatDateTime(run.started_at)}</strong></div>
+                <div class="detail-row"><span>Last Ping</span><strong>${formatDateTime(run.last_ping_at)}</strong></div>
+                <div class="detail-row"><span>Last Location</span><strong>${lastLocation}</strong></div>
+            </div>
+        </div>
+    `;
+}
+
+function updateDeliveryRunActions(run) {
+    const status = run?.status || "";
+    const isActive = ["assigned", "picked_up", "en_route", "arrived"].includes(status);
+    const isTerminal = ["delivered", "failed", "cancelled"].includes(status);
+
+    if (els.deliveryRunStart) {
+        els.deliveryRunStart.disabled = !run || status !== "assigned";
+    }
+    if (els.deliveryRunLocation) {
+        els.deliveryRunLocation.disabled = !run || !isActive;
+    }
+    if (els.deliveryRunComplete) {
+        els.deliveryRunComplete.disabled = !run || isTerminal;
+    }
+    if (els.deliveryRunFail) {
+        els.deliveryRunFail.disabled = !run || isTerminal;
+    }
+    if (els.deliveryRunStatus) {
+        const options = buildDeliveryStatusOptions(status);
+        els.deliveryRunStatus.innerHTML = options.length
+            ? `<option value="">Update status…</option>${options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join("")}`
+            : `<option value="">No status updates</option>`;
+        els.deliveryRunStatus.disabled = !run || !options.length;
+    }
+    if (els.deliveryRunStatusSubmit) {
+        els.deliveryRunStatusSubmit.disabled = !run || !els.deliveryRunStatus || els.deliveryRunStatus.disabled;
+    }
+}
+
+function openDeliveryProofForm() {
+    if (!els.deliveryRunPod) return;
+    if (!currentDeliveryRun || ["delivered", "failed", "cancelled"].includes(currentDeliveryRun.status)) {
+        return;
+    }
+    els.deliveryRunPod.classList.remove("hidden");
+    if (els.deliveryPodName) {
+        els.deliveryPodName.value = "";
+        els.deliveryPodName.focus();
+    }
+    if (els.deliveryPodPhone) els.deliveryPodPhone.value = "";
+    if (els.deliveryPodNotes) els.deliveryPodNotes.value = "";
+}
+
+function closeDeliveryProofForm() {
+    if (!els.deliveryRunPod) return;
+    els.deliveryRunPod.classList.add("hidden");
+    if (els.deliveryPodName) els.deliveryPodName.value = "";
+    if (els.deliveryPodPhone) els.deliveryPodPhone.value = "";
+    if (els.deliveryPodNotes) els.deliveryPodNotes.value = "";
+}
+
+async function submitDeliveryProof(runId) {
+    if (!runId) return;
+    const recipientName = (els.deliveryPodName?.value || "").trim();
+    const recipientPhone = (els.deliveryPodPhone?.value || "").trim();
+    const deliveryNotes = (els.deliveryPodNotes?.value || "").trim();
+    if (!recipientName) {
+        setDeliveryRunError("Recipient name is required.");
+        return;
+    }
+    setDeliveryRunError("");
+    const ok = await completeDeliveryRun(runId, {
+        recipient_name: recipientName,
+        recipient_phone: recipientPhone,
+        delivery_notes: deliveryNotes,
+    });
+    if (ok) closeDeliveryProofForm();
+}
+
+function buildDeliveryStatusOptions(status) {
+    const normalized = (status || "").toString().toLowerCase();
+    const map = {
+        picked_up: ["en_route", "arrived"],
+        en_route: ["arrived"],
+        arrived: [],
+    };
+    const options = map[normalized] || [];
+    return options.map(value => ({
+        value,
+        label: formatLabel(value),
+    }));
+}
+
+function setDeliveryRunError(message) {
+    if (!els.deliveryRunError) return;
+    if (!message) {
+        els.deliveryRunError.textContent = "";
+        els.deliveryRunError.classList.add("hidden");
+        return;
+    }
+    els.deliveryRunError.textContent = message;
+    els.deliveryRunError.classList.remove("hidden");
+}
+
+async function loadDeliveryRunHistory(runId, targetEl) {
+    if (!runId || !targetEl) return;
+    const history = await apiFetch(`/delivery/runs/${runId}/history/`);
+    renderDeliveryRunHistoryList(ensureArray(history, "deliveryRunHistory"), targetEl);
+}
+
+function renderDeliveryRunHistoryList(history, targetEl) {
+    const emptyHtml = `<div class="muted">No location history yet.</div>`;
+    if (!history || !history.length) {
+        if (targetEl) {
+            targetEl.classList.add("muted");
+            targetEl.innerHTML = emptyHtml;
+        }
+        return emptyHtml;
+    }
+    const html = history.map(ping => {
+        const metaParts = [];
+        const accuracyVal = Number(ping.accuracy_meters);
+        if (!Number.isNaN(accuracyVal)) metaParts.push(`±${accuracyVal.toFixed(1)}m`);
+        const speedVal = Number(ping.speed_kph);
+        if (!Number.isNaN(speedVal)) metaParts.push(`${speedVal.toFixed(1)} km/h`);
+        const headingVal = Number(ping.heading_degrees);
+        if (!Number.isNaN(headingVal)) metaParts.push(`${headingVal.toFixed(0)}°`);
+        const metaLine = metaParts.length ? metaParts.join(" • ") : "—";
+        return `
+            <div class="history-row">
+                <div>
+                    <strong>${formatDateTime(ping.recorded_at)}</strong>
+                    <div class="history-meta">${metaLine}</div>
+                </div>
+                <div>${formatLocation(ping.latitude, ping.longitude)}</div>
+            </div>
+        `;
+    }).join("");
+    if (targetEl) {
+        targetEl.classList.remove("muted");
+        targetEl.innerHTML = html;
+    }
+    return html;
+}
+
+async function startDeliveryRun(runId) {
+    if (!runId) return;
+    setDeliveryRunError("");
+    let coords = null;
+    try {
+        coords = await getCurrentPosition();
+    } catch (err) {
+        toast("Location unavailable; starting without GPS", "warning");
+    }
+    try {
+        await apiRequest(`/delivery/runs/${runId}/start/`, {
+            method: "POST",
+            body: coords ? { latitude: coords.latitude, longitude: coords.longitude } : {},
+        });
+        toast("Run started", "success");
+        await loadMyDeliveryRun();
+    } catch (err) {
+        setDeliveryRunError(`Start failed: ${err.message}`);
+    }
+}
+
+async function sendDeliveryRunLocation(runId) {
+    if (!runId) return;
+    setDeliveryRunError("");
+    let coords;
+    try {
+        coords = await getCurrentPosition();
+    } catch (err) {
+        setDeliveryRunError(err.message || "Unable to access location.");
+        return;
+    }
+    try {
+        await apiRequest(`/delivery/runs/${runId}/location/`, {
+            method: "POST",
+            body: {
+                latitude: coords.latitude,
+                longitude: coords.longitude,
+                accuracy_meters: coords.accuracy,
+                speed_kph: coords.speed,
+                heading_degrees: coords.heading,
+            },
+        });
+        toast("Location sent", "success");
+        await loadMyDeliveryRun();
+    } catch (err) {
+        setDeliveryRunError(`Location update failed: ${err.message}`);
+    }
+}
+
+async function updateDeliveryRunStatus(runId) {
+    if (!runId || !els.deliveryRunStatus) return;
+    const status = els.deliveryRunStatus.value;
+    if (!status) {
+        setDeliveryRunError("Select a status to update.");
+        return;
+    }
+    setDeliveryRunError("");
+    try {
+        await apiRequest(`/delivery/runs/${runId}/status/`, {
+            method: "POST",
+            body: { status },
+        });
+        toast("Status updated", "success");
+        await loadMyDeliveryRun();
+    } catch (err) {
+        setDeliveryRunError(`Status update failed: ${err.message}`);
+    }
+}
+
+async function completeDeliveryRun(runId, proof = {}) {
+    if (!runId) return;
+    setDeliveryRunError("");
+    let coords = null;
+    try {
+        coords = await getCurrentPosition();
+    } catch (err) {
+        toast("Location unavailable; completing without GPS", "warning");
+    }
+    try {
+        await apiRequest(`/delivery/runs/${runId}/complete/`, {
+            method: "POST",
+            body: {
+                ...(coords ? { latitude: coords.latitude, longitude: coords.longitude } : {}),
+                ...proof,
+            },
+        });
+        toast("Run completed", "success");
+        await loadMyDeliveryRun();
+        return true;
+    } catch (err) {
+        setDeliveryRunError(`Complete failed: ${err.message}`);
+        return false;
+    }
+}
+
+async function failDeliveryRun(runId) {
+    if (!runId) return;
+    setDeliveryRunError("");
+    let coords = null;
+    try {
+        coords = await getCurrentPosition();
+    } catch (err) {
+        toast("Location unavailable; failing without GPS", "warning");
+    }
+    try {
+        await apiRequest(`/delivery/runs/${runId}/fail/`, {
+            method: "POST",
+            body: coords ? { latitude: coords.latitude, longitude: coords.longitude } : {},
+        });
+        toast("Run marked failed", "success");
+        await loadMyDeliveryRun();
+    } catch (err) {
+        setDeliveryRunError(`Fail update failed: ${err.message}`);
+    }
+}
+
+function getCurrentPosition(options = {}) {
+    if (!navigator.geolocation) {
+        return Promise.reject(new Error("Geolocation is not supported on this device."));
+    }
+    const config = {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+        ...options,
+    };
+    return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                resolve({
+                    latitude: pos.coords.latitude,
+                    longitude: pos.coords.longitude,
+                    accuracy: pos.coords.accuracy,
+                    speed: pos.coords.speed,
+                    heading: pos.coords.heading,
+                });
+            },
+            (err) => {
+                reject(new Error(err.message || "Unable to access location."));
+            },
+            config,
+        );
+    });
 }
 
 async function ensureAssignableUsers() {
@@ -9542,6 +10863,26 @@ function renderStatusBadge(status) {
     return `<span class="status-badge status-${normalized}">${label}</span>`;
 }
 
+function renderDeliveryStatusBadge(status) {
+    const normalized = (status || "assigned").toString().toLowerCase();
+    const label = formatLabel(normalized);
+    return `<span class="status-badge status-${normalized}">${label}</span>`;
+}
+
+function formatCoord(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const num = Number(value);
+    if (Number.isNaN(num)) return null;
+    return num.toFixed(5);
+}
+
+function formatLocation(lat, lng) {
+    const latText = formatCoord(lat);
+    const lngText = formatCoord(lng);
+    if (!latText || !lngText) return "—";
+    return `${latText}, ${lngText}`;
+}
+
 function formatPaymentMethod(method) {
     const normalized = (method || "cash").toString().toLowerCase();
     if (normalized === "mpesa") return "M-Pesa";
@@ -9987,6 +11328,11 @@ function applyRoleUI() {
         const canManage = canManageCustomerOrders();
         els.customerOrdersBtn.classList.toggle("btn-disabled", !canManage);
         els.customerOrdersBtn.setAttribute("aria-disabled", canManage ? "false" : "true");
+    }
+    if (els.deliveryRunBtn) {
+        const canDelivery = canAccessDeliveryRun();
+        els.deliveryRunBtn.classList.toggle("hidden", !canDelivery);
+        els.deliveryRunBtn.setAttribute("aria-disabled", canDelivery ? "false" : "true");
     }
     if (els.ledgerBtn) {
         const canView = canViewLedger();
