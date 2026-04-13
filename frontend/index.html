@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.3">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.5">
 </head>
 <body>
     <!-- Top Bar -->
@@ -94,16 +94,28 @@
             </div>
             <div class="mobile-action-grid">
                 <button id="mobile-tile-sell" class="mobile-action-tile">
+                    <span class="tile-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img" focusable="false">
+                            <path d="M4 6h16a1 1 0 0 1 1 1v3a3 3 0 0 1-3 3h-1v2a2 2 0 0 1-2 2h-1v2h-4v-2H9a2 2 0 0 1-2-2v-2H6a3 3 0 0 1-3-3V7a1 1 0 0 1 1-1Zm1 2v2a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8H5Zm4 7h6v-2H9v2Zm1 4h4v-2h-4v2Z"/>
+                        </svg>
+                    </span>
                     <span class="tile-title">Sell</span>
-                    <span class="tile-sub">Start a new sale</span>
                 </button>
                 <button id="mobile-tile-sales" class="mobile-action-tile">
+                    <span class="tile-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img" focusable="false">
+                            <path d="M4 20a1 1 0 0 1-1-1V5a1 1 0 0 1 2 0v14h14a1 1 0 1 1 0 2H4Zm4-4a1 1 0 0 1-1-1v-3a1 1 0 1 1 2 0v3a1 1 0 0 1-1 1Zm4 0a1 1 0 0 1-1-1V9a1 1 0 1 1 2 0v6a1 1 0 0 1-1 1Zm4 0a1 1 0 0 1-1-1V6a1 1 0 1 1 2 0v9a1 1 0 0 1-1 1Z"/>
+                        </svg>
+                    </span>
                     <span class="tile-title">Sales</span>
-                    <span class="tile-sub">View recent sales</span>
                 </button>
                 <button id="mobile-tile-stock" class="mobile-action-tile">
+                    <span class="tile-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img" focusable="false">
+                            <path d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Zm0 2.2 6.5 3.3L12 10.8 5.5 7.5 12 4.2Zm-7 5.6L11 12.9v6.4l-6-3V9.8Zm8 9.5v-6.4l6-3v6.4l-6 3Z"/>
+                        </svg>
+                    </span>
                     <span class="tile-title">Stock</span>
-                    <span class="tile-sub">Check available stock</span>
                 </button>
             </div>
         </section>
@@ -440,6 +452,22 @@
                     <button id="mobile-success-new-sale" class="btn-primary">New Sale</button>
                     <button id="mobile-success-products" class="btn-ghost">Back to Products</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Sale Detail Modal -->
+    <div id="mobile-sale-detail-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content mobile-sale-detail-modal">
+            <div class="modal-header">
+                <h3>Sale Details</h3>
+                <button id="mobile-sale-detail-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <div id="mobile-sale-detail-body" class="mobile-sale-detail-body"></div>
+            </div>
+            <div class="modal-actions">
+                <button id="mobile-sale-detail-receipt" class="btn-secondary">View Receipt</button>
             </div>
         </div>
     </div>
@@ -2128,6 +2156,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-13.3"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-13.5"></script>
 </body>
 </html>

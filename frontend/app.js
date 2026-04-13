@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-13.3";
+const APP_BUILD = "2026-04-13.5";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -123,6 +123,8 @@ let lastMobileSaleId = null;
 let activeMobileTab = "home";
 let mobileSalesFilter = "today";
 let mobileSalesLoading = false;
+let mobileSalesCache = new Map();
+let currentMobileSaleDetailId = null;
 let mobileStockTimer = null;
 let mobileStockToken = 0;
 let mobileStockQuery = "";
@@ -804,6 +806,10 @@ const els = {
     mobileStockBack: document.getElementById("mobile-stock-back"),
     mobileStockSearch: document.getElementById("mobile-stock-search"),
     mobileStockList: document.getElementById("mobile-stock-list"),
+    mobileSaleDetailModal: document.getElementById("mobile-sale-detail-modal"),
+    mobileSaleDetailClose: document.getElementById("mobile-sale-detail-close"),
+    mobileSaleDetailBody: document.getElementById("mobile-sale-detail-body"),
+    mobileSaleDetailReceipt: document.getElementById("mobile-sale-detail-receipt"),
 };
 
 // ——— Overlay / Modal Helpers ———
@@ -957,6 +963,11 @@ document.addEventListener("click", (e) => {
     if (deleteDraft) {
         e.preventDefault();
         deleteOfflineDraft(deleteDraft.dataset.offlineDraftDelete);
+    }
+    const saleCard = e.target.closest("[data-mobile-sale-id]");
+    if (saleCard) {
+        e.preventDefault();
+        openMobileSaleDetail(saleCard.dataset.mobileSaleId);
     }
 });
 
@@ -2305,6 +2316,16 @@ function initMobileDashboard() {
             }, 300);
         });
     }
+    if (els.mobileSaleDetailClose) {
+        els.mobileSaleDetailClose.addEventListener("click", () => closeOverlay(els.mobileSaleDetailModal));
+    }
+    if (els.mobileSaleDetailReceipt) {
+        els.mobileSaleDetailReceipt.addEventListener("click", () => {
+            if (currentMobileSaleDetailId) {
+                showReceipt(currentMobileSaleDetailId);
+            }
+        });
+    }
 }
 
 function toISODate(date) {
@@ -2440,6 +2461,10 @@ async function loadMobileSales() {
         }
 
         const results = ensureArray(listData?.results ?? listData, "mobileSales");
+        mobileSalesCache = new Map();
+        results.forEach((sale) => {
+            if (sale?.id) mobileSalesCache.set(sale.id, sale);
+        });
         if (!results.length) {
             els.mobileSalesList.innerHTML = `<div class="sale-entry-empty">No sales found.</div>`;
         } else {
@@ -2450,7 +2475,7 @@ async function loadMobileSales() {
                 const cashier = sale.completed_by?.display_name || "—";
                 const paymentMode = formatLabel(sale.payment_mode || "cash");
                 return `
-                    <div class="mobile-sales-card">
+                    <div class="mobile-sales-card" data-mobile-sale-id="${sale.id}">
                         <div class="mobile-sales-meta">
                             <span>#${shortOrderId(sale.id)}</span>
                             <span>${saleTime}</span>
@@ -2475,6 +2500,82 @@ async function loadMobileSales() {
         }
     } finally {
         mobileSalesLoading = false;
+    }
+}
+
+async function openMobileSaleDetail(saleId) {
+    if (!saleId) return;
+    if (!canViewMobileSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
+    currentMobileSaleDetailId = saleId;
+    if (els.mobileSaleDetailBody) {
+        els.mobileSaleDetailBody.innerHTML = `<div class="sale-entry-empty">Loading sale details…</div>`;
+    }
+    openOverlay(els.mobileSaleDetailModal);
+    const sale = mobileSalesCache.get(saleId) || {};
+    const receipt = await apiFetch(`/sales/${saleId}/receipt/`);
+    if (!receipt) {
+        if (els.mobileSaleDetailBody) {
+            els.mobileSaleDetailBody.innerHTML = `<div class="sale-entry-empty">Failed to load sale details.</div>`;
+        }
+        return;
+    }
+    const customerName = sale.customer?.name || "Walk-in";
+    const branchName = sale.branch?.name || "—";
+    const cashier = sale.completed_by?.display_name || "—";
+    const saleTime = formatDateTime(receipt.date || sale.completed_at || sale.sale_date);
+    const items = ensureArray(receipt.items || [], "receiptItems");
+    const payments = ensureArray(receipt.payments || [], "receiptPayments");
+
+    const paymentSummary = payments.length
+        ? payments.map((p) => `${formatLabel(p.method || p.payment_method || "cash")} ${fmtPrice(p.amount || 0)}`).join(", ")
+        : formatLabel(receipt.payment_status || sale.payment_status || "paid");
+
+    if (els.mobileSaleDetailBody) {
+        els.mobileSaleDetailBody.innerHTML = `
+            <div class="mobile-sale-detail-header">
+                <strong>Sale #${shortOrderId(saleId)}</strong>
+                <div class="mobile-sale-detail-meta">
+                    <div><span>Date</span> ${saleTime}</div>
+                    <div><span>Customer</span> ${esc(customerName)}</div>
+                    <div><span>Branch</span> ${esc(branchName)}</div>
+                    ${isSupervisorOrAdmin() ? `<div><span>Cashier</span> ${esc(cashier)}</div>` : ""}
+                </div>
+            </div>
+            <div class="mobile-sale-detail-section">
+                <strong>Items</strong>
+                <div class="mobile-sale-items">
+                    ${items.length ? items.map((item) => `
+                        <div class="mobile-sale-item">
+                            <div>
+                                <strong>${esc(item.product || "Item")}</strong>
+                                <div class="item-meta">${item.quantity} × ${fmtPrice(item.unit_price || 0)}</div>
+                            </div>
+                            <div><strong>${fmtPrice(item.total || 0)}</strong></div>
+                        </div>
+                    `).join("") : `<div class="sale-entry-empty">No items found.</div>`}
+                </div>
+            </div>
+            <div class="mobile-sale-detail-section">
+                <strong>Payment</strong>
+                <div class="mobile-sale-detail-meta">
+                    <div><span>Status</span> ${formatLabel(receipt.payment_status || sale.payment_status || "paid")}</div>
+                    <div><span>Summary</span> ${esc(paymentSummary)}</div>
+                </div>
+            </div>
+            <div class="mobile-sale-detail-section">
+                <strong>Totals</strong>
+                <div class="mobile-sale-totals">
+                    <div class="summary-row"><span>Subtotal</span><span>${fmtPrice(receipt.subtotal || 0)}</span></div>
+                    <div class="summary-row"><span>Tax</span><span>${fmtPrice(receipt.tax || 0)}</span></div>
+                    <div class="summary-row"><span>Total</span><span>${fmtPrice(receipt.total || 0)}</span></div>
+                    <div class="summary-row"><span>Paid</span><span>${fmtPrice(receipt.paid || 0)}</span></div>
+                    <div class="summary-row"><span>Balance</span><span>${fmtPrice(receipt.balance_due || 0)}</span></div>
+                </div>
+            </div>
+        `;
     }
 }
 
