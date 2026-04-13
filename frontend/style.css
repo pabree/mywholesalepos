@@ -4188,6 +4188,12 @@ body.offline .offline-status {
     align-items: center;
 }
 
+.print-note {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
 .receipt-toggle {
     display: inline-flex;
     align-items: center;

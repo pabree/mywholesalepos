@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-10.11">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.1">
 </head>
 <body>
     <!-- Top Bar -->
@@ -296,6 +296,7 @@
                 </label>
                 <button id="print-receipt-btn" class="btn-primary">🖨️ Print</button>
                 <button id="new-sale-btn" class="btn-secondary">+ New Sale</button>
+                <div class="print-note">Printing uses your device's print dialog. Bluetooth support depends on your phone/browser.</div>
             </div>
         </div>
     </div>
@@ -2049,6 +2050,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-10.11"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-13.1"></script>
 </body>
 </html>

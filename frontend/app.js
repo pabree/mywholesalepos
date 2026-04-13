@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-10.11";
+const APP_BUILD = "2026-04-13.1";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -8685,14 +8685,20 @@ function printReceipt() {
         <html>
             <head>
                 <title>Receipt</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <style>
+                    @page {
+                        size: 58mm auto;
+                        margin: 4mm;
+                    }
                     body {
                         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
                         font-size: 12px;
                         background: #ffffff;
                         color: #000000;
                         margin: 0;
-                        padding: 10px 12px;
+                        padding: 0;
+                        width: 58mm;
                     }
                     .receipt { padding: 0; text-align: left; }
                     .receipt-success { display: none; }
@@ -8722,8 +8728,18 @@ function printReceipt() {
     `);
     win.document.close();
     win.focus();
-    win.print();
-    win.close();
+    const closeIfAllowed = () => {
+        try { win.close(); } catch (err) { /* ignore */ }
+    };
+    if ("onafterprint" in win) {
+        win.onafterprint = closeIfAllowed;
+    }
+    setTimeout(() => {
+        try { win.print(); } catch (err) { /* ignore */ }
+        if (!("onafterprint" in win)) {
+            setTimeout(closeIfAllowed, 800);
+        }
+    }, 200);
 }
 
 function closeReceiptModal() {
