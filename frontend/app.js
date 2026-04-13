@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-13.11";
+const APP_BUILD = "2026-04-13.12";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -137,6 +137,7 @@ let mobileCustomersToken = 0;
 let mobileCustomersLoading = false;
 let mobileCustomersTimer = null;
 let currentMobileCustomerId = null;
+let mobileCustomerPaymentSaving = false;
 let backOfficeSales = [];
 let backOfficeSalesQuery = "";
 let backOfficeSalesOffset = 0;
@@ -827,6 +828,15 @@ const els = {
     mobileCustomerDetailBody: document.getElementById("mobile-customer-detail-body"),
     mobileCustomerCall: document.getElementById("mobile-customer-call"),
     mobileCustomerWhatsapp: document.getElementById("mobile-customer-whatsapp"),
+    mobileCustomerPaymentBtn: document.getElementById("mobile-customer-payment-btn"),
+    mobileCustomerPaymentModal: document.getElementById("mobile-customer-payment-modal"),
+    mobileCustomerPaymentClose: document.getElementById("mobile-customer-payment-close"),
+    mobileCustomerPaymentAmount: document.getElementById("mobile-customer-payment-amount"),
+    mobileCustomerPaymentMethod: document.getElementById("mobile-customer-payment-method"),
+    mobileCustomerPaymentReference: document.getElementById("mobile-customer-payment-reference"),
+    mobileCustomerPaymentNote: document.getElementById("mobile-customer-payment-note"),
+    mobileCustomerPaymentError: document.getElementById("mobile-customer-payment-error"),
+    mobileCustomerPaymentSubmit: document.getElementById("mobile-customer-payment-submit"),
     mobileSaleDetailModal: document.getElementById("mobile-sale-detail-modal"),
     mobileSaleDetailClose: document.getElementById("mobile-sale-detail-close"),
     mobileSaleDetailBody: document.getElementById("mobile-sale-detail-body"),
@@ -2405,6 +2415,87 @@ function updateMobileWhatsappAction(phone) {
     }
 }
 
+function canRecordCustomerPayment() {
+    return ["cashier", "salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
+}
+
+function openMobileCustomerPaymentModal() {
+    if (!els.mobileCustomerPaymentModal) return;
+    if (!currentMobileCustomerId) {
+        toast("Select a customer first.", "error");
+        return;
+    }
+    if (!canRecordCustomerPayment()) {
+        toast("You do not have permission to record payments.", "error");
+        return;
+    }
+    if (els.mobileCustomerPaymentError) els.mobileCustomerPaymentError.textContent = "";
+    if (els.mobileCustomerPaymentAmount) els.mobileCustomerPaymentAmount.value = "";
+    if (els.mobileCustomerPaymentReference) els.mobileCustomerPaymentReference.value = "";
+    if (els.mobileCustomerPaymentNote) els.mobileCustomerPaymentNote.value = "";
+    if (els.mobileCustomerPaymentMethod) els.mobileCustomerPaymentMethod.value = "cash";
+    openOverlay(els.mobileCustomerPaymentModal, { closeOthers: false });
+    requestAnimationFrame(() => {
+        els.mobileCustomerPaymentAmount?.focus();
+    });
+}
+
+async function submitMobileCustomerPayment() {
+    if (mobileCustomerPaymentSaving) return;
+    if (!currentMobileCustomerId) {
+        toast("Select a customer first.", "error");
+        return;
+    }
+    if (!canRecordCustomerPayment()) {
+        toast("You do not have permission to record payments.", "error");
+        return;
+    }
+
+    const amountRaw = els.mobileCustomerPaymentAmount?.value || "";
+    const method = els.mobileCustomerPaymentMethod?.value || "cash";
+    const reference = els.mobileCustomerPaymentReference?.value || "";
+    const note = els.mobileCustomerPaymentNote?.value || "";
+
+    if (!amountRaw || Number(amountRaw) <= 0) {
+        const message = "Enter a valid amount.";
+        if (els.mobileCustomerPaymentError) els.mobileCustomerPaymentError.textContent = message;
+        toast(message, "error");
+        return;
+    }
+
+    const payload = {
+        amount: amountRaw,
+        payment_method: method,
+        reference: reference,
+        note: note,
+    };
+
+    mobileCustomerPaymentSaving = true;
+    if (els.mobileCustomerPaymentSubmit) {
+        els.mobileCustomerPaymentSubmit.disabled = true;
+        els.mobileCustomerPaymentSubmit.textContent = "Saving...";
+    }
+    try {
+        await apiRequest(`/sales/credit/customer/${currentMobileCustomerId}/payments/`, {
+            method: "POST",
+            body: payload,
+        });
+        toast("Payment recorded", "success");
+        closeOverlay(els.mobileCustomerPaymentModal);
+        await openMobileCustomerDetail(currentMobileCustomerId);
+    } catch (err) {
+        const message = err.message || "Payment failed.";
+        if (els.mobileCustomerPaymentError) els.mobileCustomerPaymentError.textContent = message;
+        toast(`Payment failed: ${message}`, "error");
+    } finally {
+        mobileCustomerPaymentSaving = false;
+        if (els.mobileCustomerPaymentSubmit) {
+            els.mobileCustomerPaymentSubmit.disabled = false;
+            els.mobileCustomerPaymentSubmit.textContent = "Save Payment";
+        }
+    }
+}
+
 function refreshMobileTab(tab) {
     if (!isMobileLayout()) return;
     if (tab === "home") {
@@ -2508,6 +2599,15 @@ function initMobileDashboard() {
     }
     if (els.mobileCustomerDetailClose) {
         els.mobileCustomerDetailClose.addEventListener("click", () => closeOverlay(els.mobileCustomerDetailModal));
+    }
+    if (els.mobileCustomerPaymentBtn) {
+        els.mobileCustomerPaymentBtn.addEventListener("click", () => openMobileCustomerPaymentModal());
+    }
+    if (els.mobileCustomerPaymentClose) {
+        els.mobileCustomerPaymentClose.addEventListener("click", () => closeOverlay(els.mobileCustomerPaymentModal));
+    }
+    if (els.mobileCustomerPaymentSubmit) {
+        els.mobileCustomerPaymentSubmit.addEventListener("click", submitMobileCustomerPayment);
     }
 }
 
@@ -2890,6 +2990,10 @@ async function openMobileCustomerDetail(customerId) {
     const phone = customer.phone || customer.phone_number || customer.contact_phone || "";
     updateMobileCallAction(phone);
     updateMobileWhatsappAction(phone);
+    if (els.mobileCustomerPaymentBtn) {
+        els.mobileCustomerPaymentBtn.disabled = !canRecordCustomerPayment();
+        els.mobileCustomerPaymentBtn.classList.toggle("btn-disabled", !canRecordCustomerPayment());
+    }
 
     const creditSummary = await apiFetch(`/sales/credit/customer/${customerId}/summary/`);
     const outstanding = creditSummary ? fmtPrice(creditSummary.total_outstanding || 0) : "—";

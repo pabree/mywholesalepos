@@ -668,6 +668,93 @@ class CreditCustomerStatementView(APIView):
             }
         )
 
+
+class CreditCustomerPaymentCreateView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
+
+    def post(self, request, customer_id):
+        data = request.data or {}
+        amount_raw = data.get("amount")
+        if amount_raw is None or str(amount_raw).strip() == "":
+            return Response({"amount": "Amount is required."}, status=400)
+        try:
+            amount = money(amount_raw)
+        except Exception:
+            return Response({"amount": "Invalid amount."}, status=400)
+        if amount <= 0:
+            return Response({"amount": "Amount must be greater than zero."}, status=400)
+
+        method = (data.get("method") or data.get("payment_method") or "cash").lower()
+        if method not in dict(SalePayment.METHOD_CHOICES):
+            return Response({"method": "Unsupported payment method."}, status=400)
+
+        reference = (data.get("reference") or "").strip()
+        phone_number = (data.get("phone_number") or "").strip()
+        note = (data.get("note") or "").strip()
+
+        open_sales = Sale.objects.select_related("customer").filter(
+            customer_id=customer_id,
+            is_credit_sale=True,
+            status="completed",
+            balance_due__gt=0,
+        ).order_by("due_date", "sale_date", "created_at")
+
+        total_outstanding = open_sales.aggregate(total=Sum("balance_due"))["total"] or Decimal("0.00")
+        if total_outstanding <= 0:
+            return Response({"detail": "Customer has no outstanding balance."}, status=400)
+        if amount > total_outstanding:
+            return Response({"amount": "Amount exceeds outstanding balance."}, status=400)
+
+        if method == "mpesa" and reference and open_sales.count() > 1:
+            first_sale = open_sales.first()
+            if first_sale and amount > first_sale.balance_due:
+                return Response({"detail": "M-Pesa payment must be applied to a single sale."}, status=400)
+
+        payments = []
+        remaining = amount
+        for sale in open_sales:
+            if remaining <= 0:
+                break
+            payable = min(remaining, sale.balance_due)
+            try:
+                payment = sale.apply_payment(
+                    amount=payable,
+                    received_by=request.user,
+                    method=method,
+                    status="completed",
+                    reference=reference,
+                    phone_number=phone_number,
+                    note=note,
+                )
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
+            payments.append(payment)
+            remaining = money(remaining - payable)
+
+            if method == "mpesa" and reference:
+                # Avoid reuse of M-Pesa reference across multiple payments.
+                break
+
+        return Response(
+            {
+                "message": "Payment recorded",
+                "payments": [
+                    {
+                        "id": str(p.id),
+                        "sale_id": str(p.sale_id),
+                        "amount": str(p.amount),
+                        "method": p.method,
+                        "status": p.status,
+                        "payment_date": p.payment_date,
+                        "reference": p.reference,
+                    }
+                    for p in payments
+                ],
+            },
+            status=201,
+        )
+
 class SaleReceiptView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
     allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
