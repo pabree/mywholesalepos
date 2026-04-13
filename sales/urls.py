@@ -17,6 +17,8 @@ from .views import (
     BackOfficeSalesListView,
     BackOfficeSalesExportView,
     BackOfficeSaleDetailView,
+    MobileSalesListView,
+    MobileSalesSummaryView,
 )
 from .order_views import (
     CustomerOrderStatusUpdateView,
@@ -40,6 +42,8 @@ urlpatterns = [
     path("credit/assigned/<uuid:user_id>/summary/", CreditAssignedSummaryView.as_view(), name="credit-assigned-summary"),
     path("backoffice/sales/export/", BackOfficeSalesExportView.as_view(), name="backoffice-sales-export"),
     path("backoffice/sales/", BackOfficeSalesListView.as_view(), name="backoffice-sales-list"),
+    path("mobile/summary/", MobileSalesSummaryView.as_view(), name="mobile-sales-summary"),
+    path("mobile/", MobileSalesListView.as_view(), name="mobile-sales-list"),
     path("backoffice/sales/<uuid:sale_id>/", BackOfficeSaleDetailView.as_view(), name="backoffice-sales-detail"),
     path("backoffice/orders/export/", BackOfficeOrderExportView.as_view(), name="backoffice-orders-export"),
     path("backoffice/orders/", BackOfficeOrderListView.as_view(), name="backoffice-orders-list"),

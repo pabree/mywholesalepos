@@ -62,6 +62,41 @@ def _backoffice_sales_queryset(request):
     return qs.order_by("-sale_date")
 
 
+def _mobile_sales_queryset(request):
+    query = (request.query_params.get("q") or "").strip()
+    branch_id = request.query_params.get("branch")
+    date_from = parse_date(request.query_params.get("date_from") or "")
+    date_to = parse_date(request.query_params.get("date_to") or "")
+    status_filter = request.query_params.get("status") or "completed"
+
+    qs = Sale.objects.select_related(
+        "branch",
+        "customer",
+        "completed_by",
+    )
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    if branch_id:
+        qs = qs.filter(branch_id=branch_id)
+    if query:
+        qs = qs.filter(
+            Q(customer__name__icontains=query)
+            | Q(id__icontains=query)
+        )
+    if date_from:
+        qs = qs.filter(sale_date__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(sale_date__date__lte=date_to)
+
+    user = request.user
+    role = (getattr(user, "role", "") or "").strip().lower()
+    if not getattr(user, "is_superuser", False) and role not in ("admin", "supervisor"):
+        qs = qs.filter(Q(completed_by=user) | Q(created_by=user))
+
+    return qs.order_by("-sale_date")
+
+
 def _format_dt(value):
     if not value:
         return ""
@@ -127,6 +162,72 @@ class BackOfficeSalesListView(APIView):
         if page is not qs:
             return paginator.get_paginated_response(data)
         return Response(data)
+
+
+class MobileSalesListView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"cashier", "salesperson", "supervisor"}
+
+    def get(self, request):
+        qs = _mobile_sales_queryset(request)
+
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        page = page if page is not None else qs
+
+        data = []
+        for sale in page:
+            completed_by = sale.completed_by
+            data.append(
+                {
+                    "id": str(sale.id),
+                    "status": sale.status,
+                    "sale_type": sale.sale_type,
+                    "payment_mode": sale.payment_mode,
+                    "payment_status": sale.payment_status,
+                    "is_credit_sale": sale.is_credit_sale,
+                    "grand_total": str(sale.grand_total),
+                    "amount_paid": str(sale.amount_paid),
+                    "balance_due": str(sale.balance_due),
+                    "sale_date": sale.sale_date,
+                    "completed_at": sale.completed_at,
+                    "branch": {
+                        "id": str(sale.branch_id) if sale.branch_id else None,
+                        "name": sale.branch.branch_name if sale.branch else None,
+                    },
+                    "customer": {
+                        "id": str(sale.customer_id) if sale.customer_id else None,
+                        "name": sale.customer.name if sale.customer else None,
+                    },
+                    "completed_by": {
+                        "id": str(completed_by.id),
+                        "display_name": f"{completed_by.first_name} {completed_by.last_name}".strip() or completed_by.username,
+                        "role": completed_by.role,
+                    } if completed_by else None,
+                }
+            )
+
+        if page is not qs:
+            return paginator.get_paginated_response(data)
+        return Response(data)
+
+
+class MobileSalesSummaryView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"cashier", "salesperson", "supervisor"}
+
+    def get(self, request):
+        qs = _mobile_sales_queryset(request)
+        totals = qs.aggregate(
+            total=Sum("grand_total"),
+            count=Count("id"),
+        )
+        return Response(
+            {
+                "total": str(totals.get("total") or Decimal("0.00")),
+                "count": totals.get("count") or 0,
+            }
+        )
 
 
 class BackOfficeSalesExportView(APIView):

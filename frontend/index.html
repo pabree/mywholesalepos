@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.2">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.3">
 </head>
 <body>
     <!-- Top Bar -->
@@ -71,6 +71,83 @@
     <!-- Main Content -->
     <main id="app">
         <div id="mobile-role-banner" class="mobile-role-banner hidden"></div>
+
+        <!-- MOBILE: Dashboard -->
+        <section id="mobile-dashboard-panel" class="mobile-panel mobile-section" data-mobile-tab="home">
+            <div class="panel-header">
+                <div>
+                    <h2>Dashboard</h2>
+                    <p class="panel-subtitle">Today’s snapshot and quick actions.</p>
+                </div>
+            </div>
+            <div class="mobile-summary-grid">
+                <div class="mobile-summary-card">
+                    <span class="summary-label">Sales Today</span>
+                    <div id="mobile-summary-sales-value" class="summary-value">—</div>
+                    <div id="mobile-summary-sales-sub" class="summary-sub">—</div>
+                </div>
+                <div class="mobile-summary-card">
+                    <span class="summary-label">Expenses Today</span>
+                    <div id="mobile-summary-expenses-value" class="summary-value">—</div>
+                    <div id="mobile-summary-expenses-sub" class="summary-sub">—</div>
+                </div>
+            </div>
+            <div class="mobile-action-grid">
+                <button id="mobile-tile-sell" class="mobile-action-tile">
+                    <span class="tile-title">Sell</span>
+                    <span class="tile-sub">Start a new sale</span>
+                </button>
+                <button id="mobile-tile-sales" class="mobile-action-tile">
+                    <span class="tile-title">Sales</span>
+                    <span class="tile-sub">View recent sales</span>
+                </button>
+                <button id="mobile-tile-stock" class="mobile-action-tile">
+                    <span class="tile-title">Stock</span>
+                    <span class="tile-sub">Check available stock</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- MOBILE: Sales -->
+        <section id="mobile-sales-panel" class="mobile-panel mobile-section" data-mobile-tab="sales">
+            <div class="panel-header mobile-panel-header">
+                <button id="mobile-sales-back" class="btn-ghost">← Home</button>
+                <div>
+                    <h2>Sales</h2>
+                    <p id="mobile-sales-scope" class="panel-subtitle">Recent sales</p>
+                </div>
+            </div>
+            <div class="mobile-filter-row">
+                <label for="mobile-sales-filter">Range</label>
+                <select id="mobile-sales-filter" class="summary-select">
+                    <option value="today">Today</option>
+                    <option value="7d">Last 7 Days</option>
+                    <option value="30d">Last 30 Days</option>
+                </select>
+            </div>
+            <div id="mobile-sales-summary" class="mobile-sales-summary"></div>
+            <div id="mobile-sales-list" class="mobile-sales-list">
+                <div class="sale-entry-empty">No sales yet.</div>
+            </div>
+        </section>
+
+        <!-- MOBILE: Stock -->
+        <section id="mobile-stock-panel" class="mobile-panel mobile-section" data-mobile-tab="stock">
+            <div class="panel-header mobile-panel-header">
+                <button id="mobile-stock-back" class="btn-ghost">← Home</button>
+                <div>
+                    <h2>Stock</h2>
+                    <p class="panel-subtitle">Branch-aware stock lookup.</p>
+                </div>
+            </div>
+            <div class="mobile-filter-row">
+                <label for="mobile-stock-search">Search</label>
+                <input type="text" id="mobile-stock-search" class="summary-input" placeholder="Search by name or SKU">
+            </div>
+            <div id="mobile-stock-list" class="mobile-stock-list">
+                <div class="sale-entry-empty">Search to view stock.</div>
+            </div>
+        </section>
         <!-- LEFT: Sale Entry Panel -->
         <section id="products-panel" class="sale-entry-panel">
             <div class="panel-header">
@@ -271,7 +348,8 @@
     </main>
 
     <nav id="mobile-pos-nav" class="mobile-pos-nav" aria-label="Mobile POS navigation">
-        <button class="mobile-nav-btn active" data-tab="products">Products</button>
+        <button class="mobile-nav-btn active" data-tab="home">Home</button>
+        <button class="mobile-nav-btn" data-tab="products">Sell</button>
         <button class="mobile-nav-btn" data-tab="cart">Cart</button>
         <button class="mobile-nav-btn" data-tab="checkout">Checkout</button>
         <button class="mobile-nav-btn" data-tab="held">Held</button>
@@ -2050,6 +2128,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-13.2"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-13.3"></script>
 </body>
 </html>

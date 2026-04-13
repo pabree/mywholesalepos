@@ -1,4 +1,5 @@
 from django.utils.dateparse import parse_date
+from django.db.models import Sum, Count
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -118,3 +119,34 @@ class ExpenseExportView(APIView):
         response = HttpResponse("\n".join(rows), content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="expenses_export.csv"'
         return response
+
+
+class ExpenseSummaryView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        start_raw = request.query_params.get("date_from") or request.query_params.get("start")
+        end_raw = request.query_params.get("date_to") or request.query_params.get("end")
+        start_date, start_error = _parse_date(start_raw, "date_from")
+        end_date, end_error = _parse_date(end_raw, "date_to")
+        if start_error or end_error:
+            return Response({"detail": start_error or end_error}, status=400)
+
+        qs = Expense.objects.filter(is_active=True)
+        if start_date:
+            qs = qs.filter(date__gte=start_date)
+        if end_date:
+            qs = qs.filter(date__lte=end_date)
+
+        branch_id = request.query_params.get("branch")
+        if branch_id:
+            qs = qs.filter(branch_id=branch_id)
+
+        totals = qs.aggregate(total=Sum("amount"), count=Count("id"))
+        return Response(
+            {
+                "total": str(totals.get("total") or 0),
+                "count": totals.get("count") or 0,
+            }
+        )
