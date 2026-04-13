@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-13.1";
+const APP_BUILD = "2026-04-13.2";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -8676,70 +8676,68 @@ function printReceipt() {
         return;
     }
     const content = contentEl.innerHTML;
-    const win = window.open("", "", "width=360,height=600");
+    const win = window.open("", "", "width=360,height=640");
     if (!win) {
         window.print();
         return;
     }
-    win.document.write(`
-        <html>
-            <head>
-                <title>Receipt</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <style>
-                    @page {
-                        size: 58mm auto;
-                        margin: 4mm;
-                    }
-                    body {
-                        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-                        font-size: 12px;
-                        background: #ffffff;
-                        color: #000000;
-                        margin: 0;
-                        padding: 0;
-                        width: 58mm;
-                    }
-                    .receipt { padding: 0; text-align: left; }
-                    .receipt-success { display: none; }
-                    .receipt-header h3 { font-size: 16px; margin: 0 0 4px; }
-                    .receipt-header .receipt-id,
-                    .receipt-header .receipt-date,
-                    .receipt-meta,
-                    .receipt-subline { font-size: 11px; color: #333; }
-                    .receipt-divider { border: none; border-top: 1px dashed #999; margin: 8px 0; }
-                    .receipt-items { text-align: left; }
-                    .receipt-item { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 12px; }
-                    .receipt-item-name { color: #000; }
-                    .receipt-item-meta { font-size: 11px; color: #555; }
-                    .receipt-item-total { font-weight: 700; }
-                    .receipt-totals { text-align: left; margin-top: 6px; }
-                    .receipt-total-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
-                    .receipt-total-row.receipt-grand { font-size: 14px; font-weight: 700; border-top: 1px dashed #999; margin-top: 6px; padding-top: 6px; }
-                    .receipt-total-row.receipt-paid { font-weight: 700; }
-                    .receipt-payments { margin-top: 8px; }
-                    .receipt-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
-                </style>
-            </head>
-            <body>
-                ${content}
-            </body>
-        </html>
-    `);
+    win.document.open();
+    win.document.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Receipt</title>
+    <style>
+      @page { margin: 6mm; }
+      html, body { padding: 0; margin: 0; }
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        color: #000;
+        background: #fff;
+      }
+      .receipt { padding: 0; text-align: left; }
+      .receipt-success { display: none; }
+      .receipt-header h3 { font-size: 16px; margin: 0 0 4px; }
+      .receipt-header .receipt-id,
+      .receipt-header .receipt-date,
+      .receipt-meta,
+      .receipt-subline { font-size: 11px; color: #222; }
+      .receipt-divider { border: none; border-top: 1px dashed #999; margin: 8px 0; }
+      .receipt-items { text-align: left; }
+      .receipt-item { display: block; padding: 4px 0; font-size: 12px; }
+      .receipt-item-total { float: right; font-weight: 700; }
+      .receipt-item-meta { font-size: 11px; color: #555; clear: both; }
+      .receipt-totals { text-align: left; margin-top: 6px; }
+      .receipt-total-row { display: block; padding: 3px 0; font-size: 12px; }
+      .receipt-total-row span:last-child,
+      .receipt-total-row strong:last-child { float: right; }
+      .receipt-total-row.receipt-grand { font-size: 14px; font-weight: 700; border-top: 1px dashed #999; margin-top: 6px; padding-top: 6px; }
+      .receipt-total-row::after { content: ""; display: block; clear: both; }
+      .receipt-payments { margin-top: 8px; }
+      .receipt-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+    </style>
+  </head>
+  <body>
+    ${content}
+  </body>
+</html>`);
     win.document.close();
-    win.focus();
     const closeIfAllowed = () => {
         try { win.close(); } catch (err) { /* ignore */ }
     };
-    if ("onafterprint" in win) {
-        win.onafterprint = closeIfAllowed;
-    }
-    setTimeout(() => {
-        try { win.print(); } catch (err) { /* ignore */ }
-        if (!("onafterprint" in win)) {
-            setTimeout(closeIfAllowed, 800);
-        }
-    }, 200);
+    win.onload = () => {
+        try { win.focus(); } catch (err) { /* ignore */ }
+        setTimeout(() => {
+            try { win.print(); } catch (err) { /* ignore */ }
+            if ("onafterprint" in win) {
+                win.onafterprint = closeIfAllowed;
+            } else {
+                setTimeout(closeIfAllowed, 1200);
+            }
+        }, 250);
+    };
 }
 
 function closeReceiptModal() {
