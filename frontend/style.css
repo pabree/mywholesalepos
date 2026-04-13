@@ -388,6 +388,20 @@ body.overlay-open {
     width: min(420px, 92vw);
 }
 
+.mobile-checkout-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 4px 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.mobile-checkout-fields label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
 .mobile-success-modal {
     width: min(420px, 92vw);
 }
@@ -4444,6 +4458,18 @@ body.offline .offline-status {
         flex-direction: column;
     }
 
+    body {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-bottom: 70px;
+    }
+
+    #app {
+        overflow: visible;
+    }
+
     #products-panel {
         display: none;
         padding: 16px;
@@ -4460,10 +4486,6 @@ body.offline .offline-status {
 
     #cart-panel .held-sales {
         display: none;
-    }
-
-    body {
-        padding-bottom: 70px;
     }
 
     #app,

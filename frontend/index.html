@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-10.10">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-10.11">
 </head>
 <body>
     <!-- Top Bar -->
@@ -166,6 +166,12 @@
             <div class="mobile-customer-row mobile-only">
                 <div class="mobile-customer-current">Customer: <strong id="mobile-customer-current">—</strong></div>
                 <button id="mobile-customer-add" class="btn-ghost btn-xs" type="button">+ New Customer</button>
+            </div>
+            <div class="mobile-checkout-fields mobile-only">
+                <label for="mobile-customer-select">Select Customer</label>
+                <select id="mobile-customer-select" class="summary-select">
+                    <option value="">Loading...</option>
+                </select>
             </div>
 
             <div class="cart-summary">
@@ -2043,6 +2049,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-10.10"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-10.11"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-10.10";
+const APP_BUILD = "2026-04-10.11";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -769,6 +769,7 @@ const els = {
     mobileNavButtons: document.querySelectorAll("#mobile-pos-nav .mobile-nav-btn"),
     mobileCustomerAdd: document.getElementById("mobile-customer-add"),
     mobileCustomerCurrent: document.getElementById("mobile-customer-current"),
+    mobileCustomerSelect: document.getElementById("mobile-customer-select"),
     mobileCustomerModal: document.getElementById("mobile-customer-modal"),
     mobileCustomerName: document.getElementById("mobile-customer-name"),
     mobileCustomerSubmit: document.getElementById("mobile-customer-submit"),
@@ -1147,6 +1148,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (els.mobileCustomerSubmit) {
         els.mobileCustomerSubmit.addEventListener("click", submitMobileCustomer);
+    }
+    if (els.mobileCustomerSelect) {
+        els.mobileCustomerSelect.addEventListener("change", () => {
+            if (els.customerSelect) {
+                els.customerSelect.value = els.mobileCustomerSelect.value;
+            }
+            scheduleReprice();
+            updateMobileCustomerLabel();
+        });
     }
     if (els.mobileSuccessClose) {
         els.mobileSuccessClose.addEventListener("click", closeMobileSuccessModal);
@@ -1883,6 +1893,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     els.customerSelect.addEventListener("change", () => {
         scheduleReprice();
+        if (els.mobileCustomerSelect) {
+            els.mobileCustomerSelect.value = els.customerSelect.value;
+        }
         updateMobileCustomerLabel();
     });
     els.branchSelect.addEventListener("change", () => {
@@ -2242,9 +2255,8 @@ async function submitMobileCustomer() {
         const newCustomer = { id, name };
         customers = [newCustomer, ...customers];
         renderCustomerOptions();
-        if (els.customerSelect) {
-            els.customerSelect.value = id;
-        }
+        if (els.customerSelect) els.customerSelect.value = id;
+        if (els.mobileCustomerSelect) els.mobileCustomerSelect.value = id;
         updateMobileCustomerLabel();
         toast("Customer created", "success");
         closeMobileCustomerModal();
@@ -3259,12 +3271,17 @@ function renderCustomerOptions() {
     els.customerSelect.innerHTML = customers.length
         ? customers.map(c => `<option value="${c.id}">${c.name}</option>`).join("")
         : `<option value="">No customers found</option>`;
+    if (els.mobileCustomerSelect) {
+        els.mobileCustomerSelect.innerHTML = customers.length
+            ? customers.map(c => `<option value="${c.id}">${c.name}</option>`).join("")
+            : `<option value="">No customers found</option>`;
+    }
     updateMobileCustomerLabel();
 }
 
 function updateMobileCustomerLabel() {
     if (!els.mobileCustomerCurrent) return;
-    const selectedId = els.customerSelect?.value;
+    const selectedId = els.mobileCustomerSelect?.value || els.customerSelect?.value;
     const selected = customers.find(c => c.id === selectedId);
     els.mobileCustomerCurrent.textContent = selected ? selected.name : "—";
 }
