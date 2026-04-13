@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-13.10";
+const APP_BUILD = "2026-04-13.11";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -128,6 +128,7 @@ let currentMobileSaleDetailId = null;
 let mobileStockTimer = null;
 let mobileStockToken = 0;
 let mobileStockQuery = "";
+let mobileStockCategory = "all";
 let mobileCategories = [];
 let mobileActiveCategory = "all";
 let mobileCustomers = [];
@@ -815,6 +816,7 @@ const els = {
     mobileStockPanel: document.getElementById("mobile-stock-panel"),
     mobileStockBack: document.getElementById("mobile-stock-back"),
     mobileStockSearch: document.getElementById("mobile-stock-search"),
+    mobileStockCategoryChips: document.getElementById("mobile-stock-category-chips"),
     mobileStockList: document.getElementById("mobile-stock-list"),
     mobileCustomersPanel: document.getElementById("mobile-customers-panel"),
     mobileCustomersBack: document.getElementById("mobile-customers-back"),
@@ -2289,6 +2291,7 @@ async function loadMobileCategories() {
     const data = await apiFetch("/inventory/categories/");
     mobileCategories = ensureArray(data, "mobileCategories");
     renderMobileCategoryChips();
+    renderMobileStockCategoryChips();
 }
 
 function renderMobileCategoryChips() {
@@ -2327,6 +2330,38 @@ function setMobileCategory(category) {
         resetMobileSearch();
         renderMobileProducts();
     }
+}
+
+function renderMobileStockCategoryChips() {
+    if (!els.mobileStockCategoryChips) return;
+    if (!mobileCategories.length) {
+        els.mobileStockCategoryChips.innerHTML = "";
+        return;
+    }
+    const chips = [
+        `<button class="mobile-category-chip ${mobileStockCategory === "all" ? "active" : ""}" data-category="all">All</button>`,
+        ...mobileCategories.map((c) => {
+            const isActive = mobileStockCategory === c.name;
+            return `<button class="mobile-category-chip ${isActive ? "active" : ""}" data-category="${esc(c.name)}">${esc(c.name)}</button>`;
+        }),
+    ];
+    els.mobileStockCategoryChips.innerHTML = chips.join("");
+    els.mobileStockCategoryChips.querySelectorAll(".mobile-category-chip").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const category = btn.dataset.category || "all";
+            setMobileStockCategory(category);
+        });
+    });
+}
+
+function setMobileStockCategory(category) {
+    mobileStockCategory = category || "all";
+    if (els.mobileStockCategoryChips) {
+        els.mobileStockCategoryChips.querySelectorAll(".mobile-category-chip").forEach((chip) => {
+            chip.classList.toggle("active", chip.dataset.category === mobileStockCategory);
+        });
+    }
+    loadMobileStock({ query: mobileStockQuery });
 }
 
 function updateMobileCallAction(phone) {
@@ -2747,6 +2782,9 @@ async function loadMobileStock({ query = "" } = {}) {
     const params = { limit: 20 };
     if (branchId) params.branch = branchId;
     if (query) params.search = query;
+    if (mobileStockCategory && mobileStockCategory !== "all") {
+        params.category = mobileStockCategory;
+    }
 
     const token = ++mobileStockToken;
     els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Loading stock…</div>`;
