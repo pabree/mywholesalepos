@@ -365,31 +365,41 @@ body.overlay-open {
     padding: 20px 24px;
 }
 
+#mobile-dashboard-panel {
+    gap: 14px;
+    padding: 16px 18px 24px;
+}
+
+#mobile-dashboard-panel .panel-header {
+    margin-bottom: 4px;
+}
+
 .mobile-summary-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 8px;
 }
 
 .mobile-summary-card {
-    padding: 14px;
-    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    border-radius: 12px;
     border: 1px solid var(--border);
     background: var(--bg-card);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
+    min-height: 72px;
 }
 
 .summary-label {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
 
 .summary-value {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--text-primary);
 }
@@ -402,12 +412,12 @@ body.overlay-open {
 .mobile-action-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 10px;
 }
 
 .mobile-action-tile {
-    padding: 18px 16px;
-    border-radius: var(--radius-md);
+    padding: 12px 10px;
+    border-radius: 14px;
     border: 1px solid var(--border);
     background: var(--bg-card);
     text-align: center;
@@ -416,9 +426,9 @@ body.overlay-open {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 6px;
     transition: transform 0.1s ease, box-shadow 0.1s ease;
-    min-height: 120px;
+    aspect-ratio: 1 / 1;
 }
 
 .mobile-action-tile:hover {
@@ -441,12 +451,13 @@ body.overlay-open {
 .mobile-action-tile .tile-title {
     font-weight: 700;
     color: var(--text-primary);
+    font-size: 13px;
 }
 
 .tile-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 16px;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
     background: var(--accent-soft);
     color: var(--accent);
     display: inline-flex;
@@ -455,8 +466,8 @@ body.overlay-open {
 }
 
 .tile-icon svg {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     fill: currentColor;
 }
 
@@ -4781,12 +4792,6 @@ body.offline .offline-status {
     }
 }
 
-@media (max-width: 600px) {
-    .mobile-summary-grid,
-    .mobile-action-grid {
-        grid-template-columns: 1fr;
-    }
-}
 
 .search-results {
     position: absolute;
