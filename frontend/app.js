@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-13.9";
+const APP_BUILD = "2026-04-13.10";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -2793,9 +2793,16 @@ async function loadMobileCustomers({ query = "" } = {}) {
     mobileCustomersLoading = true;
     els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">Loading customers…</div>`;
     try {
-        const data = await apiFetch(withParams("/customers/", params));
+        let data = await apiFetch(withParams("/customers/", params));
         if (token !== mobileCustomersToken) return;
-        const results = ensureArray(data?.results ?? data, "mobileCustomers");
+        let results = ensureArray(data?.results ?? data, "mobileCustomers");
+        if (!results.length && branchId) {
+            const fallbackParams = { limit: 20 };
+            if (query) fallbackParams.search = query;
+            data = await apiFetch(withParams("/customers/", fallbackParams));
+            if (token !== mobileCustomersToken) return;
+            results = ensureArray(data?.results ?? data, "mobileCustomersFallback");
+        }
         mobileCustomers = results;
         if (!results.length) {
             els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">No customers found.</div>`;
