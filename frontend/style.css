@@ -562,6 +562,10 @@ body.overlay-open {
     scrollbar-width: none;
 }
 
+.mobile-category-chips .mobile-category-chip {
+    flex: 0 0 auto;
+}
+
 .mobile-category-chips::-webkit-scrollbar {
     display: none;
 }
@@ -703,6 +707,107 @@ body.overlay-open {
     display: flex;
     justify-content: space-between;
     font-weight: 600;
+}
+
+.mobile-customer-detail-modal {
+    width: min(520px, 92vw);
+}
+
+.mobile-customer-detail-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.mobile-customer-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mobile-customer-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.mobile-customer-meta span {
+    color: var(--text-muted);
+}
+
+.mobile-customer-section {
+    border-top: 1px solid var(--border-light);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mobile-customer-orders {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mobile-customer-order {
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mobile-customer-order .order-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.btn-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.mobile-statement-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mobile-statement-item {
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mobile-statement-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.mobile-statement-amount {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.mobile-statement-amount.credit {
+    color: var(--success, #1f8c3a);
+}
+
+.mobile-statement-amount.debit {
+    color: var(--danger, #c1272d);
 }
 
 .mobile-cart-list {
@@ -4806,6 +4911,10 @@ body.offline .offline-status {
     }
 
     .mobile-only {
+        display: flex;
+    }
+
+    .mobile-category-chips {
         display: flex;
     }
 

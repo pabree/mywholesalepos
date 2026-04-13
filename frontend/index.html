@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.7">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.9">
 </head>
 <body>
     <!-- Top Bar -->
@@ -495,6 +495,23 @@
             </div>
             <div class="modal-actions">
                 <button id="mobile-sale-detail-receipt" class="btn-secondary">View Receipt</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Customer Detail Modal -->
+    <div id="mobile-customer-detail-modal" class="modal-overlay hidden" data-backdrop-close="true">
+        <div class="modal-content mobile-customer-detail-modal">
+            <div class="modal-header">
+                <h3>Customer</h3>
+                <button id="mobile-customer-detail-close" class="btn-ghost">✕</button>
+            </div>
+            <div class="modal-body-scroll">
+                <div id="mobile-customer-detail-body" class="mobile-customer-detail-body"></div>
+            </div>
+            <div class="modal-actions">
+                <a id="mobile-customer-call" class="btn-secondary" href="#" aria-disabled="true">Call</a>
+                <a id="mobile-customer-whatsapp" class="btn-ghost" href="#" aria-disabled="true">WhatsApp</a>
             </div>
         </div>
     </div>
@@ -2183,6 +2200,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-13.7"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-13.9"></script>
 </body>
 </html>

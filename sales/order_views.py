@@ -26,6 +26,7 @@ def _backoffice_orders_queryset(request):
     query = (request.query_params.get("q") or "").strip()
     branch_id = request.query_params.get("branch")
     route_id = request.query_params.get("route")
+    customer_id = request.query_params.get("customer")
 
     qs = CustomerOrder.objects.select_related(
         "sale",
@@ -48,6 +49,8 @@ def _backoffice_orders_queryset(request):
             | Q(id__icontains=query)
             | Q(sale__id__icontains=query)
         )
+    if customer_id:
+        qs = qs.filter(sale__customer_id=customer_id)
     if branch_id:
         qs = qs.filter(sale__branch_id=branch_id)
     if route_id:

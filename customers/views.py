@@ -43,6 +43,7 @@ class CustomerListView(APIView):
             {
                 "id": str(c.id),
                 "name": c.name,
+                "phone": c.user.phone if c.user and getattr(c.user, "phone", None) else None,
                 "is_wholesale_customer": c.is_wholesale_customer,
                 "is_active": c.is_active,
                 "can_view_balance": c.can_view_balance,

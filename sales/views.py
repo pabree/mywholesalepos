@@ -10,7 +10,7 @@ from django.db.models import Sum, Count, Q
 from decimal import Decimal
 from django.http import HttpResponse
 import csv
-from .models import Sale, SaleReturnItem
+from .models import Sale, SaleReturnItem, SalePayment
 from inventory.models import Inventory, StockMovement
 from .models import LedgerEntry
 from .services import money
@@ -583,6 +583,88 @@ class CreditAssignedSummaryView(APIView):
                 "unpaid_count": summary["unpaid_count"] or 0,
                 "partial_count": summary["partial_count"] or 0,
                 "overdue_count": overdue_count,
+            }
+        )
+
+
+class CreditCustomerStatementView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
+
+    def get(self, request, customer_id):
+        limit_raw = request.query_params.get("limit", "20")
+        offset_raw = request.query_params.get("offset", "0")
+        try:
+            limit = max(1, min(100, int(limit_raw)))
+        except (TypeError, ValueError):
+            limit = 20
+        try:
+            offset = max(0, int(offset_raw))
+        except (TypeError, ValueError):
+            offset = 0
+
+        date_from = parse_date(request.query_params.get("date_from") or "")
+        date_to = parse_date(request.query_params.get("date_to") or "")
+
+        sales_qs = Sale.objects.filter(
+            customer_id=customer_id,
+            is_credit_sale=True,
+            status="completed",
+        )
+        if date_from:
+            sales_qs = sales_qs.filter(sale_date__date__gte=date_from)
+        if date_to:
+            sales_qs = sales_qs.filter(sale_date__date__lte=date_to)
+
+        payments_qs = SalePayment.objects.filter(
+            sale__customer_id=customer_id,
+            sale__is_credit_sale=True,
+            sale__status="completed",
+        )
+        if date_from:
+            payments_qs = payments_qs.filter(payment_date__date__gte=date_from)
+        if date_to:
+            payments_qs = payments_qs.filter(payment_date__date__lte=date_to)
+
+        entries = []
+        for sale in sales_qs:
+            entries.append(
+                {
+                    "id": str(sale.id),
+                    "date": _format_dt(sale.completed_at or sale.sale_date),
+                    "entry_type": "credit_sale",
+                    "direction": "debit",
+                    "amount": str(sale.grand_total),
+                    "reference": str(sale.id),
+                    "status": sale.payment_status,
+                }
+            )
+
+        for payment in payments_qs:
+            entries.append(
+                {
+                    "id": str(payment.id),
+                    "date": _format_dt(payment.payment_date),
+                    "entry_type": "payment",
+                    "direction": "credit",
+                    "amount": str(payment.amount),
+                    "reference": payment.reference or str(payment.id),
+                    "status": payment.status,
+                    "method": payment.method,
+                    "sale_id": str(payment.sale_id),
+                }
+            )
+
+        entries.sort(key=lambda e: e.get("date") or "", reverse=True)
+        total = len(entries)
+        results = entries[offset : offset + limit]
+
+        return Response(
+            {
+                "count": total,
+                "next": None,
+                "previous": None,
+                "results": results,
             }
         )
 

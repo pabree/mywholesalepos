@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-13.7";
+const APP_BUILD = "2026-04-13.9";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -135,6 +135,7 @@ let mobileCustomersQuery = "";
 let mobileCustomersToken = 0;
 let mobileCustomersLoading = false;
 let mobileCustomersTimer = null;
+let currentMobileCustomerId = null;
 let backOfficeSales = [];
 let backOfficeSalesQuery = "";
 let backOfficeSalesOffset = 0;
@@ -819,6 +820,11 @@ const els = {
     mobileCustomersBack: document.getElementById("mobile-customers-back"),
     mobileCustomersSearch: document.getElementById("mobile-customers-search"),
     mobileCustomersList: document.getElementById("mobile-customers-list"),
+    mobileCustomerDetailModal: document.getElementById("mobile-customer-detail-modal"),
+    mobileCustomerDetailClose: document.getElementById("mobile-customer-detail-close"),
+    mobileCustomerDetailBody: document.getElementById("mobile-customer-detail-body"),
+    mobileCustomerCall: document.getElementById("mobile-customer-call"),
+    mobileCustomerWhatsapp: document.getElementById("mobile-customer-whatsapp"),
     mobileSaleDetailModal: document.getElementById("mobile-sale-detail-modal"),
     mobileSaleDetailClose: document.getElementById("mobile-sale-detail-close"),
     mobileSaleDetailBody: document.getElementById("mobile-sale-detail-body"),
@@ -981,6 +987,11 @@ document.addEventListener("click", (e) => {
     if (saleCard) {
         e.preventDefault();
         openMobileSaleDetail(saleCard.dataset.mobileSaleId);
+    }
+    const customerCard = e.target.closest("[data-mobile-customer-id]");
+    if (customerCard) {
+        e.preventDefault();
+        openMobileCustomerDetail(customerCard.dataset.mobileCustomerId);
     }
 });
 
@@ -2318,6 +2329,47 @@ function setMobileCategory(category) {
     }
 }
 
+function updateMobileCallAction(phone) {
+    if (!els.mobileCustomerCall) return;
+    if (phone) {
+        els.mobileCustomerCall.href = `tel:${phone}`;
+        els.mobileCustomerCall.classList.remove("btn-disabled");
+        els.mobileCustomerCall.setAttribute("aria-disabled", "false");
+    } else {
+        els.mobileCustomerCall.href = "#";
+        els.mobileCustomerCall.classList.add("btn-disabled");
+        els.mobileCustomerCall.setAttribute("aria-disabled", "true");
+    }
+}
+
+function normalizePhoneForWhatsApp(raw) {
+    if (!raw) return "";
+    const digits = raw.toString().replace(/[^\d+]/g, "").replace(/\+/g, "");
+    if (!digits) return "";
+    if (digits.startsWith("254")) return digits;
+    if (digits.startsWith("0") && digits.length === 10) {
+        return `254${digits.slice(1)}`;
+    }
+    if ((digits.startsWith("7") || digits.startsWith("1")) && digits.length === 9) {
+        return `254${digits}`;
+    }
+    return digits;
+}
+
+function updateMobileWhatsappAction(phone) {
+    if (!els.mobileCustomerWhatsapp) return;
+    const normalized = normalizePhoneForWhatsApp(phone);
+    if (normalized) {
+        els.mobileCustomerWhatsapp.href = `https://wa.me/${normalized}`;
+        els.mobileCustomerWhatsapp.classList.remove("btn-disabled");
+        els.mobileCustomerWhatsapp.setAttribute("aria-disabled", "false");
+    } else {
+        els.mobileCustomerWhatsapp.href = "#";
+        els.mobileCustomerWhatsapp.classList.add("btn-disabled");
+        els.mobileCustomerWhatsapp.setAttribute("aria-disabled", "true");
+    }
+}
+
 function refreshMobileTab(tab) {
     if (!isMobileLayout()) return;
     if (tab === "home") {
@@ -2418,6 +2470,9 @@ function initMobileDashboard() {
                 showReceipt(currentMobileSaleDetailId);
             }
         });
+    }
+    if (els.mobileCustomerDetailClose) {
+        els.mobileCustomerDetailClose.addEventListener("click", () => closeOverlay(els.mobileCustomerDetailModal));
     }
 }
 
@@ -2750,7 +2805,7 @@ async function loadMobileCustomers({ query = "" } = {}) {
             const route = c.route_name || "—";
             const branch = c.branch_name || "—";
             return `
-                <div class="mobile-customer-card">
+                <div class="mobile-customer-card" data-mobile-customer-id="${c.id}">
                     <strong>${esc(c.name || "—")}</strong>
                     <div class="customer-meta">
                         <span>${esc(route)}</span>
@@ -2766,6 +2821,110 @@ async function loadMobileCustomers({ query = "" } = {}) {
         if (token === mobileCustomersToken) {
             mobileCustomersLoading = false;
         }
+    }
+}
+
+async function openMobileCustomerDetail(customerId) {
+    if (!customerId) return;
+    if (!canViewCustomers()) {
+        toast("Customers are not available for your role.", "error");
+        return;
+    }
+    currentMobileCustomerId = customerId;
+    updateMobileCallAction("");
+    updateMobileWhatsappAction("");
+    if (els.mobileCustomerDetailBody) {
+        els.mobileCustomerDetailBody.innerHTML = `<div class="sale-entry-empty">Loading customer…</div>`;
+    }
+    openOverlay(els.mobileCustomerDetailModal);
+
+    const customer = mobileCustomers.find(c => c.id === customerId) || {};
+    const customerName = customer.name || "—";
+    const routeName = customer.route_name || "—";
+    const branchName = customer.branch_name || "—";
+    const phone = customer.phone || customer.phone_number || customer.contact_phone || "";
+    updateMobileCallAction(phone);
+    updateMobileWhatsappAction(phone);
+
+    const creditSummary = await apiFetch(`/sales/credit/customer/${customerId}/summary/`);
+    const outstanding = creditSummary ? fmtPrice(creditSummary.total_outstanding || 0) : "—";
+    const openCount = creditSummary ? creditSummary.open_count || 0 : 0;
+
+    const ordersData = await apiFetch(withParams("/sales/customer-orders/", { customer: customerId, limit: 5 }));
+    const ordersPage = normalizePaginated(ordersData);
+    const orders = ensureArray(ordersPage.results, "mobileCustomerOrders");
+
+    const ordersHtml = orders.length ? orders.map((order) => {
+        const sale = order.sale || {};
+        const total = sale.grand_total ? fmtPrice(sale.grand_total) : "—";
+        const status = formatLabel(order.status || "—");
+        const date = formatDateTime(order.created_at);
+        return `
+            <div class="mobile-customer-order">
+                <div class="order-meta">
+                    <span>#${shortOrderId(order.id)}</span>
+                    <span>${date}</span>
+                </div>
+                <div class="order-meta">
+                    <span>${status}</span>
+                    <span>${total}</span>
+                </div>
+            </div>
+        `;
+    }).join("") : `<div class="sale-entry-empty">No recent orders.</div>`;
+
+    const statementData = await apiFetch(withParams(`/sales/credit/customer/${customerId}/statement/`, { limit: 8 }));
+    const statementPage = normalizePaginated(statementData);
+    const statementItems = ensureArray(statementPage.results, "mobileStatement");
+    const statementHtml = statementItems.length ? statementItems.map((entry) => {
+        const direction = entry.direction || "debit";
+        const signed = direction === "credit" ? "-" : "+";
+        const amount = `${signed}${fmtPrice(entry.amount || 0)}`;
+        const label = entry.entry_type === "payment" ? "Payment" : "Credit Sale";
+        const date = formatDateTime(entry.date);
+        return `
+            <div class="mobile-statement-item">
+                <div class="mobile-statement-meta">
+                    <span>${label}</span>
+                    <span>${date}</span>
+                </div>
+                <div class="mobile-statement-meta">
+                    <span>${entry.reference ? `Ref ${shortOrderId(entry.reference)}` : "—"}</span>
+                    <span class="mobile-statement-amount ${direction}">${amount}</span>
+                </div>
+            </div>
+        `;
+    }).join("") : `<div class="sale-entry-empty">No statement entries.</div>`;
+
+    if (els.mobileCustomerDetailBody) {
+        els.mobileCustomerDetailBody.innerHTML = `
+            <div class="mobile-customer-header">
+                <strong>${esc(customerName)}</strong>
+                <div class="mobile-customer-meta">
+                    <div><span>Route</span> ${esc(routeName)}</div>
+                    <div><span>Branch</span> ${esc(branchName)}</div>
+                </div>
+            </div>
+            <div class="mobile-customer-section">
+                <strong>Outstanding Credit</strong>
+                <div class="mobile-customer-meta">
+                    <div><span>Balance Due</span> ${outstanding}</div>
+                    <div><span>Open Credit Sales</span> ${openCount}</div>
+                </div>
+            </div>
+            <div class="mobile-customer-section">
+                <strong>Recent Orders</strong>
+                <div class="mobile-customer-orders">
+                    ${ordersHtml}
+                </div>
+            </div>
+            <div class="mobile-customer-section">
+                <strong>Statement</strong>
+                <div class="mobile-statement-list">
+                    ${statementHtml}
+                </div>
+            </div>
+        `;
     }
 }
 
