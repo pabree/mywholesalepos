@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-13.6";
+const APP_BUILD = "2026-04-13.7";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -128,6 +128,13 @@ let currentMobileSaleDetailId = null;
 let mobileStockTimer = null;
 let mobileStockToken = 0;
 let mobileStockQuery = "";
+let mobileCategories = [];
+let mobileActiveCategory = "all";
+let mobileCustomers = [];
+let mobileCustomersQuery = "";
+let mobileCustomersToken = 0;
+let mobileCustomersLoading = false;
+let mobileCustomersTimer = null;
 let backOfficeSales = [];
 let backOfficeSalesQuery = "";
 let backOfficeSalesOffset = 0;
@@ -763,6 +770,7 @@ const els = {
     returnsError: document.getElementById("returns-error"),
     mobileRoleBanner: document.getElementById("mobile-role-banner"),
     mobileProductsList: document.getElementById("mobile-products-list"),
+    mobileCategoryChips: document.getElementById("mobile-category-chips"),
     mobileCartPanel: document.getElementById("mobile-cart-panel"),
     mobileCartList: document.getElementById("mobile-cart-list"),
     mobileCartCheckout: document.getElementById("mobile-cart-checkout"),
@@ -796,6 +804,7 @@ const els = {
     mobileTileSell: document.getElementById("mobile-tile-sell"),
     mobileTileSales: document.getElementById("mobile-tile-sales"),
     mobileTileStock: document.getElementById("mobile-tile-stock"),
+    mobileTileCustomers: document.getElementById("mobile-tile-customers"),
     mobileSalesPanel: document.getElementById("mobile-sales-panel"),
     mobileSalesBack: document.getElementById("mobile-sales-back"),
     mobileSalesFilter: document.getElementById("mobile-sales-filter"),
@@ -806,6 +815,10 @@ const els = {
     mobileStockBack: document.getElementById("mobile-stock-back"),
     mobileStockSearch: document.getElementById("mobile-stock-search"),
     mobileStockList: document.getElementById("mobile-stock-list"),
+    mobileCustomersPanel: document.getElementById("mobile-customers-panel"),
+    mobileCustomersBack: document.getElementById("mobile-customers-back"),
+    mobileCustomersSearch: document.getElementById("mobile-customers-search"),
+    mobileCustomersList: document.getElementById("mobile-customers-list"),
     mobileSaleDetailModal: document.getElementById("mobile-sale-detail-modal"),
     mobileSaleDetailClose: document.getElementById("mobile-sale-detail-close"),
     mobileSaleDetailBody: document.getElementById("mobile-sale-detail-body"),
@@ -1944,6 +1957,14 @@ document.addEventListener("DOMContentLoaded", () => {
             if (activeMobileTab === "stock") {
                 loadMobileStock({ query: mobileStockQuery });
             }
+            if (activeMobileTab === "customers") {
+                loadMobileCustomers({ query: mobileCustomersQuery });
+            }
+            if (mobileSearchQuery) {
+                fetchMobileSearch(mobileSearchQuery);
+            } else {
+                renderMobileProducts();
+            }
         }
     });
     els.discountInput.addEventListener("input", () => {
@@ -2196,7 +2217,7 @@ function setMobileTab(tab) {
         document.body.dataset.mobileTab = tab;
     }
     if (els.mobileNavButtons && els.mobileNavButtons.length) {
-        const navTab = ["sales", "stock"].includes(tab) ? "home" : tab;
+        const navTab = ["sales", "stock", "customers"].includes(tab) ? "home" : tab;
         els.mobileNavButtons.forEach(btn => {
             const active = btn.dataset.tab === navTab;
             btn.classList.toggle("active", active);
@@ -2252,6 +2273,51 @@ function updateMobileRoleBanner() {
     }
 }
 
+async function loadMobileCategories() {
+    if (!els.mobileCategoryChips) return;
+    const data = await apiFetch("/inventory/categories/");
+    mobileCategories = ensureArray(data, "mobileCategories");
+    renderMobileCategoryChips();
+}
+
+function renderMobileCategoryChips() {
+    if (!els.mobileCategoryChips) return;
+    if (!mobileCategories.length) {
+        els.mobileCategoryChips.innerHTML = "";
+        return;
+    }
+    const chips = [
+        `<button class="mobile-category-chip ${mobileActiveCategory === "all" ? "active" : ""}" data-category="all">All</button>`,
+        ...mobileCategories.map((c) => {
+            const isActive = mobileActiveCategory === c.name;
+            return `<button class="mobile-category-chip ${isActive ? "active" : ""}" data-category="${esc(c.name)}">${esc(c.name)}</button>`;
+        }),
+    ];
+    els.mobileCategoryChips.innerHTML = chips.join("");
+    els.mobileCategoryChips.querySelectorAll(".mobile-category-chip").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const category = btn.dataset.category || "all";
+            setMobileCategory(category);
+        });
+    });
+}
+
+function setMobileCategory(category) {
+    mobileActiveCategory = category || "all";
+    if (els.mobileCategoryChips) {
+        els.mobileCategoryChips.querySelectorAll(".mobile-category-chip").forEach((chip) => {
+            chip.classList.toggle("active", chip.dataset.category === mobileActiveCategory);
+        });
+    }
+    const query = (els.productSearch?.value || "").trim();
+    if (query) {
+        scheduleMobileSearch(query);
+    } else {
+        resetMobileSearch();
+        renderMobileProducts();
+    }
+}
+
 function refreshMobileTab(tab) {
     if (!isMobileLayout()) return;
     if (tab === "home") {
@@ -2262,6 +2328,9 @@ function refreshMobileTab(tab) {
     }
     if (tab === "stock") {
         loadMobileStock({ query: mobileStockQuery });
+    }
+    if (tab === "customers") {
+        loadMobileCustomers({ query: mobileCustomersQuery });
     }
 }
 
@@ -2294,11 +2363,23 @@ function initMobileDashboard() {
             setMobileTab("stock");
         });
     }
+    if (els.mobileTileCustomers) {
+        els.mobileTileCustomers.addEventListener("click", () => {
+            if (!canViewCustomers()) {
+                toast("Customers are not available for your role.", "error");
+                return;
+            }
+            setMobileTab("customers");
+        });
+    }
     if (els.mobileSalesBack) {
         els.mobileSalesBack.addEventListener("click", () => setMobileTab("home"));
     }
     if (els.mobileStockBack) {
         els.mobileStockBack.addEventListener("click", () => setMobileTab("home"));
+    }
+    if (els.mobileCustomersBack) {
+        els.mobileCustomersBack.addEventListener("click", () => setMobileTab("home"));
     }
     if (els.mobileSalesFilter) {
         els.mobileSalesFilter.value = mobileSalesFilter;
@@ -2314,6 +2395,18 @@ function initMobileDashboard() {
             mobileStockTimer = setTimeout(() => {
                 loadMobileStock({ query: mobileStockQuery });
             }, 300);
+        });
+    }
+    if (els.mobileCustomersSearch) {
+        els.mobileCustomersSearch.addEventListener("input", () => {
+            mobileCustomersQuery = (els.mobileCustomersSearch.value || "").trim();
+            if (mobileCustomersLoading) {
+                mobileCustomersToken += 1;
+            }
+            if (mobileCustomersTimer) clearTimeout(mobileCustomersTimer);
+            mobileCustomersTimer = setTimeout(() => {
+                loadMobileCustomers({ query: mobileCustomersQuery });
+            }, 320);
         });
     }
     if (els.mobileSaleDetailClose) {
@@ -2353,6 +2446,7 @@ function updateMobileDashboardTiles() {
     const canSell = canPerformSales();
     const canSales = canViewMobileSales();
     const canStock = canViewStock();
+    const canCustomers = canViewCustomers();
 
     if (els.mobileTileSell) {
         els.mobileTileSell.classList.toggle("disabled", !canSell);
@@ -2365,6 +2459,10 @@ function updateMobileDashboardTiles() {
     if (els.mobileTileStock) {
         els.mobileTileStock.classList.toggle("disabled", !canStock);
         els.mobileTileStock.disabled = !canStock;
+    }
+    if (els.mobileTileCustomers) {
+        els.mobileTileCustomers.classList.toggle("disabled", !canCustomers);
+        els.mobileTileCustomers.disabled = !canCustomers;
     }
 }
 
@@ -2617,6 +2715,57 @@ async function loadMobileStock({ query = "" } = {}) {
     } catch (err) {
         if (token !== mobileStockToken) return;
         els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Failed to load stock.</div>`;
+    }
+}
+
+async function loadMobileCustomers({ query = "" } = {}) {
+    if (!els.mobileCustomersList || !isMobileLayout()) return;
+    if (!API_TOKEN || !currentUser) {
+        els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">Log in to view customers.</div>`;
+        return;
+    }
+    if (!canViewCustomers()) {
+        els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">Customers are not available for your role.</div>`;
+        return;
+    }
+
+    const branchId = els.branchSelect?.value || "";
+    const params = { limit: 20 };
+    if (query) params.search = query;
+    if (branchId) params.branch = branchId;
+
+    const token = ++mobileCustomersToken;
+    mobileCustomersLoading = true;
+    els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">Loading customers…</div>`;
+    try {
+        const data = await apiFetch(withParams("/customers/", params));
+        if (token !== mobileCustomersToken) return;
+        const results = ensureArray(data?.results ?? data, "mobileCustomers");
+        mobileCustomers = results;
+        if (!results.length) {
+            els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">No customers found.</div>`;
+            return;
+        }
+        els.mobileCustomersList.innerHTML = results.map((c) => {
+            const route = c.route_name || "—";
+            const branch = c.branch_name || "—";
+            return `
+                <div class="mobile-customer-card">
+                    <strong>${esc(c.name || "—")}</strong>
+                    <div class="customer-meta">
+                        <span>${esc(route)}</span>
+                        <span>${esc(branch)}</span>
+                    </div>
+                </div>
+            `;
+        }).join("");
+    } catch (err) {
+        if (token !== mobileCustomersToken) return;
+        els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">Failed to load customers.</div>`;
+    } finally {
+        if (token === mobileCustomersToken) {
+            mobileCustomersLoading = false;
+        }
     }
 }
 
@@ -7731,9 +7880,13 @@ function renderMobileProducts() {
     if (!els.mobileProductsList) return;
     const query = (els.productSearch?.value || "").trim().toLowerCase();
     const hasQuery = Boolean(query);
-    const list = isMobileLayout() && hasQuery && Array.isArray(mobileSearchResults)
+    let list = isMobileLayout() && hasQuery && Array.isArray(mobileSearchResults)
         ? mobileSearchResults
         : lastFilteredProducts.slice(0, 20);
+
+    if (mobileActiveCategory && mobileActiveCategory !== "all") {
+        list = list.filter((p) => (p.category || "").toString() === mobileActiveCategory);
+    }
 
     if (mobileSearchLoading) {
         els.mobileProductsList.innerHTML = `<div class="sale-entry-empty">Searching...</div>`;
@@ -7801,9 +7954,11 @@ function scheduleMobileSearch(query) {
 async function fetchMobileSearch(query) {
     const token = ++mobileSearchToken;
     const branchId = els.branchSelect?.value || "";
+    const category = mobileActiveCategory && mobileActiveCategory !== "all" ? mobileActiveCategory : "";
     const endpoint = withParams("/inventory/products/", {
         branch: branchId,
         search: query,
+        category: category || undefined,
         limit: 20,
         offset: 0,
     });
@@ -12294,6 +12449,7 @@ async function loadInitialData() {
         loadCustomers(),
         loadAssignableUsers(),
         loadProducts(),
+        loadMobileCategories(),
         loadHeldSales(),
     ]);
     if (isMobileLayout()) {
@@ -12380,6 +12536,10 @@ function canViewMobileSales() {
 }
 
 function canViewStock() {
+    return ["cashier", "salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
+}
+
+function canViewCustomers() {
     return ["cashier", "salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }
 

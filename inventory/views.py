@@ -124,6 +124,7 @@ class ProductListView(APIView):
         """List all active products with their category, prices, and current stock."""
         branch_id = request.query_params.get("branch")
         query = (request.query_params.get("search") or "").strip()
+        category_value = (request.query_params.get("category") or "").strip()
         products = Product.objects.select_related("category").prefetch_related("units")
 
         if branch_id:
@@ -137,6 +138,18 @@ class ProductListView(APIView):
             products = products.filter(
                 Q(name__icontains=query) | Q(sku__icontains=query)
             )
+
+        if category_value:
+            category_qs = Category.objects.filter(name__iexact=category_value)
+            try:
+                category_qs = category_qs | Category.objects.filter(id=category_value)
+            except (ValueError, TypeError):
+                pass
+            category = category_qs.first()
+            if category:
+                products = products.filter(category=category)
+            else:
+                products = products.none()
 
         products = products.order_by("name", "sku")
 

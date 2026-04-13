@@ -505,6 +505,12 @@ body.overlay-open {
     gap: 10px;
 }
 
+.mobile-customers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
 .mobile-sales-card,
 .mobile-stock-card {
     padding: 12px 14px;
@@ -525,8 +531,56 @@ body.overlay-open {
     gap: 12px;
 }
 
+.mobile-customer-card {
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mobile-customer-card .customer-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
 .mobile-only {
     display: none;
+}
+
+.mobile-category-chips {
+    display: none;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 4px 2px;
+    scrollbar-width: none;
+}
+
+.mobile-category-chips::-webkit-scrollbar {
+    display: none;
+}
+
+.mobile-category-chip {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.mobile-category-chip.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent-hover);
 }
 
 .mobile-customer-row {
@@ -4780,6 +4834,10 @@ body.offline .offline-status {
     }
 
     body[data-mobile-tab="stock"] #mobile-stock-panel {
+        display: flex;
+    }
+
+    body[data-mobile-tab="customers"] #mobile-customers-panel {
         display: flex;
     }
 

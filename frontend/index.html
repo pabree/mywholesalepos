@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.6">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.7">
 </head>
 <body>
     <!-- Top Bar -->
@@ -117,6 +117,14 @@
                     </span>
                     <span class="tile-title">Stock</span>
                 </button>
+                <button id="mobile-tile-customers" class="mobile-action-tile">
+                    <span class="tile-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img" focusable="false">
+                            <path d="M12 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm-7 8a7 7 0 0 1 14 0H5Z"/>
+                        </svg>
+                    </span>
+                    <span class="tile-title">Customers</span>
+                </button>
             </div>
         </section>
 
@@ -160,6 +168,24 @@
                 <div class="sale-entry-empty">Search to view stock.</div>
             </div>
         </section>
+
+        <!-- MOBILE: Customers -->
+        <section id="mobile-customers-panel" class="mobile-panel mobile-section" data-mobile-tab="customers">
+            <div class="panel-header mobile-panel-header">
+                <button id="mobile-customers-back" class="btn-ghost">← Home</button>
+                <div>
+                    <h2>Customers</h2>
+                    <p class="panel-subtitle">Search and view customers.</p>
+                </div>
+            </div>
+            <div class="mobile-filter-row">
+                <label for="mobile-customers-search">Search</label>
+                <input type="text" id="mobile-customers-search" class="summary-input" placeholder="Search by name">
+            </div>
+            <div id="mobile-customers-list" class="mobile-customers-list">
+                <div class="sale-entry-empty">Search to view customers.</div>
+            </div>
+        </section>
         <!-- LEFT: Sale Entry Panel -->
         <section id="products-panel" class="sale-entry-panel">
             <div class="panel-header">
@@ -174,13 +200,14 @@
                     <button id="offline-drafts-btn" type="button" class="btn-ghost btn-xs">Drafts</button>
                     <button id="offline-sync-btn" type="button" class="btn-ghost btn-xs hidden">Sync Drafts</button>
                 </div>
-                <div class="search-wrapper">
-                    <span class="search-icon">⌕</span>
-                    <input type="text" id="product-search" placeholder="Scan barcode or search product..." autocomplete="off">
-                    <div id="product-search-results" class="search-results hidden"></div>
-                </div>
-                <button id="mobile-pos-scan-btn" class="btn-secondary mobile-scan-btn" type="button">📷 Scan Barcode</button>
+            <div class="search-wrapper">
+                <span class="search-icon">⌕</span>
+                <input type="text" id="product-search" placeholder="Scan barcode or search product..." autocomplete="off">
+                <div id="product-search-results" class="search-results hidden"></div>
             </div>
+            <div id="mobile-category-chips" class="mobile-category-chips mobile-only"></div>
+            <button id="mobile-pos-scan-btn" class="btn-secondary mobile-scan-btn" type="button">📷 Scan Barcode</button>
+        </div>
             <div id="mobile-products-list" class="mobile-products-list"></div>
             <div class="sale-entry-table-wrap">
                 <table class="sale-entry-table" id="sale-entry-table">
@@ -2156,6 +2183,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-13.6"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-13.7"></script>
 </body>
 </html>
