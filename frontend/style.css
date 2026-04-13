@@ -4415,6 +4415,31 @@ body.offline .offline-status {
 
 /* ---- RESPONSIVE ---- */
 @media (max-width: 900px) {
+    #topbar {
+        position: sticky;
+        top: 0;
+        z-index: 1400;
+        padding: 10px 12px;
+        gap: 8px;
+    }
+
+    .topbar-center {
+        display: none;
+    }
+
+    .topbar-right .btn-ghost {
+        display: none;
+    }
+
+    #auth-btn,
+    #logout-btn {
+        display: inline-flex;
+    }
+
+    .clock {
+        display: none;
+    }
+
     #app {
         flex-direction: column;
     }
@@ -4439,6 +4464,13 @@ body.offline .offline-status {
 
     body {
         padding-bottom: 70px;
+    }
+
+    #app,
+    #products-panel,
+    #cart-panel,
+    .mobile-panel {
+        min-height: calc(100vh - 140px);
     }
 
     .sale-entry-table-wrap {
