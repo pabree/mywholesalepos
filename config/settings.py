@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     "expenses.apps.ExpensesConfig",
     "logistics.apps.LogisticsConfig",
     "audit.apps.AuditConfig",
+    "reports.apps.ReportsConfig",
 ]
 
 MIDDLEWARE = [

@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-13.12";
+const APP_BUILD = "2026-04-14.04";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -95,6 +95,12 @@ let backOfficeCategoriesSetup = [];
 let backOfficeSetupBranchQuery = "";
 let backOfficeSetupRouteQuery = "";
 let backOfficeSetupCategoryQuery = "";
+let backOfficeReportsRange = "7";
+let backOfficeReportsSummary = null;
+let backOfficeReportsSales = [];
+let backOfficeReportsPayments = [];
+let backOfficeReportsTopProducts = [];
+let backOfficeReportsLowStock = [];
 let editingBranchId = null;
 let editingRouteId = null;
 let editingCategoryId = null;
@@ -118,6 +124,9 @@ let mobileSearchToken = 0;
 let mobileSearchResults = null;
 let mobileSearchLoading = false;
 let mobileSearchQuery = "";
+let mobileReportsSummary = null;
+let mobileReportsTopProducts = [];
+let mobileStockLowOnly = false;
 let mobileCustomerCreating = false;
 let lastMobileSaleId = null;
 let activeMobileTab = "home";
@@ -421,6 +430,7 @@ const els = {
     backofficeDeliverySection: document.getElementById("backoffice-delivery"),
     backofficePaymentsSection: document.getElementById("backoffice-payments"),
     backofficeSetupSection: document.getElementById("backoffice-setup"),
+    backofficeReportsSection: document.getElementById("backoffice-reports"),
     backofficeSetupTabs: document.querySelectorAll(".backoffice-subtab"),
     setupBranchesSection: document.getElementById("setup-branches"),
     setupRoutesSection: document.getElementById("setup-routes"),
@@ -502,6 +512,17 @@ const els = {
     backofficePaymentsNext: document.getElementById("backoffice-payments-next"),
     backofficePaymentsPage: document.getElementById("backoffice-payments-page"),
     backofficePaymentsExport: document.getElementById("backoffice-payments-export"),
+    backofficeReportsRange: document.getElementById("backoffice-reports-range"),
+    backofficeReportsRefresh: document.getElementById("backoffice-reports-refresh"),
+    reportsTodaySales: document.getElementById("reports-today-sales"),
+    reportsWeekSales: document.getElementById("reports-week-sales"),
+    reportsPendingOrders: document.getElementById("reports-pending-orders"),
+    reportsLowStock: document.getElementById("reports-low-stock"),
+    reportsSalesNote: document.getElementById("reports-sales-note"),
+    reportsSalesTable: document.getElementById("reports-sales-table"),
+    reportsPaymentList: document.getElementById("reports-payment-list"),
+    reportsTopProductsTable: document.getElementById("reports-top-products-table"),
+    reportsLowStockTable: document.getElementById("reports-low-stock-table"),
     backofficeSupplierSearch: document.getElementById("backoffice-supplier-search"),
     backofficeSupplierTable: document.getElementById("backoffice-supplier-table"),
     backofficeSupplierAdd: document.getElementById("backoffice-supplier-add"),
@@ -808,6 +829,7 @@ const els = {
     mobileTileSales: document.getElementById("mobile-tile-sales"),
     mobileTileStock: document.getElementById("mobile-tile-stock"),
     mobileTileCustomers: document.getElementById("mobile-tile-customers"),
+    mobileTileReports: document.getElementById("mobile-tile-reports"),
     mobileSalesPanel: document.getElementById("mobile-sales-panel"),
     mobileSalesBack: document.getElementById("mobile-sales-back"),
     mobileSalesFilter: document.getElementById("mobile-sales-filter"),
@@ -819,10 +841,23 @@ const els = {
     mobileStockSearch: document.getElementById("mobile-stock-search"),
     mobileStockCategoryChips: document.getElementById("mobile-stock-category-chips"),
     mobileStockList: document.getElementById("mobile-stock-list"),
+    mobileStockFilterNote: document.getElementById("mobile-stock-filter-note"),
+    mobileStockFilterClear: document.getElementById("mobile-stock-filter-clear"),
     mobileCustomersPanel: document.getElementById("mobile-customers-panel"),
     mobileCustomersBack: document.getElementById("mobile-customers-back"),
     mobileCustomersSearch: document.getElementById("mobile-customers-search"),
     mobileCustomersList: document.getElementById("mobile-customers-list"),
+    mobileReportsPanel: document.getElementById("mobile-reports-panel"),
+    mobileReportsBack: document.getElementById("mobile-reports-back"),
+    mobileReportsRetry: document.getElementById("mobile-reports-retry"),
+    mobileReportsError: document.getElementById("mobile-reports-error"),
+    mobileReportsContent: document.getElementById("mobile-reports-content"),
+    mobileReportsTodaySales: document.getElementById("mobile-reports-today-sales"),
+    mobileReportsWeekSales: document.getElementById("mobile-reports-week-sales"),
+    mobileReportsPendingOrders: document.getElementById("mobile-reports-pending-orders"),
+    mobileReportsLowStock: document.getElementById("mobile-reports-low-stock"),
+    mobileReportsTopProducts: document.getElementById("mobile-reports-top-products"),
+    mobileReportsEmpty: document.getElementById("mobile-reports-empty"),
     mobileCustomerDetailModal: document.getElementById("mobile-customer-detail-modal"),
     mobileCustomerDetailClose: document.getElementById("mobile-customer-detail-close"),
     mobileCustomerDetailBody: document.getElementById("mobile-customer-detail-body"),
@@ -1664,6 +1699,17 @@ document.addEventListener("DOMContentLoaded", () => {
             exportBackOfficeOrders();
         });
     }
+    if (els.backofficeReportsRange) {
+        els.backofficeReportsRange.addEventListener("change", () => {
+            backOfficeReportsRange = els.backofficeReportsRange.value || "7";
+            loadBackOfficeReports();
+        });
+    }
+    if (els.backofficeReportsRefresh) {
+        els.backofficeReportsRefresh.addEventListener("click", () => {
+            loadBackOfficeReports();
+        });
+    }
     if (els.backofficePaymentsPrev) {
         els.backofficePaymentsPrev.addEventListener("click", () => {
             if (backOfficePaymentsOffset <= 0) return;
@@ -2240,7 +2286,7 @@ function setMobileTab(tab) {
         document.body.dataset.mobileTab = tab;
     }
     if (els.mobileNavButtons && els.mobileNavButtons.length) {
-        const navTab = ["sales", "stock", "customers"].includes(tab) ? "home" : tab;
+        const navTab = ["sales", "stock", "customers", "reports"].includes(tab) ? "home" : tab;
         els.mobileNavButtons.forEach(btn => {
             const active = btn.dataset.tab === navTab;
             btn.classList.toggle("active", active);
@@ -2328,6 +2374,10 @@ function renderMobileCategoryChips() {
 
 function setMobileCategory(category) {
     mobileActiveCategory = category || "all";
+    if (mobileStockLowOnly) {
+        mobileStockLowOnly = false;
+        updateMobileStockFilterNote();
+    }
     if (els.mobileCategoryChips) {
         els.mobileCategoryChips.querySelectorAll(".mobile-category-chip").forEach((chip) => {
             chip.classList.toggle("active", chip.dataset.category === mobileActiveCategory);
@@ -2366,6 +2416,10 @@ function renderMobileStockCategoryChips() {
 
 function setMobileStockCategory(category) {
     mobileStockCategory = category || "all";
+    if (mobileStockLowOnly) {
+        mobileStockLowOnly = false;
+        updateMobileStockFilterNote();
+    }
     if (els.mobileStockCategoryChips) {
         els.mobileStockCategoryChips.querySelectorAll(".mobile-category-chip").forEach((chip) => {
             chip.classList.toggle("active", chip.dataset.category === mobileStockCategory);
@@ -2510,6 +2564,9 @@ function refreshMobileTab(tab) {
     if (tab === "customers") {
         loadMobileCustomers({ query: mobileCustomersQuery });
     }
+    if (tab === "reports") {
+        loadMobileReports();
+    }
 }
 
 function initMobileDashboard() {
@@ -2550,6 +2607,15 @@ function initMobileDashboard() {
             setMobileTab("customers");
         });
     }
+    if (els.mobileTileReports) {
+        els.mobileTileReports.addEventListener("click", () => {
+            if (!canViewReports()) {
+                toast("Reports are not available for your role.", "error");
+                return;
+            }
+            setMobileTab("reports");
+        });
+    }
     if (els.mobileSalesBack) {
         els.mobileSalesBack.addEventListener("click", () => setMobileTab("home"));
     }
@@ -2558,6 +2624,36 @@ function initMobileDashboard() {
     }
     if (els.mobileCustomersBack) {
         els.mobileCustomersBack.addEventListener("click", () => setMobileTab("home"));
+    }
+    if (els.mobileReportsBack) {
+        els.mobileReportsBack.addEventListener("click", () => setMobileTab("home"));
+    }
+    if (els.mobileReportsRetry) {
+        els.mobileReportsRetry.addEventListener("click", () => loadMobileReports());
+    }
+    if (els.mobileReportsPanel) {
+        els.mobileReportsPanel.addEventListener("click", (event) => {
+            const card = event.target.closest("[data-report-action]");
+            if (card) {
+                const action = card.dataset.reportAction || "";
+                if (action === "today-sales") {
+                    openTodaySalesFromReports();
+                } else if (action === "week-sales") {
+                    openWeekSalesFromReports();
+                } else if (action === "pending-orders") {
+                    openPendingOrdersFromReports();
+                } else if (action === "low-stock") {
+                    openLowStockFromReports();
+                }
+                return;
+            }
+            const row = event.target.closest("[data-report-product]");
+            if (row) {
+                const productId = row.dataset.reportProduct;
+                const product = mobileReportsTopProducts.find((p) => p.product_id === productId) || null;
+                openTopProductFromReports(product);
+            }
+        });
     }
     if (els.mobileSalesFilter) {
         els.mobileSalesFilter.value = mobileSalesFilter;
@@ -2569,10 +2665,24 @@ function initMobileDashboard() {
     if (els.mobileStockSearch) {
         els.mobileStockSearch.addEventListener("input", () => {
             mobileStockQuery = (els.mobileStockSearch.value || "").trim();
+            if (mobileStockLowOnly) {
+                mobileStockLowOnly = false;
+                updateMobileStockFilterNote();
+            }
             if (mobileStockTimer) clearTimeout(mobileStockTimer);
             mobileStockTimer = setTimeout(() => {
                 loadMobileStock({ query: mobileStockQuery });
             }, 300);
+        });
+    }
+    if (els.mobileStockFilterClear) {
+        els.mobileStockFilterClear.addEventListener("click", () => {
+            if (!mobileStockLowOnly) return;
+            mobileStockLowOnly = false;
+            updateMobileStockFilterNote();
+            const query = (els.mobileStockSearch?.value || "").trim();
+            mobileStockQuery = query;
+            loadMobileStock({ query });
         });
     }
     if (els.mobileCustomersSearch) {
@@ -2637,6 +2747,7 @@ function updateMobileDashboardTiles() {
     const canSales = canViewMobileSales();
     const canStock = canViewStock();
     const canCustomers = canViewCustomers();
+    const canReports = canViewReports();
 
     if (els.mobileTileSell) {
         els.mobileTileSell.classList.toggle("disabled", !canSell);
@@ -2653,6 +2764,11 @@ function updateMobileDashboardTiles() {
     if (els.mobileTileCustomers) {
         els.mobileTileCustomers.classList.toggle("disabled", !canCustomers);
         els.mobileTileCustomers.disabled = !canCustomers;
+    }
+    if (els.mobileTileReports) {
+        els.mobileTileReports.classList.toggle("disabled", !canReports);
+        els.mobileTileReports.disabled = !canReports;
+        els.mobileTileReports.classList.toggle("hidden", !canReports);
     }
 }
 
@@ -2879,6 +2995,34 @@ async function loadMobileStock({ query = "" } = {}) {
     }
 
     const branchId = els.branchSelect?.value || "";
+    if (mobileStockLowOnly && !query && mobileStockCategory === "all") {
+        updateMobileStockFilterNote();
+        const params = {};
+        if (branchId) params.branch = branchId;
+        els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Loading low stock…</div>`;
+        try {
+            const data = await apiFetch(withParams("/reports/inventory-summary/", params));
+            const lowStock = ensureArray(data?.low_stock_products, "mobileLowStock");
+            if (!lowStock.length) {
+                els.mobileStockList.innerHTML = `<div class="sale-entry-empty">No low stock items.</div>`;
+                return;
+            }
+            els.mobileStockList.innerHTML = lowStock.map((item) => `
+                <div class="mobile-stock-card">
+                    <strong>${esc(item.product_name || "—")}</strong>
+                    <div class="mobile-stock-meta">
+                        <span>${esc(item.sku || "—")}</span>
+                        <span>Stock: ${item.quantity ?? 0}</span>
+                    </div>
+                </div>
+            `).join("");
+            return;
+        } catch (err) {
+            els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Failed to load low stock.</div>`;
+            return;
+        }
+    }
+
     const params = { limit: 20 };
     if (branchId) params.branch = branchId;
     if (query) params.search = query;
@@ -2892,6 +3036,7 @@ async function loadMobileStock({ query = "" } = {}) {
         const data = await apiFetch(withParams("/inventory/products/", params));
         if (token !== mobileStockToken) return;
         const results = ensureArray(data?.results ?? data, "mobileStock");
+        updateMobileStockFilterNote();
         if (!results.length) {
             els.mobileStockList.innerHTML = `<div class="sale-entry-empty">No matching stock.</div>`;
             return;
@@ -2966,6 +3111,254 @@ async function loadMobileCustomers({ query = "" } = {}) {
         if (token === mobileCustomersToken) {
             mobileCustomersLoading = false;
         }
+    }
+}
+
+function updateMobileStockFilterNote() {
+    if (!els.mobileStockFilterNote) return;
+    els.mobileStockFilterNote.classList.toggle("hidden", !mobileStockLowOnly);
+    if (els.mobileStockFilterClear) {
+        els.mobileStockFilterClear.disabled = !mobileStockLowOnly;
+    }
+}
+
+function openTodaySalesFromReports() {
+    if (!canViewMobileSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
+    mobileSalesFilter = "today";
+    if (els.mobileSalesFilter) els.mobileSalesFilter.value = "today";
+    setMobileTab("sales");
+    loadMobileSales();
+}
+
+function openWeekSalesFromReports() {
+    if (!canViewMobileSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
+    mobileSalesFilter = "7d";
+    if (els.mobileSalesFilter) els.mobileSalesFilter.value = "7d";
+    setMobileTab("sales");
+    loadMobileSales();
+}
+
+function openPendingOrdersFromReports() {
+    if (!canManageCustomerOrders()) {
+        toast("Orders are not available for your role.", "error");
+        return;
+    }
+    openCustomerOrdersModal();
+    setCustomerOrdersFilter("pending");
+    toast("Showing pending orders. Use filters for other statuses.", "info");
+}
+
+function openLowStockFromReports() {
+    if (!canViewStock()) {
+        toast("Stock is not available for your role.", "error");
+        return;
+    }
+    mobileStockLowOnly = true;
+    mobileStockQuery = "";
+    if (els.mobileStockSearch) {
+        els.mobileStockSearch.value = "";
+    }
+    if (els.mobileStockCategoryChips) {
+        mobileStockCategory = "all";
+        els.mobileStockCategoryChips.querySelectorAll(".mobile-category-chip").forEach((chip) => {
+            chip.classList.toggle("active", chip.dataset.category === "all");
+        });
+    }
+    setMobileTab("stock");
+    loadMobileStock({ query: "" });
+}
+
+function openTopProductFromReports(product) {
+    if (!product) return;
+    if (!canPerformSales()) {
+        toast("Sales are not available for your role.", "error");
+        return;
+    }
+    const query = (product.product_name || "").trim();
+    if (!query) return;
+    if (els.productSearch) {
+        els.productSearch.value = query;
+    }
+    setMobileTab("products");
+    updateSearchResults({ forceOpen: true });
+    focusSearchInput();
+}
+
+async function loadMobileReports() {
+    if (!isMobileLayout()) return;
+    if (!els.mobileReportsTopProducts) return;
+    if (!API_TOKEN || !currentUser) {
+        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
+        if (els.mobileReportsError) {
+            els.mobileReportsError.classList.remove("hidden");
+            els.mobileReportsError.querySelector("div").textContent = "Log in to view reports.";
+        }
+        return;
+    }
+    if (!canViewReports()) {
+        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
+        if (els.mobileReportsError) {
+            els.mobileReportsError.classList.remove("hidden");
+            els.mobileReportsError.querySelector("div").textContent = "Reports are not available for your role.";
+        }
+        return;
+    }
+    if (els.mobileReportsError) {
+        els.mobileReportsError.classList.add("hidden");
+    }
+    if (els.mobileReportsContent) {
+        els.mobileReportsContent.classList.remove("hidden");
+    }
+    if (els.mobileReportsEmpty) {
+        els.mobileReportsEmpty.classList.add("hidden");
+    }
+    if (els.mobileReportsTodaySales) els.mobileReportsTodaySales.textContent = "Loading...";
+    if (els.mobileReportsWeekSales) els.mobileReportsWeekSales.textContent = "Loading...";
+    if (els.mobileReportsPendingOrders) els.mobileReportsPendingOrders.textContent = "—";
+    if (els.mobileReportsLowStock) els.mobileReportsLowStock.textContent = "—";
+    if (els.mobileReportsTopProducts) {
+        els.mobileReportsTopProducts.innerHTML = `<div class="sale-entry-empty">Loading top products...</div>`;
+    }
+
+    const summary = await apiFetch("/reports/dashboard/");
+    if (!summary) {
+        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
+        if (els.mobileReportsError) {
+            els.mobileReportsError.classList.remove("hidden");
+            els.mobileReportsError.querySelector("div").textContent = "Unable to load reports.";
+        }
+        return;
+    }
+
+    mobileReportsSummary = summary;
+    mobileReportsTopProducts = ensureArray(summary.top_products, "mobileReportsTopProducts");
+
+    if (els.mobileReportsTodaySales) {
+        els.mobileReportsTodaySales.textContent = fmtPrice(summary.today_sales || 0);
+    }
+    if (els.mobileReportsWeekSales) {
+        els.mobileReportsWeekSales.textContent = fmtPrice(summary.week_sales || 0);
+    }
+    if (els.mobileReportsPendingOrders) {
+        const count = summary.pending_orders_count ?? 0;
+        els.mobileReportsPendingOrders.textContent = count.toLocaleString("en-KE");
+    }
+    if (els.mobileReportsLowStock) {
+        const count = summary.low_stock_count ?? 0;
+        els.mobileReportsLowStock.textContent = count.toLocaleString("en-KE");
+    }
+
+    if (!mobileReportsTopProducts.length) {
+        if (els.mobileReportsTopProducts) {
+            els.mobileReportsTopProducts.innerHTML = `<div class="sale-entry-empty">No top products yet.</div>`;
+        }
+        if (els.mobileReportsEmpty) {
+            els.mobileReportsEmpty.classList.remove("hidden");
+        }
+        return;
+    }
+
+    if (els.mobileReportsTopProducts) {
+        els.mobileReportsTopProducts.innerHTML = mobileReportsTopProducts.map(item => `
+            <div class="mobile-report-item" data-report-product="${esc(item.product_id || "")}">
+                <div class="report-meta">
+                    <strong>${esc(item.product_name || "—")}</strong>
+                    <span>${item.total_quantity || 0} sold</span>
+                </div>
+                <div class="report-value">${fmtPrice(item.total_revenue || 0)}</div>
+            </div>
+        `).join("");
+    }
+}
+
+async function loadMobileReports() {
+    if (!isMobileLayout()) return;
+    if (!els.mobileReportsTopProducts) return;
+    if (!API_TOKEN || !currentUser) {
+        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
+        if (els.mobileReportsError) {
+            els.mobileReportsError.classList.remove("hidden");
+            els.mobileReportsError.querySelector("div").textContent = "Log in to view reports.";
+        }
+        return;
+    }
+    if (!canViewReports()) {
+        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
+        if (els.mobileReportsError) {
+            els.mobileReportsError.classList.remove("hidden");
+            els.mobileReportsError.querySelector("div").textContent = "Reports are not available for your role.";
+        }
+        return;
+    }
+    if (els.mobileReportsError) {
+        els.mobileReportsError.classList.add("hidden");
+    }
+    if (els.mobileReportsContent) {
+        els.mobileReportsContent.classList.remove("hidden");
+    }
+    if (els.mobileReportsEmpty) {
+        els.mobileReportsEmpty.classList.add("hidden");
+    }
+    if (els.mobileReportsTodaySales) els.mobileReportsTodaySales.textContent = "Loading...";
+    if (els.mobileReportsWeekSales) els.mobileReportsWeekSales.textContent = "Loading...";
+    if (els.mobileReportsPendingOrders) els.mobileReportsPendingOrders.textContent = "—";
+    if (els.mobileReportsLowStock) els.mobileReportsLowStock.textContent = "—";
+    if (els.mobileReportsTopProducts) {
+        els.mobileReportsTopProducts.innerHTML = `<div class="sale-entry-empty">Loading top products...</div>`;
+    }
+
+    const summary = await apiFetch("/reports/dashboard/");
+    if (!summary) {
+        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
+        if (els.mobileReportsError) {
+            els.mobileReportsError.classList.remove("hidden");
+            els.mobileReportsError.querySelector("div").textContent = "Unable to load reports.";
+        }
+        return;
+    }
+
+    if (els.mobileReportsTodaySales) {
+        els.mobileReportsTodaySales.textContent = fmtPrice(summary.today_sales || 0);
+    }
+    if (els.mobileReportsWeekSales) {
+        els.mobileReportsWeekSales.textContent = fmtPrice(summary.week_sales || 0);
+    }
+    if (els.mobileReportsPendingOrders) {
+        const count = summary.pending_orders_count ?? 0;
+        els.mobileReportsPendingOrders.textContent = count.toLocaleString("en-KE");
+    }
+    if (els.mobileReportsLowStock) {
+        const count = summary.low_stock_count ?? 0;
+        els.mobileReportsLowStock.textContent = count.toLocaleString("en-KE");
+    }
+
+    const topProducts = ensureArray(summary.top_products, "mobileReportsTopProducts");
+    if (!topProducts.length) {
+        if (els.mobileReportsTopProducts) {
+            els.mobileReportsTopProducts.innerHTML = `<div class="sale-entry-empty">No top products yet.</div>`;
+        }
+        if (els.mobileReportsEmpty) {
+            els.mobileReportsEmpty.classList.remove("hidden");
+        }
+        return;
+    }
+
+    if (els.mobileReportsTopProducts) {
+        els.mobileReportsTopProducts.innerHTML = topProducts.map(item => `
+            <div class="mobile-report-item">
+                <div class="report-meta">
+                    <strong>${esc(item.product_name || "—")}</strong>
+                    <span>${item.total_quantity || 0} sold</span>
+                </div>
+                <div class="report-value">${fmtPrice(item.total_revenue || 0)}</div>
+            </div>
+        `).join("");
     }
 }
 
@@ -4406,6 +4799,9 @@ function setBackOfficeSection(section) {
     if (els.backofficePaymentsSection) {
         els.backofficePaymentsSection.classList.toggle("hidden", backOfficeActiveSection !== "payments");
     }
+    if (els.backofficeReportsSection) {
+        els.backofficeReportsSection.classList.toggle("hidden", backOfficeActiveSection !== "reports");
+    }
     if (els.backofficeSetupSection) {
         els.backofficeSetupSection.classList.toggle("hidden", backOfficeActiveSection !== "setup");
     }
@@ -4435,6 +4831,9 @@ function setBackOfficeSection(section) {
     }
     if (backOfficeActiveSection === "payments") {
         loadBackOfficePayments();
+    }
+    if (backOfficeActiveSection === "reports") {
+        loadBackOfficeReports();
     }
     if (backOfficeActiveSection === "setup") {
         setBackOfficeSetupSection(backOfficeSetupSection || "branches");
@@ -6101,6 +6500,119 @@ function renderBackOfficeOrders() {
             </tr>
         `;
     }).join("");
+}
+
+async function loadBackOfficeReports() {
+    if (!canAccessBackOffice()) return;
+    backOfficeReportsRange = els.backofficeReportsRange?.value || backOfficeReportsRange || "7";
+    if (els.reportsSalesNote) {
+        els.reportsSalesNote.textContent = `Last ${backOfficeReportsRange} days`;
+    }
+    if (els.reportsSalesTable) {
+        const tbody = els.reportsSalesTable.querySelector("tbody");
+        if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="muted">Loading sales overview...</td></tr>`;
+    }
+    if (els.reportsTopProductsTable) {
+        const tbody = els.reportsTopProductsTable.querySelector("tbody");
+        if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="muted">Loading top products...</td></tr>`;
+    }
+    if (els.reportsLowStockTable) {
+        const tbody = els.reportsLowStockTable.querySelector("tbody");
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="muted">Loading stock...</td></tr>`;
+    }
+
+    const summary = await apiFetch("/reports/dashboard/");
+    const salesSummary = await apiFetch(withParams("/reports/sales-summary/", { days: backOfficeReportsRange }));
+    const topProducts = await apiFetch(withParams("/reports/top-products/", { days: backOfficeReportsRange }));
+    const inventorySummary = await apiFetch("/reports/inventory-summary/");
+
+    backOfficeReportsSummary = summary;
+    backOfficeReportsSales = ensureArray(salesSummary?.sales_by_day, "reportsSalesByDay");
+    backOfficeReportsPayments = ensureArray(salesSummary?.sales_by_payment_method, "reportsPaymentMethods");
+    backOfficeReportsTopProducts = ensureArray(topProducts?.top_products, "reportsTopProducts");
+    backOfficeReportsLowStock = ensureArray(inventorySummary?.low_stock_products, "reportsLowStock");
+
+    renderBackOfficeReports();
+}
+
+function renderBackOfficeReports() {
+    if (els.reportsTodaySales) {
+        els.reportsTodaySales.textContent = fmtPrice(backOfficeReportsSummary?.today_sales || 0);
+    }
+    if (els.reportsWeekSales) {
+        els.reportsWeekSales.textContent = fmtPrice(backOfficeReportsSummary?.week_sales || 0);
+    }
+    if (els.reportsPendingOrders) {
+        const count = backOfficeReportsSummary?.pending_orders_count ?? 0;
+        els.reportsPendingOrders.textContent = count.toLocaleString("en-KE");
+    }
+    if (els.reportsLowStock) {
+        const count = backOfficeReportsSummary?.low_stock_count ?? 0;
+        els.reportsLowStock.textContent = count.toLocaleString("en-KE");
+    }
+
+    if (els.reportsSalesTable) {
+        const tbody = els.reportsSalesTable.querySelector("tbody");
+        if (tbody) {
+            if (!backOfficeReportsSales.length) {
+                tbody.innerHTML = `<tr><td colspan="3">No sales data for this range.</td></tr>`;
+            } else {
+                tbody.innerHTML = backOfficeReportsSales.map(row => `
+                    <tr>
+                        <td>${formatShortDate(row.date)}</td>
+                        <td>${row.total_orders || 0}</td>
+                        <td>${fmtPrice(row.total_sales || 0)}</td>
+                    </tr>
+                `).join("");
+            }
+        }
+    }
+
+    if (els.reportsPaymentList) {
+        if (!backOfficeReportsPayments.length) {
+            els.reportsPaymentList.innerHTML = `<span class="muted">No payment breakdown available.</span>`;
+        } else {
+            els.reportsPaymentList.innerHTML = backOfficeReportsPayments.map(row => `
+                <span class="reports-payment-pill">${formatLabel(row.payment_method)} · ${fmtPrice(row.total_sales || 0)}</span>
+            `).join("");
+        }
+    }
+
+    if (els.reportsTopProductsTable) {
+        const tbody = els.reportsTopProductsTable.querySelector("tbody");
+        if (tbody) {
+            if (!backOfficeReportsTopProducts.length) {
+                tbody.innerHTML = `<tr><td colspan="3">No products found.</td></tr>`;
+            } else {
+                tbody.innerHTML = backOfficeReportsTopProducts.map(row => `
+                    <tr>
+                        <td>${esc(row.product_name || "—")}</td>
+                        <td>${row.total_quantity || 0}</td>
+                        <td>${fmtPrice(row.total_revenue || 0)}</td>
+                    </tr>
+                `).join("");
+            }
+        }
+    }
+
+    if (els.reportsLowStockTable) {
+        const tbody = els.reportsLowStockTable.querySelector("tbody");
+        if (tbody) {
+            if (!backOfficeReportsLowStock.length) {
+                tbody.innerHTML = `<tr><td colspan="5">No low stock items.</td></tr>`;
+            } else {
+                tbody.innerHTML = backOfficeReportsLowStock.map(row => `
+                    <tr>
+                        <td>${esc(row.product_name || "—")}</td>
+                        <td>${esc(row.sku || "—")}</td>
+                        <td>${row.quantity ?? 0}</td>
+                        <td>${row.reorder_level ?? 0}</td>
+                        <td>${esc(row.branch_name || "—")}</td>
+                    </tr>
+                `).join("");
+            }
+        }
+    }
 }
 
 async function openBackOfficeOrderDetail(orderId) {
@@ -12849,6 +13361,10 @@ function canViewStock() {
 
 function canViewCustomers() {
     return ["cashier", "salesperson", "supervisor", "admin"].includes(normalizeRole(currentUserRole));
+}
+
+function canViewReports() {
+    return ["supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }
 
 function isSupervisorOrAdmin() {

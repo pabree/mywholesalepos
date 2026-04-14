@@ -17,7 +17,7 @@
     <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
     <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-13.12">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-14.04">
 </head>
 <body>
     <!-- Top Bar -->
@@ -125,6 +125,14 @@
                     </span>
                     <span class="tile-title">Customers</span>
                 </button>
+                <button id="mobile-tile-reports" class="mobile-action-tile">
+                    <span class="tile-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img" focusable="false">
+                            <path d="M4 4h16a1 1 0 0 1 1 1v14H3V5a1 1 0 0 1 1-1Zm1 4v9h14V8H5Zm2 2h3v5H7v-5Zm5 0h3v5h-3v-5Zm5 0h2v5h-2v-5Z"/>
+                        </svg>
+                    </span>
+                    <span class="tile-title">Reports</span>
+                </button>
             </div>
         </section>
 
@@ -164,6 +172,10 @@
                 <label for="mobile-stock-search">Search</label>
                 <input type="text" id="mobile-stock-search" class="summary-input" placeholder="Search by name or SKU">
             </div>
+            <div id="mobile-stock-filter-note" class="mobile-filter-note hidden">
+                <span>Showing low stock items</span>
+                <button id="mobile-stock-filter-clear" class="btn-ghost btn-inline">Clear</button>
+            </div>
             <div id="mobile-stock-category-chips" class="mobile-category-chips mobile-only"></div>
             <div id="mobile-stock-list" class="mobile-stock-list">
                 <div class="sale-entry-empty">Search to view stock.</div>
@@ -185,6 +197,50 @@
             </div>
             <div id="mobile-customers-list" class="mobile-customers-list">
                 <div class="sale-entry-empty">Search to view customers.</div>
+            </div>
+        </section>
+
+        <!-- MOBILE: Reports -->
+        <section id="mobile-reports-panel" class="mobile-panel mobile-section" data-mobile-tab="reports">
+            <div class="panel-header mobile-panel-header">
+                <button id="mobile-reports-back" class="btn-ghost">← Home</button>
+                <div>
+                    <h2>Reports</h2>
+                    <p class="panel-subtitle">Quick business snapshot.</p>
+                </div>
+            </div>
+            <div id="mobile-reports-error" class="mobile-empty-state hidden">
+                <div>Unable to load reports.</div>
+                <button id="mobile-reports-retry" class="btn-secondary">Retry</button>
+            </div>
+            <div id="mobile-reports-content" class="mobile-reports-content">
+                <div class="mobile-reports-summary">
+                    <div class="mobile-summary-card mobile-report-card" data-report-action="today-sales">
+                        <span class="summary-label">Today Sales</span>
+                        <div id="mobile-reports-today-sales" class="summary-value">—</div>
+                    </div>
+                    <div class="mobile-summary-card mobile-report-card" data-report-action="week-sales">
+                        <span class="summary-label">This Week</span>
+                        <div id="mobile-reports-week-sales" class="summary-value">—</div>
+                    </div>
+                    <div class="mobile-summary-card mobile-report-card" data-report-action="pending-orders">
+                        <span class="summary-label">Pending Orders</span>
+                        <div id="mobile-reports-pending-orders" class="summary-value">—</div>
+                    </div>
+                    <div class="mobile-summary-card mobile-report-card" data-report-action="low-stock">
+                        <span class="summary-label">Low Stock</span>
+                        <div id="mobile-reports-low-stock" class="summary-value">—</div>
+                    </div>
+                </div>
+                <div class="mobile-reports-section">
+                    <div class="mobile-section-title">Top Products</div>
+                    <div id="mobile-reports-top-products" class="mobile-reports-list">
+                        <div class="sale-entry-empty">Loading top products...</div>
+                    </div>
+                </div>
+                <div id="mobile-reports-empty" class="mobile-empty-state hidden">
+                    No report data available.
+                </div>
             </div>
         </section>
         <!-- LEFT: Sale Entry Panel -->
@@ -1054,6 +1110,7 @@
                     <button class="backoffice-tab" data-section="delivery">Delivery Runs</button>
                     <button class="backoffice-tab" data-section="payments">Payments</button>
                     <button class="backoffice-tab" data-section="ledger" id="backoffice-ledger-tab">Ledger</button>
+                    <button class="backoffice-tab" data-section="reports">Reports</button>
                     <button class="backoffice-tab" data-section="staff">Staff</button>
                     <button class="backoffice-tab" data-section="inventory">Inventory</button>
                     <button class="backoffice-tab" data-section="setup">Setup</button>
@@ -1409,6 +1466,104 @@
                             <button id="backoffice-orders-prev" class="btn-ghost" disabled>Prev</button>
                             <span id="backoffice-orders-page" class="pagination-meta">Page 1 of 1</span>
                             <button id="backoffice-orders-next" class="btn-ghost" disabled>Next</button>
+                        </div>
+                    </div>
+                    <div id="backoffice-reports" class="backoffice-section hidden">
+                        <div class="backoffice-toolbar">
+                            <div class="backoffice-search">
+                                <select id="backoffice-reports-range" class="summary-select">
+                                    <option value="7">Last 7 Days</option>
+                                    <option value="30">Last 30 Days</option>
+                                </select>
+                            </div>
+                            <div class="backoffice-actions">
+                                <button id="backoffice-reports-refresh" class="btn-ghost">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="reports-summary-grid">
+                            <div class="reports-summary-card">
+                                <span>Today Sales</span>
+                                <strong id="reports-today-sales">—</strong>
+                            </div>
+                            <div class="reports-summary-card">
+                                <span>This Week Sales</span>
+                                <strong id="reports-week-sales">—</strong>
+                            </div>
+                            <div class="reports-summary-card">
+                                <span>Pending Orders</span>
+                                <strong id="reports-pending-orders">—</strong>
+                            </div>
+                            <div class="reports-summary-card">
+                                <span>Low Stock</span>
+                                <strong id="reports-low-stock">—</strong>
+                            </div>
+                        </div>
+                        <div class="reports-section">
+                            <div class="reports-section-header">
+                                <h4>Sales Overview</h4>
+                                <span id="reports-sales-note" class="muted">—</span>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="reports-sales-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Orders</th>
+                                            <th>Total Sales</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="3" class="muted">Loading sales overview...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div id="reports-payment-list" class="reports-payment-list"></div>
+                        </div>
+                        <div class="reports-section">
+                            <div class="reports-section-header">
+                                <h4>Top Products</h4>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="reports-top-products-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Product</th>
+                                            <th>Quantity</th>
+                                            <th>Revenue</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="3" class="muted">Loading top products...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="reports-section">
+                            <div class="reports-section-header">
+                                <h4>Low Stock</h4>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="reports-low-stock-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Product</th>
+                                            <th>SKU</th>
+                                            <th>Qty</th>
+                                            <th>Reorder</th>
+                                            <th>Branch</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="5" class="muted">Loading stock...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                     <div id="backoffice-delivery" class="backoffice-section hidden">
@@ -2235,6 +2390,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-13.12"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-14.04"></script>
 </body>
 </html>

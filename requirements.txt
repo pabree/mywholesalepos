@@ -9,3 +9,4 @@ whitenoise==6.7.0
 requests==2.32.3
 openpyxl==3.1.5
 python-dotenv==1.0.1
+boto3==1.35.76
