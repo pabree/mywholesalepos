@@ -1,5 +1,5 @@
-const CACHE_NAME = "staff-app-v57";
-const APP_BUILD = "2026-04-15.02";
+const CACHE_NAME = "staff-app-v59";
+const APP_BUILD = "2026-04-15.04";
 const APP_SHELL = [
     "/",
     `/static/style.css?v=${APP_BUILD}`,
