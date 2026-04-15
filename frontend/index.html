@@ -14,17 +14,18 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="manifest" href="/manifest.json">
-    <link rel="icon" sizes="192x192" href="{% static 'staff-icon-192.png' %}">
-    <link rel="icon" sizes="512x512" href="{% static 'staff-icon-512.png' %}">
-    <link rel="apple-touch-icon" href="{% static 'staff-icon-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-14.04">
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'logo-32.png' %}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{% static 'logo-192.png' %}">
+    <link rel="icon" type="image/png" sizes="512x512" href="{% static 'logo-512.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'logo-192.png' %}">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-15.01">
 </head>
 <body>
     <!-- Top Bar -->
     <header id="topbar">
         <div class="topbar-left">
             <div class="logo">
-                <span class="logo-icon">◆</span>
+                <img src="{% static 'logo.png' %}" alt="Stery Wholesalers logo" class="app-logo app-logo-header">
                 <span class="logo-copy">
                     <span class="logo-text">Stery <span class="accent">Wholesalers</span></span>
                     <span class="logo-subtitle">Wholesale POS</span>
@@ -635,6 +636,13 @@
             </div>
             <div class="modal-body-scroll">
                 <div class="modal-body">
+                    <div class="auth-brand">
+                        <img src="{% static 'logo.png' %}" alt="Stery Wholesalers logo" class="app-logo app-logo-auth">
+                        <div class="auth-brand-copy">
+                            <strong>Stery Wholesalers</strong>
+                            <span>Wholesale POS</span>
+                        </div>
+                    </div>
                     <div class="auth-section">
                         <label for="auth-username">Username</label>
                         <input id="auth-username" type="text" class="modal-input" placeholder="username">
@@ -781,6 +789,10 @@
                         <button class="order-filter" data-status="cancelled">Cancelled</button>
                     </div>
                     <input id="customer-orders-search" class="modal-input orders-search" placeholder="Search by customer or order id">
+                </div>
+                <div id="customer-orders-status-note" class="mobile-filter-note hidden">
+                    <span>Showing pending orders (multiple statuses)</span>
+                    <button id="customer-orders-status-clear" class="btn-ghost btn-inline">Clear</button>
                 </div>
                 <div class="orders-grid">
                     <div class="orders-list-panel">
@@ -2390,6 +2402,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-14.04"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-15.01"></script>
 </body>
 </html>

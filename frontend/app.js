@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-14.04";
+const APP_BUILD = "2026-04-15.01";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -38,6 +38,7 @@ let currentSaleMeta = null;
 let customerOrders = [];
 let selectedCustomerOrder = null;
 let customerOrdersFilter = "all";
+let customerOrdersStatusList = [];
 let customerOrdersQuery = "";
 let customerOrdersFailed = false;
 let amountPaidDirty = false;
@@ -117,6 +118,14 @@ let posScanStream = null;
 let posScanDetector = null;
 let posScanActive = false;
 let posScanLoopTimer = null;
+
+const PENDING_ORDER_STATUSES = [
+    "pending",
+    "pending_credit_approval",
+    "confirmed",
+    "processing",
+    "out_for_delivery",
+];
 let posScanLastValue = null;
 let posScanLastAt = 0;
 let mobileSearchTimer = null;
@@ -357,6 +366,8 @@ const els = {
     customerOrdersCloseBtn: document.getElementById("customer-orders-close-btn"),
     refreshCustomerOrders: document.getElementById("refresh-customer-orders"),
     customerOrdersFilters: document.getElementById("customer-orders-filters"),
+    customerOrdersStatusNote: document.getElementById("customer-orders-status-note"),
+    customerOrdersStatusClear: document.getElementById("customer-orders-status-clear"),
     customerOrdersSearch: document.getElementById("customer-orders-search"),
     customerOrdersList: document.getElementById("customer-orders-list"),
     customerOrdersLoading: document.getElementById("customer-orders-loading"),
@@ -2182,6 +2193,12 @@ document.addEventListener("DOMContentLoaded", () => {
             btn.addEventListener("click", () => setCustomerOrdersFilter(btn.dataset.status));
         });
     }
+    if (els.customerOrdersStatusClear) {
+        els.customerOrdersStatusClear.addEventListener("click", () => {
+            clearCustomerOrdersStatusList();
+            toast("Showing all customer orders.", "info");
+        });
+    }
     if (els.submitPaymentBtn) els.submitPaymentBtn.addEventListener("click", submitPayment);
     if (els.payFullBtn) els.payFullBtn.addEventListener("click", fillFullBalance);
     if (els.paymentAmount) els.paymentAmount.addEventListener("input", validatePaymentInput);
@@ -3150,8 +3167,8 @@ function openPendingOrdersFromReports() {
         return;
     }
     openCustomerOrdersModal();
-    setCustomerOrdersFilter("pending");
-    toast("Showing pending orders. Use filters for other statuses.", "info");
+    setCustomerOrdersStatusList(PENDING_ORDER_STATUSES);
+    toast("Showing pending orders across multiple statuses.", "info");
 }
 
 function openLowStockFromReports() {
@@ -3267,91 +3284,6 @@ async function loadMobileReports() {
     if (els.mobileReportsTopProducts) {
         els.mobileReportsTopProducts.innerHTML = mobileReportsTopProducts.map(item => `
             <div class="mobile-report-item" data-report-product="${esc(item.product_id || "")}">
-                <div class="report-meta">
-                    <strong>${esc(item.product_name || "—")}</strong>
-                    <span>${item.total_quantity || 0} sold</span>
-                </div>
-                <div class="report-value">${fmtPrice(item.total_revenue || 0)}</div>
-            </div>
-        `).join("");
-    }
-}
-
-async function loadMobileReports() {
-    if (!isMobileLayout()) return;
-    if (!els.mobileReportsTopProducts) return;
-    if (!API_TOKEN || !currentUser) {
-        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
-        if (els.mobileReportsError) {
-            els.mobileReportsError.classList.remove("hidden");
-            els.mobileReportsError.querySelector("div").textContent = "Log in to view reports.";
-        }
-        return;
-    }
-    if (!canViewReports()) {
-        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
-        if (els.mobileReportsError) {
-            els.mobileReportsError.classList.remove("hidden");
-            els.mobileReportsError.querySelector("div").textContent = "Reports are not available for your role.";
-        }
-        return;
-    }
-    if (els.mobileReportsError) {
-        els.mobileReportsError.classList.add("hidden");
-    }
-    if (els.mobileReportsContent) {
-        els.mobileReportsContent.classList.remove("hidden");
-    }
-    if (els.mobileReportsEmpty) {
-        els.mobileReportsEmpty.classList.add("hidden");
-    }
-    if (els.mobileReportsTodaySales) els.mobileReportsTodaySales.textContent = "Loading...";
-    if (els.mobileReportsWeekSales) els.mobileReportsWeekSales.textContent = "Loading...";
-    if (els.mobileReportsPendingOrders) els.mobileReportsPendingOrders.textContent = "—";
-    if (els.mobileReportsLowStock) els.mobileReportsLowStock.textContent = "—";
-    if (els.mobileReportsTopProducts) {
-        els.mobileReportsTopProducts.innerHTML = `<div class="sale-entry-empty">Loading top products...</div>`;
-    }
-
-    const summary = await apiFetch("/reports/dashboard/");
-    if (!summary) {
-        if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
-        if (els.mobileReportsError) {
-            els.mobileReportsError.classList.remove("hidden");
-            els.mobileReportsError.querySelector("div").textContent = "Unable to load reports.";
-        }
-        return;
-    }
-
-    if (els.mobileReportsTodaySales) {
-        els.mobileReportsTodaySales.textContent = fmtPrice(summary.today_sales || 0);
-    }
-    if (els.mobileReportsWeekSales) {
-        els.mobileReportsWeekSales.textContent = fmtPrice(summary.week_sales || 0);
-    }
-    if (els.mobileReportsPendingOrders) {
-        const count = summary.pending_orders_count ?? 0;
-        els.mobileReportsPendingOrders.textContent = count.toLocaleString("en-KE");
-    }
-    if (els.mobileReportsLowStock) {
-        const count = summary.low_stock_count ?? 0;
-        els.mobileReportsLowStock.textContent = count.toLocaleString("en-KE");
-    }
-
-    const topProducts = ensureArray(summary.top_products, "mobileReportsTopProducts");
-    if (!topProducts.length) {
-        if (els.mobileReportsTopProducts) {
-            els.mobileReportsTopProducts.innerHTML = `<div class="sale-entry-empty">No top products yet.</div>`;
-        }
-        if (els.mobileReportsEmpty) {
-            els.mobileReportsEmpty.classList.remove("hidden");
-        }
-        return;
-    }
-
-    if (els.mobileReportsTopProducts) {
-        els.mobileReportsTopProducts.innerHTML = topProducts.map(item => `
-            <div class="mobile-report-item">
                 <div class="report-meta">
                     <strong>${esc(item.product_name || "—")}</strong>
                     <span>${item.total_quantity || 0} sold</span>
@@ -10570,13 +10502,48 @@ async function ensureAssignableUsers() {
 
 function setCustomerOrdersFilter(status) {
     customerOrdersFilter = status || "all";
+    customerOrdersStatusList = [];
     customerOrdersOffset = 0;
     if (els.customerOrdersFilters) {
         els.customerOrdersFilters.querySelectorAll(".order-filter").forEach(btn => {
             btn.classList.toggle("active", btn.dataset.status === customerOrdersFilter);
         });
     }
+    updateCustomerOrdersStatusNote();
     loadCustomerOrders();
+}
+
+function setCustomerOrdersStatusList(statusList = []) {
+    customerOrdersStatusList = Array.isArray(statusList) ? statusList.filter(Boolean) : [];
+    customerOrdersFilter = "all";
+    customerOrdersOffset = 0;
+    if (els.customerOrdersFilters) {
+        els.customerOrdersFilters.querySelectorAll(".order-filter").forEach(btn => {
+            btn.classList.toggle("active", btn.dataset.status === "all");
+        });
+    }
+    updateCustomerOrdersStatusNote();
+    loadCustomerOrders();
+}
+
+function clearCustomerOrdersStatusList() {
+    if (!customerOrdersStatusList.length) return;
+    customerOrdersStatusList = [];
+    customerOrdersOffset = 0;
+    updateCustomerOrdersStatusNote();
+    loadCustomerOrders();
+}
+
+function updateCustomerOrdersStatusNote() {
+    if (!els.customerOrdersStatusNote) return;
+    const hasMultiStatus = Array.isArray(customerOrdersStatusList) && customerOrdersStatusList.length > 0;
+    els.customerOrdersStatusNote.classList.toggle("hidden", !hasMultiStatus);
+    if (els.customerOrdersStatusNote) {
+        els.customerOrdersStatusNote.setAttribute("aria-hidden", hasMultiStatus ? "false" : "true");
+    }
+    if (els.customerOrdersStatusClear) {
+        els.customerOrdersStatusClear.disabled = !hasMultiStatus;
+    }
 }
 
 async function loadCustomerOrders() {
@@ -10586,30 +10553,38 @@ async function loadCustomerOrders() {
     els.customerOrdersError.classList.add("hidden");
     els.customerOrdersEmpty.classList.add("hidden");
 
+    const isMultiStatus = Array.isArray(customerOrdersStatusList) && customerOrdersStatusList.length > 0;
     const params = new URLSearchParams();
-    if (customerOrdersFilter && customerOrdersFilter !== "all") {
+    if (!isMultiStatus && customerOrdersFilter && customerOrdersFilter !== "all") {
         params.set("status", customerOrdersFilter);
     }
     if (customerOrdersQuery) {
         params.set("q", customerOrdersQuery);
     }
-    params.set("limit", CUSTOMER_ORDERS_LIMIT);
-    params.set("offset", customerOrdersOffset);
+    if (!isMultiStatus) {
+        params.set("limit", CUSTOMER_ORDERS_LIMIT);
+        params.set("offset", customerOrdersOffset);
+    }
 
     const endpoint = `/sales/customer-orders/${params.toString() ? `?${params}` : ""}`;
-    customerOrdersLog("[customer-orders] fetch", endpoint);
-    const data = await apiFetch(endpoint);
-    const page = normalizePaginated(data);
+    customerOrdersLog("[customer-orders] fetch", endpoint, { isMultiStatus, statusList: customerOrdersStatusList });
+    const data = isMultiStatus ? await apiFetchAll(endpoint) : await apiFetch(endpoint);
+    const page = isMultiStatus ? { count: Array.isArray(data) ? data.length : 0, next: null, previous: null, results: ensureArray(data, "customerOrdersMulti") } : normalizePaginated(data);
     customerOrdersLog("[customer-orders] response", Array.isArray(page.results) ? page.results.length : page);
-    if (!data) {
+    if (!data && !isMultiStatus) {
         customerOrdersFailed = true;
         customerOrders = [];
         customerOrdersPage = { count: 0, next: null, previous: null, results: [] };
         els.customerOrdersError.textContent = "Unable to load customer orders. Please try again.";
         els.customerOrdersError.classList.remove("hidden");
     } else {
-        customerOrders = page.results;
-        customerOrdersPage = page;
+        const rows = isMultiStatus
+            ? ensureArray(page.results, "customerOrdersMulti").filter(order => customerOrdersStatusList.includes(order.status))
+            : page.results;
+        customerOrders = rows;
+        customerOrdersPage = isMultiStatus
+            ? { count: rows.length, next: null, previous: null, results: rows }
+            : page;
     }
     els.customerOrdersLoading.classList.add("hidden");
     updatePager({
@@ -10617,9 +10592,12 @@ async function loadCustomerOrders() {
         nextEl: els.customerOrdersNext,
         pageEl: els.customerOrdersPage,
         offset: customerOrdersOffset,
-        limit: CUSTOMER_ORDERS_LIMIT,
+        limit: isMultiStatus ? Math.max(customerOrdersPage.count || 0, 1) : CUSTOMER_ORDERS_LIMIT,
         pageData: customerOrdersPage,
     });
+    if (isMultiStatus) {
+        updateCustomerOrdersStatusNote();
+    }
     renderCustomerOrders();
 }
 

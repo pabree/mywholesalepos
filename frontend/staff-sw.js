@@ -1,10 +1,14 @@
-const CACHE_NAME = "staff-app-v54";
-const APP_BUILD = "2026-04-14.04";
+const CACHE_NAME = "staff-app-v56";
+const APP_BUILD = "2026-04-15.01";
 const APP_SHELL = [
     "/",
     `/static/style.css?v=${APP_BUILD}`,
     `/static/app.js?v=${APP_BUILD}`,
     "/manifest.json",
+    "/static/logo-32.png",
+    "/static/logo.png",
+    "/static/logo-192.png",
+    "/static/logo-512.png",
     "/static/staff-icon-192.png",
     "/static/staff-icon-512.png",
 ];
