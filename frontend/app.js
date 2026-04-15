@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-15.03";
+const APP_BUILD = "2026-04-15.05";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -3243,8 +3243,50 @@ async function loadMobileReports() {
         els.mobileReportsTopProducts.innerHTML = `<div class="sale-entry-empty">Loading top products...</div>`;
     }
 
-    const summary = await apiFetch("/reports/dashboard/");
-    if (!summary) {
+    const endpoint = "/reports/dashboard/";
+    let summary = null;
+    try {
+        const requestReports = async (authHeader = true) => {
+            const res = await fetch(`${API_BASE}${endpoint}`, {
+                method: "GET",
+                headers: authHeader && API_TOKEN ? { Authorization: `Token ${API_TOKEN}` } : {},
+                credentials: "same-origin",
+            });
+            const contentType = res.headers.get("content-type") || "";
+            const rawBody = contentType.includes("application/json") ? await res.json() : await res.text();
+            return { res, rawBody };
+        };
+
+        let { res, rawBody } = await requestReports(true);
+        if (!res.ok && API_TOKEN && (res.status === 401 || res.status === 403)) {
+            console.warn("[mobile-reports] retrying without token header", {
+                endpoint,
+                status: res.status,
+            });
+            ({ res, rawBody } = await requestReports(false));
+        }
+
+        if (!res.ok) {
+            console.error("[mobile-reports] request failed", {
+                endpoint,
+                status: res.status,
+                body: rawBody,
+            });
+            const message = res.status === 401
+                ? "Log in to view reports."
+                : res.status === 403
+                    ? "Reports are not available for your role."
+                    : "Unable to load reports.";
+            if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
+            if (els.mobileReportsError) {
+                els.mobileReportsError.classList.remove("hidden");
+                els.mobileReportsError.querySelector("div").textContent = message;
+            }
+            return;
+        }
+        summary = rawBody;
+    } catch (err) {
+        console.error("[mobile-reports] unexpected error", { endpoint, error: err });
         if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
         if (els.mobileReportsError) {
             els.mobileReportsError.classList.remove("hidden");
