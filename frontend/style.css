@@ -2118,6 +2118,35 @@ body.offline .offline-status {
     text-align: right;
 }
 
+.location-display {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    max-width: 100%;
+}
+
+.location-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.25;
+    text-align: right;
+    word-break: break-word;
+}
+
+.location-coords {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.2;
+    text-align: right;
+    word-break: break-word;
+}
+
+.location-coords-small {
+    font-size: 10px;
+    opacity: 0.95;
+}
+
 .location-map-link {
     display: inline-flex;
     align-items: center;

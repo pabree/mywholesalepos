@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-16.04";
+const APP_BUILD = "2026-04-16.05";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -10447,9 +10447,6 @@ function setDeliveryRunLocationState({ run = currentDeliveryRun, history = [], l
             els.deliveryRunLocationSummary.innerHTML = `<div class="muted">No location history yet.</div>`;
             return;
         }
-        const lastKnown = formatLocation(run?.last_known_latitude, run?.last_known_longitude);
-        const startLocation = formatLocation(run?.start_latitude, run?.start_longitude);
-        const endLocation = formatLocation(run?.end_latitude, run?.end_longitude);
         const lastPing = formatDateTime(run?.last_ping_at);
         const pingLabel = `${pingCount} ping${pingCount === 1 ? "" : "s"}`;
         const lastKnownMapUrl = buildMapsUrl(run?.last_known_latitude, run?.last_known_longitude);
@@ -10460,29 +10457,27 @@ function setDeliveryRunLocationState({ run = currentDeliveryRun, history = [], l
             <div class="detail-card delivery-run-location-card">
                 <div class="detail-row">
                     <span>Last Known</span>
-                    <strong class="location-inline">
-                        <span>${lastKnown}</span>
-                        ${lastKnownMapUrl ? `<a class="location-map-link" href="${lastKnownMapUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+                    <strong class="location-inline" data-location-summary="last-known">
+                        ${renderLocationDisplay(run?.last_known_latitude, run?.last_known_longitude, { mapsUrl: lastKnownMapUrl })}
                     </strong>
                 </div>
                 <div class="detail-row"><span>Last Ping</span><strong>${lastPing}</strong></div>
                 <div class="detail-row">
                     <span>Start</span>
-                    <strong class="location-inline">
-                        <span>${startLocation}</span>
-                        ${startMapUrl ? `<a class="location-map-link" href="${startMapUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+                    <strong class="location-inline" data-location-summary="start">
+                        ${renderLocationDisplay(run?.start_latitude, run?.start_longitude, { mapsUrl: startMapUrl })}
                     </strong>
                 </div>
                 <div class="detail-row">
                     <span>End</span>
-                    <strong class="location-inline">
-                        <span>${endLocation}</span>
-                        ${endMapUrl ? `<a class="location-map-link" href="${endMapUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+                    <strong class="location-inline" data-location-summary="end">
+                        ${renderLocationDisplay(run?.end_latitude, run?.end_longitude, { mapsUrl: endMapUrl })}
                     </strong>
                 </div>
                 <div class="detail-row"><span>History</span><strong>${pingLabel}</strong></div>
             </div>
         `;
+        enhanceFriendlyLocationLabels(els.deliveryRunLocationSummary);
     }
 }
 
@@ -10532,8 +10527,7 @@ function renderDeliveryRunHistoryList(history, targetEl) {
                     <div class="history-meta">${metaLine}</div>
                 </div>
                 <div class="history-location">
-                    <span>${formatLocation(ping.latitude, ping.longitude)}</span>
-                    ${mapsUrl ? `<a class="location-map-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+                    ${renderLocationDisplay(ping.latitude, ping.longitude, { mapsUrl, coordsClass: "location-coords location-coords-small" })}
                 </div>
             </div>
         `;
@@ -10541,6 +10535,7 @@ function renderDeliveryRunHistoryList(history, targetEl) {
     if (targetEl) {
         targetEl.classList.remove("muted");
         targetEl.innerHTML = html;
+        enhanceFriendlyLocationLabels(targetEl);
     }
     return html;
 }
@@ -13106,6 +13101,145 @@ function buildMapsUrl(lat, lng) {
     const lngText = formatCoord(lng);
     if (!latText || !lngText) return "";
     return `https://www.google.com/maps?q=${encodeURIComponent(`${latText},${lngText}`)}`;
+}
+
+const locationLabelCache = new Map();
+const locationLabelInflight = new Map();
+
+function getLocationCacheKey(lat, lng) {
+    const latText = formatCoord(lat);
+    const lngText = formatCoord(lng);
+    if (!latText || !lngText) return "";
+    return `${latText},${lngText}`;
+}
+
+function formatFriendlyLocationLabel(data) {
+    if (!data) return "";
+    const address = data.address || {};
+    const parts = [];
+    if (address.neighbourhood) parts.push(address.neighbourhood);
+    else if (address.suburb) parts.push(address.suburb);
+    else if (address.village) parts.push(address.village);
+    else if (address.town) parts.push(address.town);
+    else if (address.city) parts.push(address.city);
+    else if (address.county) parts.push(address.county);
+    if (address.city && !parts.includes(address.city)) parts.push(address.city);
+    if (!parts.length && data.name) parts.push(data.name);
+    if (!parts.length && data.display_name) {
+        parts.push(data.display_name.split(",").slice(0, 2).join(",").trim());
+    }
+    const label = parts.filter(Boolean).join(", ").trim();
+    return label || "";
+}
+
+async function resolveFriendlyLocationLabel(lat, lng) {
+    const cacheKey = getLocationCacheKey(lat, lng);
+    if (!cacheKey) return "";
+    if (locationLabelCache.has(cacheKey)) {
+        return locationLabelCache.get(cacheKey);
+    }
+    if (locationLabelInflight.has(cacheKey)) {
+        return locationLabelInflight.get(cacheKey);
+    }
+
+    const latText = formatCoord(lat);
+    const lngText = formatCoord(lng);
+    if (!latText || !lngText) return "";
+
+    const request = fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latText)}&lon=${encodeURIComponent(lngText)}&zoom=18&addressdetails=1`, {
+        method: "GET",
+        headers: {
+            Accept: "application/json",
+        },
+    })
+        .then(async (response) => {
+            if (!response.ok) throw new Error(`Reverse geocode failed (${response.status})`);
+            const data = await response.json();
+            const label = formatFriendlyLocationLabel(data) || "";
+            const value = label || "";
+            locationLabelCache.set(cacheKey, value);
+            return value;
+        })
+        .catch(() => {
+            locationLabelCache.set(cacheKey, "");
+            return "";
+        })
+        .finally(() => {
+            locationLabelInflight.delete(cacheKey);
+        });
+
+    locationLabelInflight.set(cacheKey, request);
+    return request;
+}
+
+function enhanceFriendlyLocationLabels(rootEl) {
+    if (!rootEl) return;
+    const nodes = rootEl.querySelectorAll("[data-location-key]");
+    nodes.forEach((node) => {
+        const key = node.dataset.locationKey || "";
+        if (!key) return;
+        if (node.dataset.locationLabelEnhanced === key) return;
+        node.dataset.locationLabelEnhanced = key;
+        const coordsText = node.querySelector("[data-location-coords]")?.textContent || "—";
+        resolveFriendlyLocationLabelFromKey(key).then((label) => {
+            if (!node.isConnected) return;
+            const labelEl = node.querySelector("[data-location-label]");
+            const coordsEl = node.querySelector("[data-location-coords]");
+            if (!labelEl || !coordsEl) return;
+            if (label) {
+                labelEl.textContent = label;
+                coordsEl.textContent = coordsText;
+                coordsEl.classList.remove("hidden");
+            } else {
+                labelEl.textContent = coordsText;
+                coordsEl.classList.add("hidden");
+            }
+        });
+    });
+}
+
+function resolveFriendlyLocationLabelFromKey(cacheKey) {
+    if (!cacheKey) return Promise.resolve("");
+    if (locationLabelCache.has(cacheKey)) {
+        return Promise.resolve(locationLabelCache.get(cacheKey));
+    }
+    if (locationLabelInflight.has(cacheKey)) {
+        return locationLabelInflight.get(cacheKey);
+    }
+    const [lat, lng] = cacheKey.split(",");
+    return resolveFriendlyLocationLabel(lat, lng);
+}
+
+function renderLocationDisplay(lat, lng, { mapsUrl = "", element = null, coordsClass = "location-coords", labelClass = "location-label" } = {}) {
+    const coordsText = formatLocation(lat, lng);
+    const cacheKey = getLocationCacheKey(lat, lng);
+    const safeMap = mapsUrl || buildMapsUrl(lat, lng);
+    const labelAttr = cacheKey ? ` data-location-key="${esc(cacheKey)}"` : "";
+    const html = `
+        <span class="location-display"${labelAttr}>
+            <span class="${labelClass}" data-location-label>${esc(coordsText)}</span>
+            <span class="${coordsClass}" data-location-coords>${esc(coordsText)}</span>
+            ${safeMap ? `<a class="location-map-link" href="${safeMap}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+        </span>
+    `;
+    if (element) element.innerHTML = html;
+    if (cacheKey && element) {
+        resolveFriendlyLocationLabel(lat, lng).then((label) => {
+            if (!element.isConnected) return;
+            const labelEl = element.querySelector("[data-location-label]");
+            const coordsEl = element.querySelector("[data-location-coords]");
+            if (!labelEl || !coordsEl) return;
+            if (label) {
+                labelEl.textContent = label;
+                coordsEl.textContent = coordsText;
+                coordsEl.classList.remove("hidden");
+            } else {
+                labelEl.textContent = coordsText;
+                coordsEl.classList.add("hidden");
+            }
+        });
+    }
+    return html;
 }
 
 function formatPaymentMethod(method) {
