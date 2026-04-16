@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-16.03";
+const APP_BUILD = "2026-04-16.04";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -2788,9 +2788,14 @@ function updateMobileDashboardTiles() {
     const canReports = canViewReports();
     const canDelivery = canAccessDeliveryRun();
     console.debug("[mobile-dashboard] role state", {
+        currentUserRoleRaw: currentUserRole,
+        currentUserRoleResolved: getResolvedUserRole(),
         currentUserRole,
         normalizedRole: normalizeRole(currentUserRole),
         canDelivery,
+        deliveryTileExists: Boolean(els.mobileTileDelivery),
+        deliveryTileClassName: els.mobileTileDelivery?.className || null,
+        deliveryTileDisplay: els.mobileTileDelivery ? getComputedStyle(els.mobileTileDelivery).display : null,
     });
 
     if (els.mobileTileSell) {
@@ -10173,7 +10178,7 @@ function canApproveCustomerCredit() {
 }
 
 function canAccessDeliveryRun() {
-    return ["deliver_person", "delivery_person"].includes(normalizeRole(currentUserRole));
+    return isDeliveryRole();
 }
 
 function openCustomerOrdersModal() {
@@ -13624,6 +13629,15 @@ function normalizeRole(role) {
         .toLowerCase()
         .replace(/[\s-]+/g, "_")
         .replace(/_+/g, "_");
+}
+
+function getResolvedUserRole() {
+    return normalizeRole(currentUser?.role || currentUserRole || localStorage.getItem("pos_user_role") || "");
+}
+
+function isDeliveryRole(role = getResolvedUserRole()) {
+    const normalized = normalizeRole(role);
+    return normalized === "deliver_person" || normalized === "delivery_person";
 }
 
 function canImportProducts() {
