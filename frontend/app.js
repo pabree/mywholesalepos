@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-15.05";
+const APP_BUILD = "2026-04-16.01";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -389,6 +389,10 @@ const els = {
     deliveryRunStatusSubmit: document.getElementById("delivery-run-status-submit"),
     deliveryRunComplete: document.getElementById("delivery-run-complete"),
     deliveryRunFail: document.getElementById("delivery-run-fail"),
+    deliveryRunLocationRefresh: document.getElementById("delivery-run-location-refresh"),
+    deliveryRunLocationNote: document.getElementById("delivery-run-location-note"),
+    deliveryRunLocationSummary: document.getElementById("delivery-run-location-summary"),
+    deliveryRunLocationError: document.getElementById("delivery-run-location-error"),
     deliveryRunHistory: document.getElementById("delivery-run-history"),
     deliveryRunError: document.getElementById("delivery-run-error"),
     deliveryRunPod: document.getElementById("delivery-run-pod"),
@@ -841,6 +845,7 @@ const els = {
     mobileTileStock: document.getElementById("mobile-tile-stock"),
     mobileTileCustomers: document.getElementById("mobile-tile-customers"),
     mobileTileReports: document.getElementById("mobile-tile-reports"),
+    mobileTileDelivery: document.getElementById("mobile-tile-delivery"),
     mobileSalesPanel: document.getElementById("mobile-sales-panel"),
     mobileSalesBack: document.getElementById("mobile-sales-back"),
     mobileSalesFilter: document.getElementById("mobile-sales-filter"),
@@ -1923,6 +1928,13 @@ document.addEventListener("DOMContentLoaded", () => {
             closeDeliveryProofForm();
         });
     }
+    if (els.deliveryRunLocationRefresh) {
+        els.deliveryRunLocationRefresh.addEventListener("click", () => {
+            if (currentDeliveryRun?.id) {
+                loadDeliveryRunLocationHistory(currentDeliveryRun);
+            }
+        });
+    }
     if (els.backofficeProductSearch) {
         els.backofficeProductSearch.addEventListener("input", () => {
             backOfficeQuery = els.backofficeProductSearch.value || "";
@@ -2633,6 +2645,15 @@ function initMobileDashboard() {
             setMobileTab("reports");
         });
     }
+    if (els.mobileTileDelivery) {
+        els.mobileTileDelivery.addEventListener("click", () => {
+            if (!canAccessDeliveryRun()) {
+                toast("Delivery run access is not available for your role.", "error");
+                return;
+            }
+            openDeliveryRunModal();
+        });
+    }
     if (els.mobileSalesBack) {
         els.mobileSalesBack.addEventListener("click", () => setMobileTab("home"));
     }
@@ -2786,6 +2807,11 @@ function updateMobileDashboardTiles() {
         els.mobileTileReports.classList.toggle("disabled", !canReports);
         els.mobileTileReports.disabled = !canReports;
         els.mobileTileReports.classList.toggle("hidden", !canReports);
+    }
+    if (els.mobileTileDelivery) {
+        els.mobileTileDelivery.classList.toggle("disabled", !canDelivery);
+        els.mobileTileDelivery.disabled = !canDelivery;
+        els.mobileTileDelivery.classList.toggle("hidden", !canDelivery);
     }
 }
 
@@ -10141,7 +10167,7 @@ function canApproveCustomerCredit() {
 }
 
 function canAccessDeliveryRun() {
-    return ["deliver_person"].includes(normalizeRole(currentUserRole));
+    return ["deliver_person", "delivery_person"].includes(normalizeRole(currentUserRole));
 }
 
 function openCustomerOrdersModal() {
@@ -10188,6 +10214,7 @@ function openDeliveryRunModal() {
         els.deliveryRunHistory.classList.add("muted");
         els.deliveryRunHistory.innerHTML = `No location history yet.`;
     }
+    setDeliveryRunLocationState({ loading: true });
     closeDeliveryProofForm();
     openOverlay(els.deliveryRunModal, { closeOthers: false });
     loadMyDeliveryRun();
@@ -10217,6 +10244,7 @@ async function loadMyDeliveryRun() {
         if (!run) {
             currentDeliveryRun = null;
             els.deliveryRunMeta.innerHTML = `<div class="muted">No active delivery run assigned.</div>`;
+            setDeliveryRunLocationState({ run: null, history: [], loading: false });
             renderDeliveryRunHistoryList([], els.deliveryRunHistory);
             updateDeliveryRunActions(null);
             return;
@@ -10224,10 +10252,11 @@ async function loadMyDeliveryRun() {
         currentDeliveryRun = run;
         renderDeliveryRunMeta(run);
         updateDeliveryRunActions(run);
-        await loadDeliveryRunHistory(run.id, els.deliveryRunHistory);
+        await loadDeliveryRunLocationHistory(run);
     } catch (err) {
         els.deliveryRunMeta.innerHTML = `<div class="muted">Failed to load delivery run.</div>`;
         setDeliveryRunError("Failed to load delivery run.");
+        setDeliveryRunLocationState({ error: "Failed to load location history.", loading: false });
     }
 }
 
@@ -10350,10 +10379,120 @@ function setDeliveryRunError(message) {
     els.deliveryRunError.classList.remove("hidden");
 }
 
-async function loadDeliveryRunHistory(runId, targetEl) {
-    if (!runId || !targetEl) return;
-    const history = await apiFetch(`/delivery/runs/${runId}/history/`);
-    renderDeliveryRunHistoryList(ensureArray(history, "deliveryRunHistory"), targetEl);
+function setDeliveryRunLocationState({ run = currentDeliveryRun, history = [], loading = false, error = "" } = {}) {
+    const hasSummary = Boolean(els.deliveryRunLocationSummary);
+    const hasNote = Boolean(els.deliveryRunLocationNote);
+    const hasError = Boolean(els.deliveryRunLocationError);
+    if (!hasSummary && !hasNote && !hasError) return;
+
+    if (els.deliveryRunLocationRefresh) {
+        els.deliveryRunLocationRefresh.disabled = loading;
+    }
+
+    if (hasNote) {
+        let note = "No location history yet.";
+        if (loading) {
+            note = "Loading location history...";
+        } else if (error) {
+            note = "Unable to load location history.";
+        } else if (run && run.last_known_latitude != null && run.last_known_longitude != null) {
+            note = "Last known location available.";
+        }
+        els.deliveryRunLocationNote.textContent = note;
+    }
+
+    if (hasError) {
+        if (error) {
+            els.deliveryRunLocationError.textContent = error;
+            els.deliveryRunLocationError.classList.remove("hidden");
+        } else {
+            els.deliveryRunLocationError.textContent = "";
+            els.deliveryRunLocationError.classList.add("hidden");
+        }
+    }
+
+    if (hasSummary) {
+        if (loading) {
+            els.deliveryRunLocationSummary.classList.add("muted");
+            els.deliveryRunLocationSummary.innerHTML = `<div class="muted">Loading location history...</div>`;
+            return;
+        }
+        if (error) {
+            els.deliveryRunLocationSummary.classList.add("muted");
+            els.deliveryRunLocationSummary.innerHTML = `<div class="muted">Location summary unavailable.</div>`;
+            return;
+        }
+        const pingCount = Array.isArray(history) ? history.length : 0;
+        const hasAnyCoords = [
+            run?.last_known_latitude,
+            run?.last_known_longitude,
+            run?.start_latitude,
+            run?.start_longitude,
+            run?.end_latitude,
+            run?.end_longitude,
+        ].some(value => value != null && value !== "");
+        if (!hasAnyCoords && pingCount === 0) {
+            els.deliveryRunLocationSummary.classList.add("muted");
+            els.deliveryRunLocationSummary.innerHTML = `<div class="muted">No location history yet.</div>`;
+            return;
+        }
+        const lastKnown = formatLocation(run?.last_known_latitude, run?.last_known_longitude);
+        const startLocation = formatLocation(run?.start_latitude, run?.start_longitude);
+        const endLocation = formatLocation(run?.end_latitude, run?.end_longitude);
+        const lastPing = formatDateTime(run?.last_ping_at);
+        const pingLabel = `${pingCount} ping${pingCount === 1 ? "" : "s"}`;
+        const lastKnownMapUrl = buildMapsUrl(run?.last_known_latitude, run?.last_known_longitude);
+        const startMapUrl = buildMapsUrl(run?.start_latitude, run?.start_longitude);
+        const endMapUrl = buildMapsUrl(run?.end_latitude, run?.end_longitude);
+        els.deliveryRunLocationSummary.classList.remove("muted");
+        els.deliveryRunLocationSummary.innerHTML = `
+            <div class="detail-card delivery-run-location-card">
+                <div class="detail-row">
+                    <span>Last Known</span>
+                    <strong class="location-inline">
+                        <span>${lastKnown}</span>
+                        ${lastKnownMapUrl ? `<a class="location-map-link" href="${lastKnownMapUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+                    </strong>
+                </div>
+                <div class="detail-row"><span>Last Ping</span><strong>${lastPing}</strong></div>
+                <div class="detail-row">
+                    <span>Start</span>
+                    <strong class="location-inline">
+                        <span>${startLocation}</span>
+                        ${startMapUrl ? `<a class="location-map-link" href="${startMapUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+                    </strong>
+                </div>
+                <div class="detail-row">
+                    <span>End</span>
+                    <strong class="location-inline">
+                        <span>${endLocation}</span>
+                        ${endMapUrl ? `<a class="location-map-link" href="${endMapUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+                    </strong>
+                </div>
+                <div class="detail-row"><span>History</span><strong>${pingLabel}</strong></div>
+            </div>
+        `;
+    }
+}
+
+async function loadDeliveryRunLocationHistory(run) {
+    if (!run || !els.deliveryRunHistory) {
+        return;
+    }
+    setDeliveryRunLocationState({ run, history: [], loading: true });
+    try {
+        const history = await apiFetch(`/delivery/runs/${run.id}/history/`);
+        const rows = ensureArray(history, "deliveryRunHistory").slice().sort((a, b) => {
+            const aTime = new Date(a.recorded_at || 0).getTime() || 0;
+            const bTime = new Date(b.recorded_at || 0).getTime() || 0;
+            return bTime - aTime;
+        });
+        setDeliveryRunLocationState({ run, history: rows, loading: false });
+        renderDeliveryRunHistoryList(rows, els.deliveryRunHistory);
+    } catch (err) {
+        setDeliveryRunLocationState({ run, history: [], loading: false, error: "Failed to load location history." });
+        renderDeliveryRunHistoryList([], els.deliveryRunHistory);
+    }
 }
 
 function renderDeliveryRunHistoryList(history, targetEl) {
@@ -10374,13 +10513,17 @@ function renderDeliveryRunHistoryList(history, targetEl) {
         const headingVal = Number(ping.heading_degrees);
         if (!Number.isNaN(headingVal)) metaParts.push(`${headingVal.toFixed(0)}°`);
         const metaLine = metaParts.length ? metaParts.join(" • ") : "—";
+        const mapsUrl = buildMapsUrl(ping.latitude, ping.longitude);
         return `
             <div class="history-row">
                 <div>
                     <strong>${formatDateTime(ping.recorded_at)}</strong>
                     <div class="history-meta">${metaLine}</div>
                 </div>
-                <div>${formatLocation(ping.latitude, ping.longitude)}</div>
+                <div class="history-location">
+                    <span>${formatLocation(ping.latitude, ping.longitude)}</span>
+                    ${mapsUrl ? `<a class="location-map-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>` : ""}
+                </div>
             </div>
         `;
     }).join("");
@@ -12945,6 +13088,13 @@ function formatLocation(lat, lng) {
     const lngText = formatCoord(lng);
     if (!latText || !lngText) return "—";
     return `${latText}, ${lngText}`;
+}
+
+function buildMapsUrl(lat, lng) {
+    const latText = formatCoord(lat);
+    const lngText = formatCoord(lng);
+    if (!latText || !lngText) return "";
+    return `https://www.google.com/maps?q=${encodeURIComponent(`${latText},${lngText}`)}`;
 }
 
 function formatPaymentMethod(method) {

@@ -142,7 +142,7 @@ def _sync_order_status_from_delivery_run(run, *, outcome):
 
 class DeliveryRunListView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor", "deliver_person"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def get(self, request):
         query = (request.query_params.get("search") or "").strip()
@@ -229,7 +229,7 @@ class DeliveryRunCreateView(APIView):
 
 class DeliveryRunDetailView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor", "deliver_person"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def get(self, request, run_id):
         run = get_object_or_404(
@@ -254,7 +254,7 @@ class DeliveryRunDetailView(APIView):
 
 class DeliveryRunHistoryView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor", "deliver_person"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def get(self, request, run_id):
         run = get_object_or_404(DeliveryRun, id=run_id)
@@ -281,7 +281,7 @@ class DeliveryRunCancelView(APIView):
 
 class DeliveryRunStartView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor", "deliver_person"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def post(self, request, run_id):
         data = request.data or {}
@@ -316,7 +316,7 @@ class DeliveryRunStartView(APIView):
 
 class DeliveryRunStatusView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor", "deliver_person"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def post(self, request, run_id):
         data = request.data or {}
@@ -348,7 +348,7 @@ class DeliveryRunStatusView(APIView):
 
 class DeliveryRunLocationView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor", "deliver_person"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def post(self, request, run_id):
         data = request.data or {}
@@ -399,7 +399,7 @@ class DeliveryRunLocationView(APIView):
 
 class DeliveryRunCompleteView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor", "deliver_person"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def post(self, request, run_id):
         data = request.data or {}
@@ -439,7 +439,7 @@ class DeliveryRunCompleteView(APIView):
 
 class DeliveryRunFailView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor", "deliver_person"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def post(self, request, run_id):
         data = request.data or {}

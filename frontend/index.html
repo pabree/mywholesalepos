@@ -134,6 +134,14 @@
                     </span>
                     <span class="tile-title">Reports</span>
                 </button>
+                <button id="mobile-tile-delivery" class="mobile-action-tile hidden">
+                    <span class="tile-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img" focusable="false">
+                            <path d="M3 7a1 1 0 0 1 1-1h11a2 2 0 0 1 2 2v1h2.6a1 1 0 0 1 .8.4l1.9 2.5a1 1 0 0 1 .2.6V16a1 1 0 0 1-1 1h-1.1a2.5 2.5 0 0 1-4.8 0H9.9a2.5 2.5 0 0 1-4.8 0H4a1 1 0 0 1-1-1V7Zm13 2H5v6h.6a2.5 2.5 0 0 1 4.8 0h5.2V9Zm2 2v2h3l-1.2-2H18ZM7 18.5A.5.5 0 1 0 7 17.5a.5.5 0 0 0 0 1Zm9.9 0A.5.5 0 1 0 17 17.5a.5.5 0 0 0 0 1Z"/>
+                        </svg>
+                    </span>
+                    <span class="tile-title">Delivery</span>
+                </button>
             </div>
         </section>
 
@@ -1939,7 +1947,18 @@
                         <button id="delivery-pod-cancel" class="btn-ghost">Cancel</button>
                     </div>
                 </div>
-                <div id="delivery-run-history" class="delivery-run-history muted">No location history yet.</div>
+                <div class="detail-section delivery-run-location-section">
+                    <div class="delivery-run-location-header">
+                        <div>
+                            <h4>Location History</h4>
+                            <div id="delivery-run-location-note" class="muted">Loading location history...</div>
+                        </div>
+                        <button id="delivery-run-location-refresh" class="btn-ghost btn-inline" type="button">Refresh</button>
+                    </div>
+                    <div id="delivery-run-location-summary" class="delivery-run-location-summary muted">No location history yet.</div>
+                    <div id="delivery-run-location-error" class="delivery-run-location-error form-error hidden"></div>
+                    <div id="delivery-run-history" class="delivery-run-history muted">No location history yet.</div>
+                </div>
                 <div id="delivery-run-error" class="form-error hidden"></div>
             </div>
         </div>
