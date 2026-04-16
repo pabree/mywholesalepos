@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-16.02";
+const APP_BUILD = "2026-04-16.03";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -2786,6 +2786,12 @@ function updateMobileDashboardTiles() {
     const canStock = canViewStock();
     const canCustomers = canViewCustomers();
     const canReports = canViewReports();
+    const canDelivery = canAccessDeliveryRun();
+    console.debug("[mobile-dashboard] role state", {
+        currentUserRole,
+        normalizedRole: normalizeRole(currentUserRole),
+        canDelivery,
+    });
 
     if (els.mobileTileSell) {
         els.mobileTileSell.classList.toggle("disabled", !canSell);
