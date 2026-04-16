@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-16.01";
+const APP_BUILD = "2026-04-16.02";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -13612,7 +13612,12 @@ function applyRoleUI() {
 }
 
 function normalizeRole(role) {
-    return (role || "").toString().trim().toLowerCase();
+    return (role || "")
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replace(/[\s-]+/g, "_")
+        .replace(/_+/g, "_");
 }
 
 function canImportProducts() {
