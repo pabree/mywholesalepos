@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-17.01";
+const APP_BUILD = "2026-04-17.02";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -2403,8 +2403,9 @@ function renderMobileCategoryChips() {
     const chips = [
         `<button class="mobile-category-chip ${mobileActiveCategory === "all" ? "active" : ""}" data-category="all">All</button>`,
         ...mobileCategories.map((c) => {
-            const isActive = mobileActiveCategory === c.name;
-            return `<button class="mobile-category-chip ${isActive ? "active" : ""}" data-category="${esc(c.name)}">${esc(c.name)}</button>`;
+            const categoryId = c.id || "";
+            const isActive = mobileActiveCategory === categoryId;
+            return `<button class="mobile-category-chip ${isActive ? "active" : ""}" data-category="${esc(categoryId)}">${esc(c.name)}</button>`;
         }),
     ];
     els.mobileCategoryChips.innerHTML = chips.join("");
@@ -2445,8 +2446,9 @@ function renderMobileStockCategoryChips() {
     const chips = [
         `<button class="mobile-category-chip ${mobileStockCategory === "all" ? "active" : ""}" data-category="all">All</button>`,
         ...mobileCategories.map((c) => {
-            const isActive = mobileStockCategory === c.name;
-            return `<button class="mobile-category-chip ${isActive ? "active" : ""}" data-category="${esc(c.name)}">${esc(c.name)}</button>`;
+            const categoryId = c.id || "";
+            const isActive = mobileStockCategory === categoryId;
+            return `<button class="mobile-category-chip ${isActive ? "active" : ""}" data-category="${esc(categoryId)}">${esc(c.name)}</button>`;
         }),
     ];
     els.mobileStockCategoryChips.innerHTML = chips.join("");
@@ -2802,43 +2804,20 @@ function updateMobileDashboardTiles() {
     const canCustomers = canViewCustomers();
     const canReports = canViewReports();
     const canDelivery = canAccessDeliveryRun();
-    console.debug("[mobile-dashboard] role state", {
-        currentUserRoleRaw: currentUserRole,
-        currentUserRoleResolved: getResolvedUserRole(),
-        currentUserRole,
-        normalizedRole: normalizeRole(currentUserRole),
-        canDelivery,
-        deliveryTileExists: Boolean(els.mobileTileDelivery),
-        deliveryTileClassName: els.mobileTileDelivery?.className || null,
-        deliveryTileDisplay: els.mobileTileDelivery ? getComputedStyle(els.mobileTileDelivery).display : null,
-    });
+    const isDelivery = isDeliveryRole();
+    const setTileVisible = (tile, visible) => {
+        if (!tile) return;
+        tile.classList.toggle("hidden", !visible);
+        tile.disabled = !visible;
+        tile.classList.toggle("disabled", !visible);
+    };
 
-    if (els.mobileTileSell) {
-        els.mobileTileSell.classList.toggle("disabled", !canSell);
-        els.mobileTileSell.disabled = !canSell;
-    }
-    if (els.mobileTileSales) {
-        els.mobileTileSales.classList.toggle("disabled", !canSales);
-        els.mobileTileSales.disabled = !canSales;
-    }
-    if (els.mobileTileStock) {
-        els.mobileTileStock.classList.toggle("disabled", !canStock);
-        els.mobileTileStock.disabled = !canStock;
-    }
-    if (els.mobileTileCustomers) {
-        els.mobileTileCustomers.classList.toggle("disabled", !canCustomers);
-        els.mobileTileCustomers.disabled = !canCustomers;
-    }
-    if (els.mobileTileReports) {
-        els.mobileTileReports.classList.toggle("disabled", !canReports);
-        els.mobileTileReports.disabled = !canReports;
-        els.mobileTileReports.classList.toggle("hidden", !canReports);
-    }
-    if (els.mobileTileDelivery) {
-        els.mobileTileDelivery.classList.toggle("disabled", !canDelivery);
-        els.mobileTileDelivery.disabled = !canDelivery;
-        els.mobileTileDelivery.classList.toggle("hidden", !canDelivery);
-    }
+    setTileVisible(els.mobileTileSell, canSell && !isDelivery);
+    setTileVisible(els.mobileTileSales, canSales && !isDelivery);
+    setTileVisible(els.mobileTileStock, canStock && !isDelivery);
+    setTileVisible(els.mobileTileCustomers, canCustomers && !isDelivery);
+    setTileVisible(els.mobileTileReports, canReports && !isDelivery);
+    setTileVisible(els.mobileTileDelivery, canDelivery);
 }
 
 async function loadMobileDashboardSummary() {
@@ -3092,7 +3071,7 @@ async function loadMobileStock({ query = "" } = {}) {
         }
     }
 
-    const params = { limit: 20 };
+    const params = { limit: 100 };
     if (branchId) params.branch = branchId;
     if (query) params.search = query;
     if (mobileStockCategory && mobileStockCategory !== "all") {
@@ -3102,9 +3081,9 @@ async function loadMobileStock({ query = "" } = {}) {
     const token = ++mobileStockToken;
     els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Loading stock…</div>`;
     try {
-        const data = await apiFetch(withParams("/inventory/products/", params));
+        const data = await apiFetchAll(withParams("/inventory/products/", params), { limit: 100 });
         if (token !== mobileStockToken) return;
-        const results = ensureArray(data?.results ?? data, "mobileStock");
+        const results = ensureArray(data, "mobileStock");
         updateMobileStockFilterNote();
         if (!results.length) {
             els.mobileStockList.innerHTML = `<div class="sale-entry-empty">No matching stock.</div>`;
@@ -8772,10 +8751,10 @@ function renderMobileProducts() {
     const hasQuery = Boolean(query);
     let list = isMobileLayout() && hasQuery && Array.isArray(mobileSearchResults)
         ? mobileSearchResults
-        : lastFilteredProducts.slice(0, 20);
+        : lastFilteredProducts;
 
     if (mobileActiveCategory && mobileActiveCategory !== "all") {
-        list = list.filter((p) => (p.category || "").toString() === mobileActiveCategory);
+        list = list.filter((p) => (p.category_id || "").toString() === mobileActiveCategory);
     }
 
     if (mobileSearchLoading) {
@@ -8849,15 +8828,12 @@ async function fetchMobileSearch(query) {
         branch: branchId,
         search: query,
         category: category || undefined,
-        limit: 20,
-        offset: 0,
     });
     mobileSearchLoading = true;
     try {
-        const data = await apiFetch(endpoint);
+        const data = await apiFetchAll(endpoint, { limit: 100 });
         if (token !== mobileSearchToken) return;
-        const page = normalizePaginated(data);
-        mobileSearchResults = ensureArray(page, "mobile_search_results");
+        mobileSearchResults = ensureArray(data, "mobile_search_results");
     } catch (err) {
         if (token !== mobileSearchToken) return;
         mobileSearchResults = [];

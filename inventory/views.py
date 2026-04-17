@@ -165,6 +165,7 @@ class ProductListView(APIView):
                 "id": str(product.id),
                 "name": product.name,
                 "sku": product.sku,
+                "category_id": str(product.category_id) if product.category_id else None,
                 "category": product.category.name if product.category else None,
                 "cost_price": str(product.cost_price),
                 "selling_price": str(product.retail_price or product.selling_price),
