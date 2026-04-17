@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-16.05";
+const APP_BUILD = "2026-04-17.01";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -171,6 +171,7 @@ let backOfficeDeliveryQuery = "";
 let backOfficeDeliveryOffset = 0;
 let backOfficeDeliveryLimit = 20;
 let backOfficeDeliveryPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficeDeliveryScope = localStorage.getItem("backoffice_delivery_scope") || "active";
 let currentDeliveryRun = null;
 let backOfficePayments = [];
 let backOfficePaymentsQuery = "";
@@ -509,6 +510,8 @@ const els = {
     backofficeOrdersPage: document.getElementById("backoffice-orders-page"),
     backofficeOrdersExport: document.getElementById("backoffice-orders-export"),
     backofficeDeliverySearch: document.getElementById("backoffice-delivery-search"),
+    backofficeDeliveryScopeActive: document.getElementById("backoffice-delivery-scope-active"),
+    backofficeDeliveryScopeAll: document.getElementById("backoffice-delivery-scope-all"),
     backofficeDeliveryStatus: document.getElementById("backoffice-delivery-status"),
     backofficeDeliveryPerson: document.getElementById("backoffice-delivery-person"),
     backofficeDeliveryBranch: document.getElementById("backoffice-delivery-branch"),
@@ -1625,6 +1628,18 @@ document.addEventListener("DOMContentLoaded", () => {
             backOfficeDeliveryQuery = els.backofficeDeliverySearch.value || "";
             backOfficeDeliveryOffset = 0;
             loadBackOfficeDeliveryRuns();
+        });
+    }
+    if (els.backofficeDeliveryScopeActive) {
+        els.backofficeDeliveryScopeActive.addEventListener("click", () => {
+            if (!canViewDeliveryTracking()) return;
+            setBackOfficeDeliveryScope("active");
+        });
+    }
+    if (els.backofficeDeliveryScopeAll) {
+        els.backofficeDeliveryScopeAll.addEventListener("click", () => {
+            if (!canViewDeliveryTracking()) return;
+            setBackOfficeDeliveryScope("all");
         });
     }
     if (els.backofficeDeliveryStatus) {
@@ -3322,6 +3337,11 @@ async function loadMobileReports() {
             return;
         }
         summary = rawBody;
+        console.debug("[mobile-reports] response ok", {
+            endpoint,
+            status: res.status,
+            payload: summary,
+        });
     } catch (err) {
         console.error("[mobile-reports] unexpected error", { endpoint, error: err });
         if (els.mobileReportsContent) els.mobileReportsContent.classList.add("hidden");
@@ -4838,6 +4858,7 @@ function setBackOfficeSection(section) {
         loadBackOfficeOrders();
     }
     if (backOfficeActiveSection === "delivery") {
+        syncBackOfficeDeliveryScopeUI();
         loadBackOfficeDeliveryRuns();
     }
     if (backOfficeActiveSection === "payments") {
@@ -4848,6 +4869,24 @@ function setBackOfficeSection(section) {
     }
     if (backOfficeActiveSection === "setup") {
         setBackOfficeSetupSection(backOfficeSetupSection || "branches");
+    }
+}
+
+function setBackOfficeDeliveryScope(scope) {
+    const nextScope = scope === "all" ? "all" : "active";
+    backOfficeDeliveryScope = nextScope;
+    localStorage.setItem("backoffice_delivery_scope", nextScope);
+    syncBackOfficeDeliveryScopeUI();
+    backOfficeDeliveryOffset = 0;
+    loadBackOfficeDeliveryRuns();
+}
+
+function syncBackOfficeDeliveryScopeUI() {
+    if (els.backofficeDeliveryScopeActive) {
+        els.backofficeDeliveryScopeActive.classList.toggle("active", backOfficeDeliveryScope === "active");
+    }
+    if (els.backofficeDeliveryScopeAll) {
+        els.backofficeDeliveryScopeAll.classList.toggle("active", backOfficeDeliveryScope === "all");
     }
 }
 
@@ -6783,14 +6822,18 @@ async function loadBackOfficeDeliveryRuns() {
             loadBackOfficeBranches(),
             loadBackOfficeDeliveryPeople(),
         ]);
-        const endpoint = withParams("/delivery/runs/", {
+        const queryParams = {
             limit: backOfficeDeliveryLimit,
             offset: backOfficeDeliveryOffset,
             search: backOfficeDeliveryQuery,
             status: els.backofficeDeliveryStatus?.value || "",
             branch: els.backofficeDeliveryBranch?.value || "",
             delivery_person: els.backofficeDeliveryPerson?.value || "",
-        });
+        };
+        if (backOfficeDeliveryScope === "active") {
+            queryParams.active = 1;
+        }
+        const endpoint = withParams("/delivery/runs/", queryParams);
         const data = await apiFetch(endpoint);
         const page = normalizePaginated(data);
         backOfficeDeliveryPage = page;
@@ -6819,7 +6862,10 @@ async function loadBackOfficeDeliveryPeople() {
     if (!els.backofficeDeliveryPerson) return;
     await ensureAssignableUsers();
     const current = els.backofficeDeliveryPerson.value || "";
-    const deliveryUsers = assignableUsers.filter(u => normalizeRole(u.role) === "deliver_person");
+    const deliveryUsers = assignableUsers.filter(u => {
+        const role = normalizeRole(u.role);
+        return role === "deliver_person" || role === "delivery_person";
+    });
     const options = [
         `<option value="">All delivery persons</option>`,
         ...deliveryUsers.map(user => {
@@ -6847,7 +6893,13 @@ function renderBackOfficeDeliveryRuns() {
         const branchName = run.branch?.name || "—";
         const statusBadge = renderDeliveryStatusBadge(run.status);
         const lastPing = formatDateTime(run.last_ping_at);
-        const lastLocation = formatLocation(run.last_known_latitude, run.last_known_longitude);
+        const lastMapsUrl = buildMapsUrl(run.last_known_latitude, run.last_known_longitude);
+        const locationHtml = renderLocationDisplay(run.last_known_latitude, run.last_known_longitude, {
+            coordsClass: "location-coords location-coords-small",
+        });
+        const mapAction = lastMapsUrl
+            ? `<a class="btn-ghost btn-inline" href="${lastMapsUrl}" target="_blank" rel="noopener noreferrer">Open in Maps</a>`
+            : "";
         return `
             <tr>
                 <td>${orderId}</td>
@@ -6856,11 +6908,17 @@ function renderBackOfficeDeliveryRuns() {
                 <td>${esc(branchName)}</td>
                 <td>${statusBadge}</td>
                 <td>${lastPing}</td>
-                <td>${lastLocation}</td>
-                <td><button class="btn-ghost" onclick="openBackOfficeDeliveryDetail('${run.id}')">View</button></td>
+                <td><span class="delivery-location-cell" data-delivery-location="${run.id}">${locationHtml}</span></td>
+                <td>
+                    <div class="delivery-row-actions">
+                        <button class="btn-ghost" onclick="openBackOfficeDeliveryDetail('${run.id}')">View</button>
+                        ${mapAction}
+                    </div>
+                </td>
             </tr>
         `;
     }).join("");
+    enhanceFriendlyLocationLabels(tbody);
 }
 
 async function openBackOfficeDeliveryDetail(runId) {
@@ -6931,9 +6989,9 @@ function renderBackOfficeDeliveryDetail(run, history = []) {
             </div>
             <div class="detail-card">
                 <div class="detail-row"><span>Last Ping</span><strong>${formatDateTime(run.last_ping_at)}</strong></div>
-                <div class="detail-row"><span>Last Location</span><strong>${lastLocation}</strong></div>
-                <div class="detail-row"><span>Start</span><strong>${formatLocation(run.start_latitude, run.start_longitude)}</strong></div>
-                <div class="detail-row"><span>End</span><strong>${formatLocation(run.end_latitude, run.end_longitude)}</strong></div>
+                <div class="detail-row"><span>Last Location</span><strong class="location-inline">${renderLocationDisplay(run.last_known_latitude, run.last_known_longitude, { mapsUrl: buildMapsUrl(run.last_known_latitude, run.last_known_longitude) })}</strong></div>
+                <div class="detail-row"><span>Start</span><strong class="location-inline">${renderLocationDisplay(run.start_latitude, run.start_longitude, { mapsUrl: buildMapsUrl(run.start_latitude, run.start_longitude) })}</strong></div>
+                <div class="detail-row"><span>End</span><strong class="location-inline">${renderLocationDisplay(run.end_latitude, run.end_longitude, { mapsUrl: buildMapsUrl(run.end_latitude, run.end_longitude) })}</strong></div>
             </div>
         </div>
         ${orderAction}
@@ -6943,6 +7001,7 @@ function renderBackOfficeDeliveryDetail(run, history = []) {
             <div class="delivery-run-history">${historyHtml}</div>
         </div>
     `;
+    enhanceFriendlyLocationLabels(els.backofficeDeliveryDetailBody);
 }
 
 async function loadBackOfficePayments() {
@@ -10179,6 +10238,10 @@ function canApproveCustomerCredit() {
 
 function canAccessDeliveryRun() {
     return isDeliveryRole();
+}
+
+function canViewDeliveryTracking() {
+    return ["supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }
 
 function openCustomerOrdersModal() {

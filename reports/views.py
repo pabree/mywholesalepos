@@ -57,11 +57,11 @@ def _extract_date_range(request, default_days=7):
     return start_date, end_date, None
 
 
-def _apply_sale_range(qs, start_date, end_date):
+def _apply_sale_range(qs, start_date, end_date, date_field="completed_at"):
     if start_date:
-        qs = qs.filter(completed_at__date__gte=start_date)
+        qs = qs.filter(**{f"{date_field}__date__gte": start_date})
     if end_date:
-        qs = qs.filter(completed_at__date__lte=end_date)
+        qs = qs.filter(**{f"{date_field}__date__lte": end_date})
     return qs
 
 
@@ -76,7 +76,7 @@ def _top_products(*, start_date=None, end_date=None, branch_id=None, limit=10):
     qs = SaleItem.objects.filter(sale__status="completed")
     if branch_id:
         qs = qs.filter(sale__branch_id=branch_id)
-    qs = _apply_sale_range(qs, start_date, end_date)
+    qs = _apply_sale_range(qs, start_date, end_date, date_field="sale__completed_at")
     rows = (
         qs.values("product_id", "product__name")
         .annotate(

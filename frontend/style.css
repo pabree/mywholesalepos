@@ -1353,6 +1353,17 @@ body.offline .offline-status {
     align-items: center;
 }
 
+.backoffice-delivery-scope {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.backoffice-delivery-scope .backoffice-subtab {
+    min-width: 72px;
+}
+
 .backoffice-table-wrap {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -1386,6 +1397,29 @@ body.offline .offline-status {
 
 .backoffice-table tbody tr:hover {
     background: var(--bg-card-hover);
+}
+
+.delivery-location-cell {
+    display: block;
+    max-width: 100%;
+}
+
+.delivery-location-cell .location-display {
+    align-items: flex-start;
+    text-align: left;
+}
+
+.delivery-location-cell .location-label,
+.delivery-location-cell .location-coords {
+    text-align: left;
+}
+
+.delivery-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-start;
 }
 
 .reports-summary-grid {
