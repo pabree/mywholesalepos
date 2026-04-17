@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-17.02";
+const APP_BUILD = "2026-04-17.04";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -935,22 +935,109 @@ function updateOverlayState() {
     document.body.classList.toggle("overlay-open", hasOpenOverlay);
 }
 
-function openOverlay(overlayEl, { closeOthers = true } = {}) {
+function isMobileHistoryOverlay(id) {
+    return MOBILE_HISTORY_OVERLAYS.has(id);
+}
+
+function getTopMobileHistoryOverlayId() {
+    for (let i = overlayStack.length - 1; i >= 0; i -= 1) {
+        const id = overlayStack[i];
+        if (isMobileHistoryOverlay(id)) {
+            const overlay = document.getElementById(id);
+            if (overlay && !overlay.classList.contains("hidden")) return id;
+        }
+    }
+    for (const id of MOBILE_HISTORY_OVERLAYS) {
+        const overlay = document.getElementById(id);
+        if (overlay && !overlay.classList.contains("hidden")) return id;
+    }
+    return null;
+}
+
+function getMobileOverlayHistoryState(overlayId = getTopMobileHistoryOverlayId()) {
+    if (!overlayId) return null;
+    const state = { id: overlayId };
+    switch (overlayId) {
+        case "mobile-sale-detail-modal":
+            state.saleId = currentMobileSaleDetailId || null;
+            break;
+        case "mobile-customer-detail-modal":
+        case "mobile-customer-payment-modal":
+            state.customerId = currentMobileCustomerId || null;
+            break;
+        case "mobile-success-modal":
+            state.saleId = lastMobileSaleId || null;
+            break;
+        case "receipt-modal":
+            state.saleId = currentMobileSaleDetailId || lastMobileSaleId || null;
+            break;
+        default:
+            break;
+    }
+    return state;
+}
+
+function getMobileHistoryStateFromUI() {
+    return {
+        mobileNav: true,
+        tab: normalizeMobileTab(activeMobileTab),
+        overlay: getMobileOverlayHistoryState(),
+    };
+}
+
+function sameMobileHistoryState(a, b) {
+    return JSON.stringify(a || null) === JSON.stringify(b || null);
+}
+
+function syncMobileHistoryState(mode = "push") {
+    if (!isMobileLayout() || mobileHistorySyncSuspended) return;
+    const state = getMobileHistoryStateFromUI();
+    const current = window.history.state;
+    if (mode === "replace" || !current || !current.mobileNav || sameMobileHistoryState(current, state)) {
+        window.history.replaceState(state, "", window.location.href);
+        return;
+    }
+    window.history.pushState(state, "", window.location.href);
+}
+
+function closeOpenMobileHistoryOverlays() {
+    Array.from(MOBILE_HISTORY_OVERLAYS).forEach((id) => {
+        const overlay = document.getElementById(id);
+        if (overlay && !overlay.classList.contains("hidden")) {
+            closeOverlay(overlay, { syncHistory: false });
+        }
+    });
+}
+
+function openOverlay(overlayEl, { closeOthers = true, syncHistory = true } = {}) {
     if (!overlayEl) return;
+    const trackHistory = syncHistory && isMobileLayout() && isMobileHistoryOverlay(overlayEl.id) && !mobileHistorySyncSuspended;
+    if (trackHistory) {
+        mobileHistorySyncSuspended = true;
+    }
     if (closeOthers) closeAllOverlays({ except: overlayEl });
+    if (trackHistory) {
+        mobileHistorySyncSuspended = false;
+    }
     overlayEl.classList.remove("hidden");
     const existingIndex = overlayStack.indexOf(overlayEl.id);
     if (existingIndex !== -1) overlayStack.splice(existingIndex, 1);
     overlayStack.push(overlayEl.id);
     updateOverlayState();
+    if (syncHistory && isMobileLayout() && isMobileHistoryOverlay(overlayEl.id)) {
+        syncMobileHistoryState("push");
+    }
 }
 
-function closeOverlay(overlayEl) {
+function closeOverlay(overlayEl, { syncHistory = true } = {}) {
     if (!overlayEl) return;
     overlayEl.classList.add("hidden");
     const index = overlayStack.indexOf(overlayEl.id);
     if (index !== -1) overlayStack.splice(index, 1);
     updateOverlayState();
+    if (syncHistory && isMobileLayout() && isMobileHistoryOverlay(overlayEl.id)) {
+        syncMobileHistoryState("replace");
+    }
 }
 
 function closeOverlayById(id) {
@@ -2323,20 +2410,145 @@ function isMobileLayout() {
     return window.matchMedia && window.matchMedia("(max-width: 900px)").matches;
 }
 
-function setMobileTab(tab) {
+const MOBILE_HISTORY_TABS = new Set(["home", "products", "sales", "stock", "customers", "reports", "checkout"]);
+const MOBILE_HISTORY_OVERLAYS = new Set([
+    "mobile-sale-detail-modal",
+    "mobile-customer-detail-modal",
+    "mobile-customer-payment-modal",
+    "mobile-customer-modal",
+    "mobile-success-modal",
+    "receipt-modal",
+    "customer-orders-modal",
+    "credit-modal",
+    "ledger-modal",
+    "returns-modal",
+    "inventory-scan-modal",
+    "pos-scan-modal",
+    "delivery-run-modal",
+]);
+let mobileHistorySyncSuspended = false;
+
+function canAccessMobileTab(tab) {
+    const role = getResolvedUserRole();
+    switch (tab) {
+        case "products":
+        case "checkout":
+            return ["cashier", "salesperson", "supervisor", "admin"].includes(role);
+        case "sales":
+            return canViewMobileSales();
+        case "stock":
+            return canViewStock();
+        case "customers":
+            return canViewCustomers();
+        case "reports":
+            return canViewReports();
+        case "home":
+        default:
+            return true;
+    }
+}
+
+function normalizeMobileTab(tab) {
+    const value = (tab || "home").toString();
+    if (!MOBILE_HISTORY_TABS.has(value)) return "home";
+    return canAccessMobileTab(value) ? value : "home";
+}
+
+function restoreMobileHistoryState(state) {
+    if (!isMobileLayout()) return;
+    const nextTab = normalizeMobileTab(state?.tab || "home");
+    const overlayState = state?.overlay && isMobileHistoryOverlay(state.overlay.id) ? state.overlay : null;
+    mobileHistorySyncSuspended = true;
+    setMobileTab(nextTab, { syncHistory: false });
+    closeOpenMobileHistoryOverlays();
+
+    if (overlayState) {
+        switch (overlayState.id) {
+            case "mobile-sale-detail-modal":
+                if (overlayState.saleId && canViewMobileSales()) openMobileSaleDetail(overlayState.saleId);
+                break;
+            case "mobile-customer-detail-modal":
+                if (overlayState.customerId && canViewCustomers()) openMobileCustomerDetail(overlayState.customerId);
+                break;
+            case "mobile-customer-payment-modal":
+                if (overlayState.customerId && canViewCustomers() && canRecordCustomerPayment()) {
+                    currentMobileCustomerId = overlayState.customerId;
+                    openMobileCustomerPaymentModal();
+                }
+                break;
+            case "mobile-success-modal":
+                if (overlayState.saleId && canPerformSales()) {
+                    lastMobileSaleId = overlayState.saleId;
+                }
+                if (canPerformSales()) openMobileSuccessModal();
+                break;
+            case "receipt-modal":
+                if (overlayState.saleId && canViewMobileSales()) {
+                    lastMobileSaleId = overlayState.saleId;
+                    showReceipt(overlayState.saleId);
+                }
+                break;
+            case "mobile-customer-modal":
+                if (canCreateCustomer()) openMobileCustomerModal();
+                break;
+            case "delivery-run-modal":
+                if (canAccessDeliveryRun()) openDeliveryRunModal();
+                break;
+            case "customer-orders-modal":
+                if (canManageCustomerOrders()) openCustomerOrdersModal();
+                break;
+            case "credit-modal":
+                if (canPerformSales()) openCreditModal();
+                break;
+            case "ledger-modal":
+                if (canViewLedger()) openLedgerModal();
+                break;
+            case "returns-modal":
+                if (canProcessReturns()) openReturnsModal();
+                break;
+            case "inventory-scan-modal":
+                if (canPerformSales()) openInventoryScanModal();
+                break;
+            case "pos-scan-modal":
+                if (canPerformSales()) openPosScanModal();
+                break;
+            default:
+                break;
+        }
+    }
+
+    mobileHistorySyncSuspended = false;
+    syncMobileHistoryState("replace");
+}
+
+function setMobileTab(tab, { syncHistory = true, historyMode = "push" } = {}) {
     if (!tab) return;
-    activeMobileTab = tab;
+    const nextTab = normalizeMobileTab(tab);
+    activeMobileTab = nextTab;
     if (isMobileLayout()) {
-        document.body.dataset.mobileTab = tab;
+        document.body.dataset.mobileTab = nextTab;
+    }
+    let effectiveHistoryMode = historyMode;
+    if (syncHistory && !mobileHistorySyncSuspended) {
+        const hasOpenMobileOverlay = Boolean(getTopMobileHistoryOverlayId());
+        if (hasOpenMobileOverlay) {
+            mobileHistorySyncSuspended = true;
+            closeOpenMobileHistoryOverlays();
+            mobileHistorySyncSuspended = false;
+            effectiveHistoryMode = "replace";
+        }
     }
     if (els.mobileNavButtons && els.mobileNavButtons.length) {
-        const navTab = ["sales", "stock", "customers", "reports"].includes(tab) ? "home" : tab;
+        const navTab = ["sales", "stock", "customers", "reports"].includes(nextTab) ? "home" : nextTab;
         els.mobileNavButtons.forEach(btn => {
             const active = btn.dataset.tab === navTab;
             btn.classList.toggle("active", active);
         });
     }
-    refreshMobileTab(tab);
+    refreshMobileTab(nextTab);
+    if (syncHistory && !mobileHistorySyncSuspended) {
+        syncMobileHistoryState(effectiveHistoryMode);
+    }
     window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -2355,10 +2567,9 @@ function initMobileNav() {
 
     const apply = () => {
         if (isMobileLayout()) {
-            if (!document.body.dataset.mobileTab) {
-                setMobileTab(activeMobileTab);
-            } else {
-                setMobileTab(document.body.dataset.mobileTab);
+            if (!window.history.state || !window.history.state.mobileNav) {
+                setMobileTab(activeMobileTab, { syncHistory: false });
+                syncMobileHistoryState("replace");
             }
         } else {
             document.body.removeAttribute("data-mobile-tab");
@@ -2370,6 +2581,19 @@ function initMobileNav() {
         requestAnimationFrame(apply);
     });
 }
+
+window.addEventListener("popstate", (event) => {
+    if (!isMobileLayout()) return;
+    if (event.state && event.state.mobileNav) {
+        restoreMobileHistoryState(event.state);
+        return;
+    }
+    mobileHistorySyncSuspended = true;
+    closeOpenMobileHistoryOverlays();
+    setMobileTab("home", { syncHistory: false });
+    mobileHistorySyncSuspended = false;
+    syncMobileHistoryState("replace");
+});
 
 function updateMobileRoleBanner() {
     if (!els.mobileRoleBanner) return;
@@ -13627,6 +13851,12 @@ async function loadInitialData() {
         loadHeldSales(),
     ]);
     if (isMobileLayout()) {
+        if (window.history.state && window.history.state.mobileNav) {
+            restoreMobileHistoryState(window.history.state);
+        } else {
+            setMobileTab(activeMobileTab, { syncHistory: false });
+            syncMobileHistoryState("replace");
+        }
         loadMobileDashboardSummary();
         if (activeMobileTab === "sales") loadMobileSales();
         if (activeMobileTab === "stock") loadMobileStock({ query: mobileStockQuery });
@@ -13678,6 +13908,7 @@ async function loginForToken() {
 }
 
 function clearAuth() {
+    mobileHistorySyncSuspended = true;
     setApiToken("");
     setUserRole("");
     currentUser = null;
@@ -13689,6 +13920,12 @@ function clearAuth() {
     if (els.ledgerModal) closeOverlay(els.ledgerModal);
     if (els.returnsModal) closeOverlay(els.returnsModal);
     if (els.receiptModal) closeOverlay(els.receiptModal);
+    closeOpenMobileHistoryOverlays();
+    setMobileTab("home", { syncHistory: false });
+    mobileHistorySyncSuspended = false;
+    if (isMobileLayout()) {
+        syncMobileHistoryState("replace");
+    }
 }
 
 function logout() {
