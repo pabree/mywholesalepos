@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-17.04";
+const APP_BUILD = "2026-04-18.03";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -156,6 +156,10 @@ let mobileCustomersLoading = false;
 let mobileCustomersTimer = null;
 let currentMobileCustomerId = null;
 let mobileCustomerPaymentSaving = false;
+const MOBILE_UI_STATE_KEY = "mobile_ui_state_v1";
+let mobileUiState = loadMobileUiState();
+let mobileStateRestoring = false;
+let mobilePendingScrollRestore = null;
 let backOfficeSales = [];
 let backOfficeSalesQuery = "";
 let backOfficeSalesOffset = 0;
@@ -585,6 +589,7 @@ const els = {
     backofficeProductTable: document.getElementById("backoffice-product-table"),
     backofficeProductAdd: document.getElementById("backoffice-product-add"),
     backofficeProductTemplate: document.getElementById("backoffice-product-template"),
+    backofficeProductExport: document.getElementById("backoffice-product-export"),
     backofficeProductImport: document.getElementById("backoffice-product-import"),
     backofficeProductFile: document.getElementById("backoffice-product-file"),
     backofficeProductResult: document.getElementById("backoffice-product-result"),
@@ -971,6 +976,11 @@ function getMobileOverlayHistoryState(overlayId = getTopMobileHistoryOverlayId()
         case "receipt-modal":
             state.saleId = currentMobileSaleDetailId || lastMobileSaleId || null;
             break;
+        case "customer-orders-modal":
+            if (Array.isArray(customerOrdersStatusList) && customerOrdersStatusList.length) {
+                state.statusList = [...customerOrdersStatusList];
+            }
+            break;
         default:
             break;
     }
@@ -981,12 +991,278 @@ function getMobileHistoryStateFromUI() {
     return {
         mobileNav: true,
         tab: normalizeMobileTab(activeMobileTab),
+        branchId: els.branchSelect?.value || "",
+        screenState: captureMobileScreenState(activeMobileTab),
         overlay: getMobileOverlayHistoryState(),
     };
 }
 
 function sameMobileHistoryState(a, b) {
     return JSON.stringify(a || null) === JSON.stringify(b || null);
+}
+
+function getEmptyMobileUiState() {
+    return {
+        version: 1,
+        role: "",
+        activeTab: "home",
+        branchId: "",
+        tabs: {},
+    };
+}
+
+function loadMobileUiState() {
+    try {
+        const raw = sessionStorage.getItem(MOBILE_UI_STATE_KEY);
+        if (!raw) return getEmptyMobileUiState();
+        const parsed = JSON.parse(raw);
+        if (!parsed || parsed.version !== 1 || typeof parsed !== "object") {
+            return getEmptyMobileUiState();
+        }
+        return {
+            ...getEmptyMobileUiState(),
+            ...parsed,
+            tabs: parsed.tabs && typeof parsed.tabs === "object" ? parsed.tabs : {},
+        };
+    } catch (err) {
+        return getEmptyMobileUiState();
+    }
+}
+
+function persistMobileUiState() {
+    try {
+        sessionStorage.setItem(MOBILE_UI_STATE_KEY, JSON.stringify(mobileUiState));
+    } catch (err) {
+        // Ignore storage failures; state persistence is best-effort.
+    }
+}
+
+function clearMobileUiState() {
+    mobileUiState = getEmptyMobileUiState();
+    mobilePendingScrollRestore = null;
+    try {
+        sessionStorage.removeItem(MOBILE_UI_STATE_KEY);
+    } catch (err) {
+        // Ignore storage failures.
+    }
+}
+
+function getMobileSavedTabState(tab = activeMobileTab) {
+    const normalized = normalizeMobileTab(tab);
+    if (!mobileUiState || mobileUiState.role && mobileUiState.role !== getResolvedUserRole()) {
+        return null;
+    }
+    if (!canAccessMobileTab(normalized)) return null;
+    const state = mobileUiState.tabs?.[normalized];
+    if (!state || typeof state !== "object") return null;
+    return state;
+}
+
+function getMobilePersistedActiveTab() {
+    if (!mobileUiState || mobileUiState.role && mobileUiState.role !== getResolvedUserRole()) {
+        return "home";
+    }
+    const tab = normalizeMobileTab(mobileUiState.activeTab || "home");
+    return canAccessMobileTab(tab) ? tab : "home";
+}
+
+function getMobilePersistedBranchId() {
+    if (!mobileUiState || mobileUiState.role && mobileUiState.role !== getResolvedUserRole()) {
+        return "";
+    }
+    return mobileUiState.branchId || "";
+}
+
+function captureMobileScreenState(tab = activeMobileTab) {
+    const normalized = normalizeMobileTab(tab);
+    const scrollY = Math.max(0, window.scrollY || window.pageYOffset || 0);
+    switch (normalized) {
+        case "products":
+            return {
+                query: (els.productSearch?.value || "").trim(),
+                category: mobileActiveCategory || "all",
+                scrollY,
+            };
+        case "sales":
+            return {
+                filter: mobileSalesFilter || "today",
+                scrollY,
+            };
+        case "stock":
+            return {
+                query: mobileStockQuery || "",
+                category: mobileStockCategory || "all",
+                lowOnly: Boolean(mobileStockLowOnly),
+                scrollY,
+            };
+        case "customers":
+            return {
+                query: mobileCustomersQuery || "",
+                scrollY,
+            };
+        case "reports":
+        case "checkout":
+        case "home":
+        default:
+            return { scrollY };
+    }
+}
+
+function upsertMobileTabState(tab, snapshot = {}, { preserveScroll = true } = {}) {
+    if (!isMobileLayout()) return;
+    const normalized = normalizeMobileTab(tab);
+    if (!canAccessMobileTab(normalized)) return;
+    const existing = mobileUiState.tabs?.[normalized] || {};
+    const nextState = {
+        ...existing,
+        ...snapshot,
+    };
+    if (preserveScroll && existing.scrollY !== undefined && snapshot.scrollY === undefined) {
+        nextState.scrollY = existing.scrollY;
+    }
+    mobileUiState.role = getResolvedUserRole();
+    mobileUiState.activeTab = normalized;
+    mobileUiState.branchId = els.branchSelect?.value || "";
+    mobileUiState.tabs[normalized] = nextState;
+    persistMobileUiState();
+}
+
+function persistMobileScreenState(tab = activeMobileTab) {
+    if (!isMobileLayout() || mobileStateRestoring) return;
+    upsertMobileTabState(tab, captureMobileScreenState(tab), { preserveScroll: false });
+}
+
+function restoreMobileBranchSelection(branchId = getMobilePersistedBranchId()) {
+    if (!branchId || !els.branchSelect) return false;
+    const hasOption = Array.from(els.branchSelect.options || []).some((opt) => opt.value === branchId);
+    if (!hasOption) return false;
+    els.branchSelect.value = branchId;
+    return true;
+}
+
+function queueMobileScrollRestore(tab, scrollY) {
+    if (scrollY === null || scrollY === undefined) return;
+    const normalized = normalizeMobileTab(tab);
+    const nextToken = (mobilePendingScrollRestore?.token || 0) + 1;
+    mobilePendingScrollRestore = {
+        tab: normalized,
+        scrollY: Math.max(0, Number(scrollY) || 0),
+        token: nextToken,
+    };
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (!mobilePendingScrollRestore || mobilePendingScrollRestore.token !== nextToken) return;
+            if (normalizeMobileTab(activeMobileTab) !== normalized) return;
+            window.scrollTo({ top: mobilePendingScrollRestore.scrollY, behavior: "auto" });
+            mobilePendingScrollRestore = null;
+        });
+    });
+}
+
+function applyMobileScreenState(tab, state) {
+    if (!state || typeof state !== "object") return false;
+    const normalized = normalizeMobileTab(tab);
+    switch (normalized) {
+        case "products": {
+            const query = (state.query || "").trim();
+            mobileActiveCategory = state.category || "all";
+            if (els.productSearch) {
+                els.productSearch.value = query;
+            }
+            if (els.mobileCategoryChips) {
+                renderMobileCategoryChips();
+            }
+            if (query) {
+                mobileSearchQuery = query.toLowerCase();
+                updateSearchResults({ keepOpen: true });
+            } else {
+                resetMobileSearch();
+                renderMobileProducts();
+            }
+            if (state.scrollY !== undefined) {
+                queueMobileScrollRestore(normalized, state.scrollY);
+            }
+            return true;
+        }
+        case "sales":
+            mobileSalesFilter = state.filter || "today";
+            if (els.mobileSalesFilter) {
+                els.mobileSalesFilter.value = mobileSalesFilter;
+            }
+            if (state.scrollY !== undefined) {
+                queueMobileScrollRestore(normalized, state.scrollY);
+            }
+            return true;
+        case "stock":
+            mobileStockQuery = state.query || "";
+            mobileStockCategory = state.category || "all";
+            mobileStockLowOnly = Boolean(state.lowOnly);
+            if (els.mobileStockSearch) {
+                els.mobileStockSearch.value = mobileStockQuery;
+            }
+            if (els.mobileStockCategoryChips) {
+                renderMobileStockCategoryChips();
+            }
+            updateMobileStockFilterNote();
+            if (state.scrollY !== undefined) {
+                queueMobileScrollRestore(normalized, state.scrollY);
+            }
+            return true;
+        case "customers":
+            mobileCustomersQuery = state.query || "";
+            if (els.mobileCustomersSearch) {
+                els.mobileCustomersSearch.value = mobileCustomersQuery;
+            }
+            if (state.scrollY !== undefined) {
+                queueMobileScrollRestore(normalized, state.scrollY);
+            }
+            return true;
+        case "home":
+        case "reports":
+        case "checkout":
+            if (state.scrollY !== undefined) {
+                queueMobileScrollRestore(normalized, state.scrollY);
+            }
+            return true;
+        default:
+            return false;
+    }
+}
+
+function restoreMobileScreenState(tab, snapshot = null) {
+    if (!isMobileLayout()) return false;
+    const normalized = normalizeMobileTab(tab);
+    const state = snapshot || getMobileSavedTabState(normalized);
+    if (!state) return false;
+    mobileStateRestoring = true;
+    try {
+        const restored = applyMobileScreenState(normalized, state);
+        if (restored) {
+            mobileUiState.role = getResolvedUserRole();
+            mobileUiState.activeTab = normalized;
+            mobileUiState.branchId = els.branchSelect?.value || mobileUiState.branchId || "";
+            mobileUiState.tabs[normalized] = state;
+            persistMobileUiState();
+        }
+        return restored;
+    } finally {
+        mobileStateRestoring = false;
+    }
+}
+
+function restoreMobileScrollIfNeeded(tab) {
+    if (!mobilePendingScrollRestore) return;
+    const normalized = normalizeMobileTab(tab);
+    if (mobilePendingScrollRestore.tab !== normalized) return;
+    const { scrollY, token } = mobilePendingScrollRestore;
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (!mobilePendingScrollRestore || mobilePendingScrollRestore.token !== token) return;
+            if (normalizeMobileTab(activeMobileTab) !== normalized) return;
+            window.scrollTo({ top: scrollY, behavior: "auto" });
+            mobilePendingScrollRestore = null;
+        });
+    });
 }
 
 function syncMobileHistoryState(mode = "push") {
@@ -1013,6 +1289,7 @@ function openOverlay(overlayEl, { closeOthers = true, syncHistory = true } = {})
     if (!overlayEl) return;
     const trackHistory = syncHistory && isMobileLayout() && isMobileHistoryOverlay(overlayEl.id) && !mobileHistorySyncSuspended;
     if (trackHistory) {
+        persistMobileScreenState(activeMobileTab);
         mobileHistorySyncSuspended = true;
     }
     if (closeOthers) closeAllOverlays({ except: overlayEl });
@@ -1200,6 +1477,7 @@ document.addEventListener("DOMContentLoaded", () => {
     els.productSearch.addEventListener("input", () => {
         searchResultIndex = -1;
         updateSearchResults();
+        persistMobileScreenState("products");
     });
     els.productSearch.addEventListener("keydown", (event) => {
         if (event.key === "ArrowDown") {
@@ -2052,6 +2330,12 @@ document.addEventListener("DOMContentLoaded", () => {
             downloadProductTemplate();
         });
     }
+    if (els.backofficeProductExport) {
+        els.backofficeProductExport.addEventListener("click", (event) => {
+            event.preventDefault();
+            exportBackOfficeProductsExcel();
+        });
+    }
     if (els.backofficeProductImport) {
         els.backofficeProductImport.addEventListener("click", () => {
             if (els.backofficeProductFile) els.backofficeProductFile.click();
@@ -2159,6 +2443,7 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 renderMobileProducts();
             }
+            persistMobileScreenState(activeMobileTab);
         }
     });
     els.discountInput.addEventListener("input", () => {
@@ -2410,7 +2695,7 @@ function isMobileLayout() {
     return window.matchMedia && window.matchMedia("(max-width: 900px)").matches;
 }
 
-const MOBILE_HISTORY_TABS = new Set(["home", "products", "sales", "stock", "customers", "reports", "checkout"]);
+const MOBILE_HISTORY_TABS = new Set(["home", "products", "cart", "sales", "stock", "customers", "reports", "checkout"]);
 const MOBILE_HISTORY_OVERLAYS = new Set([
     "mobile-sale-detail-modal",
     "mobile-customer-detail-modal",
@@ -2458,8 +2743,15 @@ function restoreMobileHistoryState(state) {
     if (!isMobileLayout()) return;
     const nextTab = normalizeMobileTab(state?.tab || "home");
     const overlayState = state?.overlay && isMobileHistoryOverlay(state.overlay.id) ? state.overlay : null;
+    if (state?.branchId) {
+        restoreMobileBranchSelection(state.branchId);
+    }
     mobileHistorySyncSuspended = true;
-    setMobileTab(nextTab, { syncHistory: false });
+    setMobileTab(nextTab, {
+        syncHistory: false,
+        preserveScroll: true,
+        restoreSnapshot: state?.screenState || null,
+    });
     closeOpenMobileHistoryOverlays();
 
     if (overlayState) {
@@ -2495,7 +2787,7 @@ function restoreMobileHistoryState(state) {
                 if (canAccessDeliveryRun()) openDeliveryRunModal();
                 break;
             case "customer-orders-modal":
-                if (canManageCustomerOrders()) openCustomerOrdersModal();
+                if (canManageCustomerOrders()) openCustomerOrdersModal({ statusList: overlayState.statusList || [] });
                 break;
             case "credit-modal":
                 if (canPerformSales()) openCreditModal();
@@ -2521,12 +2813,21 @@ function restoreMobileHistoryState(state) {
     syncMobileHistoryState("replace");
 }
 
-function setMobileTab(tab, { syncHistory = true, historyMode = "push" } = {}) {
+function setMobileTab(tab, { syncHistory = true, historyMode = "push", preserveScroll = false, restoreSnapshot = null } = {}) {
     if (!tab) return;
     const nextTab = normalizeMobileTab(tab);
+    if (!mobileStateRestoring) {
+        persistMobileScreenState(activeMobileTab);
+    }
     activeMobileTab = nextTab;
     if (isMobileLayout()) {
         document.body.dataset.mobileTab = nextTab;
+    }
+    if (!mobileStateRestoring) {
+        mobileUiState.role = getResolvedUserRole();
+        mobileUiState.activeTab = nextTab;
+        mobileUiState.branchId = els.branchSelect?.value || "";
+        persistMobileUiState();
     }
     let effectiveHistoryMode = historyMode;
     if (syncHistory && !mobileHistorySyncSuspended) {
@@ -2545,11 +2846,19 @@ function setMobileTab(tab, { syncHistory = true, historyMode = "push" } = {}) {
             btn.classList.toggle("active", active);
         });
     }
+    if (!mobileStateRestoring) {
+        const restored = restoreMobileScreenState(nextTab, restoreSnapshot);
+        if (!restored) {
+            mobilePendingScrollRestore = null;
+        }
+    }
     refreshMobileTab(nextTab);
     if (syncHistory && !mobileHistorySyncSuspended) {
         syncMobileHistoryState(effectiveHistoryMode);
     }
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (!preserveScroll && !mobilePendingScrollRestore) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }
 }
 
 function initMobileNav() {
@@ -2568,7 +2877,9 @@ function initMobileNav() {
     const apply = () => {
         if (isMobileLayout()) {
             if (!window.history.state || !window.history.state.mobileNav) {
-                setMobileTab(activeMobileTab, { syncHistory: false });
+                mobileStateRestoring = true;
+                setMobileTab(activeMobileTab, { syncHistory: false, preserveScroll: true });
+                mobileStateRestoring = false;
                 syncMobileHistoryState("replace");
             }
         } else {
@@ -2659,6 +2970,7 @@ function setMobileCategory(category) {
         resetMobileSearch();
         renderMobileProducts();
     }
+    persistMobileScreenState("products");
 }
 
 function renderMobileStockCategoryChips() {
@@ -2696,6 +3008,7 @@ function setMobileStockCategory(category) {
         });
     }
     loadMobileStock({ query: mobileStockQuery });
+    persistMobileScreenState("stock");
 }
 
 function updateMobileCallAction(phone) {
@@ -2939,6 +3252,7 @@ function initMobileDashboard() {
         els.mobileSalesFilter.addEventListener("change", () => {
             mobileSalesFilter = els.mobileSalesFilter.value || "today";
             loadMobileSales();
+            persistMobileScreenState("sales");
         });
     }
     if (els.mobileStockSearch) {
@@ -2952,6 +3266,7 @@ function initMobileDashboard() {
             mobileStockTimer = setTimeout(() => {
                 loadMobileStock({ query: mobileStockQuery });
             }, 300);
+            persistMobileScreenState("stock");
         });
     }
     if (els.mobileStockFilterClear) {
@@ -2962,6 +3277,7 @@ function initMobileDashboard() {
             const query = (els.mobileStockSearch?.value || "").trim();
             mobileStockQuery = query;
             loadMobileStock({ query });
+            persistMobileScreenState("stock");
         });
     }
     if (els.mobileCustomersSearch) {
@@ -2974,6 +3290,7 @@ function initMobileDashboard() {
             mobileCustomersTimer = setTimeout(() => {
                 loadMobileCustomers({ query: mobileCustomersQuery });
             }, 320);
+            persistMobileScreenState("customers");
         });
     }
     if (els.mobileSaleDetailClose) {
@@ -3051,6 +3368,7 @@ async function loadMobileDashboardSummary() {
         els.mobileSummarySalesSub.textContent = "Log in to view";
         els.mobileSummaryExpensesValue.textContent = "—";
         els.mobileSummaryExpensesSub.textContent = "Log in to view";
+        restoreMobileScrollIfNeeded("home");
         return;
     }
     const branchId = els.branchSelect?.value || "";
@@ -3079,6 +3397,7 @@ async function loadMobileDashboardSummary() {
     if (!canViewLedger()) {
         els.mobileSummaryExpensesValue.textContent = "—";
         els.mobileSummaryExpensesSub.textContent = "Admin only";
+        restoreMobileScrollIfNeeded("home");
         return;
     }
     els.mobileSummaryExpensesValue.textContent = "Loading...";
@@ -3093,6 +3412,7 @@ async function loadMobileDashboardSummary() {
         els.mobileSummaryExpensesValue.textContent = "—";
         els.mobileSummaryExpensesSub.textContent = "Unable to load";
     }
+    restoreMobileScrollIfNeeded("home");
 }
 
 async function loadMobileSales() {
@@ -3102,6 +3422,7 @@ async function loadMobileSales() {
         if (els.mobileSalesSummary) {
             els.mobileSalesSummary.textContent = "";
         }
+        restoreMobileScrollIfNeeded("sales");
         return;
     }
     if (!canViewMobileSales()) {
@@ -3109,6 +3430,7 @@ async function loadMobileSales() {
         if (els.mobileSalesSummary) {
             els.mobileSalesSummary.textContent = "";
         }
+        restoreMobileScrollIfNeeded("sales");
         return;
     }
 
@@ -3176,6 +3498,7 @@ async function loadMobileSales() {
         }
     } finally {
         mobileSalesLoading = false;
+        restoreMobileScrollIfNeeded("sales");
     }
 }
 
@@ -3259,10 +3582,12 @@ async function loadMobileStock({ query = "" } = {}) {
     if (!els.mobileStockList || !isMobileLayout()) return;
     if (!API_TOKEN || !currentUser) {
         els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Log in to view stock.</div>`;
+        restoreMobileScrollIfNeeded("stock");
         return;
     }
     if (!canViewStock()) {
         els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Stock is not available for your role.</div>`;
+        restoreMobileScrollIfNeeded("stock");
         return;
     }
 
@@ -3277,6 +3602,7 @@ async function loadMobileStock({ query = "" } = {}) {
             const lowStock = ensureArray(data?.low_stock_products, "mobileLowStock");
             if (!lowStock.length) {
                 els.mobileStockList.innerHTML = `<div class="sale-entry-empty">No low stock items.</div>`;
+                restoreMobileScrollIfNeeded("stock");
                 return;
             }
             els.mobileStockList.innerHTML = lowStock.map((item) => `
@@ -3288,9 +3614,11 @@ async function loadMobileStock({ query = "" } = {}) {
                     </div>
                 </div>
             `).join("");
+            restoreMobileScrollIfNeeded("stock");
             return;
         } catch (err) {
             els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Failed to load low stock.</div>`;
+            restoreMobileScrollIfNeeded("stock");
             return;
         }
     }
@@ -3311,6 +3639,7 @@ async function loadMobileStock({ query = "" } = {}) {
         updateMobileStockFilterNote();
         if (!results.length) {
             els.mobileStockList.innerHTML = `<div class="sale-entry-empty">No matching stock.</div>`;
+            restoreMobileScrollIfNeeded("stock");
             return;
         }
         els.mobileStockList.innerHTML = results.map((product) => `
@@ -3326,16 +3655,19 @@ async function loadMobileStock({ query = "" } = {}) {
         if (token !== mobileStockToken) return;
         els.mobileStockList.innerHTML = `<div class="sale-entry-empty">Failed to load stock.</div>`;
     }
+    restoreMobileScrollIfNeeded("stock");
 }
 
 async function loadMobileCustomers({ query = "" } = {}) {
     if (!els.mobileCustomersList || !isMobileLayout()) return;
     if (!API_TOKEN || !currentUser) {
         els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">Log in to view customers.</div>`;
+        restoreMobileScrollIfNeeded("customers");
         return;
     }
     if (!canViewCustomers()) {
         els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">Customers are not available for your role.</div>`;
+        restoreMobileScrollIfNeeded("customers");
         return;
     }
 
@@ -3361,6 +3693,7 @@ async function loadMobileCustomers({ query = "" } = {}) {
         mobileCustomers = results;
         if (!results.length) {
             els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">No customers found.</div>`;
+            restoreMobileScrollIfNeeded("customers");
             return;
         }
         els.mobileCustomersList.innerHTML = results.map((c) => {
@@ -3376,6 +3709,7 @@ async function loadMobileCustomers({ query = "" } = {}) {
                 </div>
             `;
         }).join("");
+        restoreMobileScrollIfNeeded("customers");
     } catch (err) {
         if (token !== mobileCustomersToken) return;
         els.mobileCustomersList.innerHTML = `<div class="sale-entry-empty">Failed to load customers.</div>`;
@@ -3383,6 +3717,7 @@ async function loadMobileCustomers({ query = "" } = {}) {
         if (token === mobileCustomersToken) {
             mobileCustomersLoading = false;
         }
+        restoreMobileScrollIfNeeded("customers");
     }
 }
 
@@ -3401,6 +3736,7 @@ function openTodaySalesFromReports() {
     }
     mobileSalesFilter = "today";
     if (els.mobileSalesFilter) els.mobileSalesFilter.value = "today";
+    upsertMobileTabState("sales", { filter: mobileSalesFilter }, { preserveScroll: true });
     setMobileTab("sales");
     loadMobileSales();
 }
@@ -3412,6 +3748,7 @@ function openWeekSalesFromReports() {
     }
     mobileSalesFilter = "7d";
     if (els.mobileSalesFilter) els.mobileSalesFilter.value = "7d";
+    upsertMobileTabState("sales", { filter: mobileSalesFilter }, { preserveScroll: true });
     setMobileTab("sales");
     loadMobileSales();
 }
@@ -3421,8 +3758,7 @@ function openPendingOrdersFromReports() {
         toast("Orders are not available for your role.", "error");
         return;
     }
-    openCustomerOrdersModal();
-    setCustomerOrdersStatusList(PENDING_ORDER_STATUSES);
+    openCustomerOrdersModal({ statusList: PENDING_ORDER_STATUSES });
     toast("Showing pending orders across multiple statuses.", "info");
 }
 
@@ -3442,6 +3778,11 @@ function openLowStockFromReports() {
             chip.classList.toggle("active", chip.dataset.category === "all");
         });
     }
+    upsertMobileTabState("stock", {
+        query: mobileStockQuery,
+        category: mobileStockCategory,
+        lowOnly: mobileStockLowOnly,
+    }, { preserveScroll: true });
     setMobileTab("stock");
     loadMobileStock({ query: "" });
 }
@@ -3457,6 +3798,10 @@ function openTopProductFromReports(product) {
     if (els.productSearch) {
         els.productSearch.value = query;
     }
+    upsertMobileTabState("products", {
+        query,
+        category: mobileActiveCategory || "all",
+    }, { preserveScroll: true });
     setMobileTab("products");
     updateSearchResults({ forceOpen: true });
     focusSearchInput();
@@ -3471,6 +3816,7 @@ async function loadMobileReports() {
             els.mobileReportsError.classList.remove("hidden");
             els.mobileReportsError.querySelector("div").textContent = "Log in to view reports.";
         }
+        restoreMobileScrollIfNeeded("reports");
         return;
     }
     if (!canViewReports()) {
@@ -3479,6 +3825,7 @@ async function loadMobileReports() {
             els.mobileReportsError.classList.remove("hidden");
             els.mobileReportsError.querySelector("div").textContent = "Reports are not available for your role.";
         }
+        restoreMobileScrollIfNeeded("reports");
         return;
     }
     if (els.mobileReportsError) {
@@ -3537,6 +3884,7 @@ async function loadMobileReports() {
                 els.mobileReportsError.classList.remove("hidden");
                 els.mobileReportsError.querySelector("div").textContent = message;
             }
+            restoreMobileScrollIfNeeded("reports");
             return;
         }
         summary = rawBody;
@@ -3552,6 +3900,7 @@ async function loadMobileReports() {
             els.mobileReportsError.classList.remove("hidden");
             els.mobileReportsError.querySelector("div").textContent = "Unable to load reports.";
         }
+        restoreMobileScrollIfNeeded("reports");
         return;
     }
 
@@ -3580,6 +3929,7 @@ async function loadMobileReports() {
         if (els.mobileReportsEmpty) {
             els.mobileReportsEmpty.classList.remove("hidden");
         }
+        restoreMobileScrollIfNeeded("reports");
         return;
     }
 
@@ -3594,6 +3944,7 @@ async function loadMobileReports() {
             </div>
         `).join("");
     }
+    restoreMobileScrollIfNeeded("reports");
 }
 
 async function openMobileCustomerDetail(customerId) {
@@ -4894,6 +5245,45 @@ async function downloadProductTemplate() {
         window.URL.revokeObjectURL(url);
     } catch (err) {
         toast(`Template download failed: ${err.message}`, "error");
+    }
+}
+
+async function exportBackOfficeProductsExcel() {
+    if (!API_TOKEN) {
+        toast("Please log in to export products", "error");
+        openAuthModal();
+        return;
+    }
+    const params = {};
+    const query = (backOfficeQuery || "").trim();
+    if (query) {
+        params.search = query;
+    }
+    const qs = withParams("/inventory/products/export/", params);
+    const filename = `products_export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    try {
+        const res = await fetch(`${API_BASE}${qs}`, {
+            headers: {
+                Authorization: `Token ${API_TOKEN}`,
+            },
+            credentials: "same-origin",
+        });
+        if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(text || `Export failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+        console.error("Product Excel export failed", err);
+        toast(`Export failed: ${err.message}`, "error");
     }
 }
 
@@ -8989,6 +9379,7 @@ function renderMobileProducts() {
     if (!list.length) {
         const message = hasQuery ? "No matching products." : "Start typing to search products.";
         els.mobileProductsList.innerHTML = `<div class="sale-entry-empty">${message}</div>`;
+        restoreMobileScrollIfNeeded("products");
         return;
     }
 
@@ -9855,7 +10246,8 @@ function renderCreditSalesList(list, target) {
                 <div>${renderStatusBadge(sale.payment_status)}</div>
             </div>
         </div>
-    `).join("");
+        `).join("");
+    restoreMobileScrollIfNeeded("products");
 }
 
 
@@ -10444,7 +10836,7 @@ function canViewDeliveryTracking() {
     return ["supervisor", "admin"].includes(normalizeRole(currentUserRole));
 }
 
-function openCustomerOrdersModal() {
+function openCustomerOrdersModal({ statusList = null } = {}) {
     customerOrdersLog("[customer-orders] open modal click");
     customerOrdersLog("[customer-orders] auth", { hasToken: Boolean(API_TOKEN), hasUser: Boolean(currentUser), role: currentUserRole });
     if (!API_TOKEN || !currentUser) {
@@ -10460,7 +10852,11 @@ function openCustomerOrdersModal() {
     openOverlay(els.customerOrdersModal);
     customerOrdersLog("[customer-orders] modal opened");
     customerOrdersOffset = 0;
-    loadCustomerOrders();
+    if (Array.isArray(statusList) && statusList.length) {
+        setCustomerOrdersStatusList(statusList);
+    } else {
+        loadCustomerOrders();
+    }
     ensureAssignableUsers();
 }
 
@@ -13842,8 +14238,9 @@ async function loadInitialData() {
         applyRoleUI();
         return;
     }
+    await loadBranches();
+    restoreMobileBranchSelection();
     await Promise.all([
-        loadBranches(),
         loadCustomers(),
         loadAssignableUsers(),
         loadProducts(),
@@ -13854,7 +14251,13 @@ async function loadInitialData() {
         if (window.history.state && window.history.state.mobileNav) {
             restoreMobileHistoryState(window.history.state);
         } else {
-            setMobileTab(activeMobileTab, { syncHistory: false });
+            const savedTab = getMobilePersistedActiveTab();
+            const savedSnapshot = getMobileSavedTabState(savedTab);
+            setMobileTab(savedTab, {
+                syncHistory: false,
+                preserveScroll: Boolean(savedSnapshot),
+                restoreSnapshot: savedSnapshot,
+            });
             syncMobileHistoryState("replace");
         }
         loadMobileDashboardSummary();
@@ -13909,9 +14312,11 @@ async function loginForToken() {
 
 function clearAuth() {
     mobileHistorySyncSuspended = true;
+    mobileStateRestoring = true;
     setApiToken("");
     setUserRole("");
     currentUser = null;
+    clearMobileUiState();
     firstProtectedFailure = null;
     updateAuthStatus();
     applyRoleUI();
@@ -13921,7 +14326,8 @@ function clearAuth() {
     if (els.returnsModal) closeOverlay(els.returnsModal);
     if (els.receiptModal) closeOverlay(els.receiptModal);
     closeOpenMobileHistoryOverlays();
-    setMobileTab("home", { syncHistory: false });
+    setMobileTab("home", { syncHistory: false, preserveScroll: true });
+    mobileStateRestoring = false;
     mobileHistorySyncSuspended = false;
     if (isMobileLayout()) {
         syncMobileHistoryState("replace");

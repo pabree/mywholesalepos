@@ -254,7 +254,7 @@
         </section>
         <!-- LEFT: Sale Entry Panel -->
         <section id="products-panel" class="sale-entry-panel">
-            <div class="panel-header">
+            <div class="panel-header mobile-sell-header">
                 <div class="panel-title">
                     <h1>Sale Entry</h1>
                     <p class="panel-subtitle">Review and confirm line items before payment.</p>
@@ -266,14 +266,14 @@
                     <button id="offline-drafts-btn" type="button" class="btn-ghost btn-xs">Drafts</button>
                     <button id="offline-sync-btn" type="button" class="btn-ghost btn-xs hidden">Sync Drafts</button>
                 </div>
+                <button id="mobile-pos-scan-btn" class="btn-secondary mobile-scan-btn" type="button">📷 Scan Barcode</button>
+            </div>
             <div class="search-wrapper">
                 <span class="search-icon">⌕</span>
                 <input type="text" id="product-search" placeholder="Scan barcode or search product..." autocomplete="off">
                 <div id="product-search-results" class="search-results hidden"></div>
             </div>
             <div id="mobile-category-chips" class="mobile-category-chips mobile-only"></div>
-            <button id="mobile-pos-scan-btn" class="btn-secondary mobile-scan-btn" type="button">📷 Scan Barcode</button>
-        </div>
             <div id="mobile-products-list" class="mobile-products-list"></div>
             <div class="sale-entry-table-wrap">
                 <table class="sale-entry-table" id="sale-entry-table">
@@ -1145,6 +1145,7 @@
                             <div class="backoffice-actions">
                                 <button id="backoffice-product-add" class="btn-primary">Add Product</button>
                                 <button id="backoffice-product-template" class="btn-ghost">Download Template</button>
+                                <button id="backoffice-product-export" class="btn-secondary">Export Excel</button>
                                 <button id="backoffice-product-import" class="btn-secondary">Import Excel</button>
                                 <input type="file" id="backoffice-product-file" accept=".xlsx" hidden>
                             </div>

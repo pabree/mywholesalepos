@@ -410,6 +410,24 @@ body.overlay-open {
     padding: 20px 24px;
 }
 
+.mobile-sell-header {
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.mobile-sell-header .panel-title {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.mobile-sell-header .mobile-scan-btn {
+    display: none;
+    flex: 0 0 auto;
+    margin-left: auto;
+    align-self: center;
+}
+
 #mobile-dashboard-panel {
     gap: 14px;
     padding: 16px 18px 24px;
@@ -5199,6 +5217,7 @@ body.offline .offline-status {
     #products-panel {
         display: none;
         padding: 16px;
+        gap: 14px;
     }
 
     #cart-panel {
@@ -5244,6 +5263,55 @@ body.offline .offline-status {
 
     .mobile-category-chips {
         display: flex;
+    }
+
+    .mobile-sell-header {
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .mobile-sell-header .panel-title {
+        flex: 1 1 calc(100% - 122px);
+    }
+
+    .mobile-sell-header .mobile-scan-btn {
+        display: inline-flex;
+        padding: 10px 12px;
+        min-height: 42px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+
+    #products-panel .offline-status {
+        width: 100%;
+        order: 2;
+    }
+
+    #products-panel .search-wrapper {
+        order: 3;
+        width: 100%;
+        max-width: none;
+        margin-top: 2px;
+    }
+
+    #product-search {
+        width: 100%;
+        min-width: 0;
+        font-size: 16px;
+        box-sizing: border-box;
+        min-height: 46px;
+    }
+
+    #mobile-category-chips {
+        order: 4;
+        width: 100%;
+        margin-top: 2px;
+        padding-bottom: 4px;
+    }
+
+    #mobile-products-list {
+        order: 5;
+        margin-top: 2px;
     }
 
     .mobile-section {

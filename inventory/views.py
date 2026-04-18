@@ -5,10 +5,12 @@ from django.db.models import Sum, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.utils import timezone
 from decimal import Decimal, InvalidOperation
 import json
 import re
 from openpyxl import load_workbook, Workbook
+from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 from accounts.permissions import RolePermission
 from .models import Product, Category, ProductUnit, Inventory, StockMovement, ProductSupplier
@@ -34,6 +36,39 @@ class ProductBySkuView(APIView):
                 "price": product.retail_price or product.selling_price,
             }
         )
+
+
+def _build_product_queryset(request):
+    branch_id = request.query_params.get("branch")
+    query = (request.query_params.get("search") or "").strip()
+    category_value = (request.query_params.get("category") or "").strip()
+    products = Product.objects.select_related("category").prefetch_related("units")
+
+    if branch_id:
+        products = products.annotate(
+            stock=Sum("inventory__quantity", filter=Q(inventory__branch_id=branch_id))
+        )
+    else:
+        products = products.annotate(stock=Sum("inventory__quantity"))
+
+    if query:
+        products = products.filter(
+            Q(name__icontains=query) | Q(sku__icontains=query)
+        )
+
+    if category_value:
+        category_qs = Category.objects.filter(name__iexact=category_value)
+        try:
+            category_qs = category_qs | Category.objects.filter(id=category_value)
+        except (ValueError, TypeError):
+            pass
+        category = category_qs.first()
+        if category:
+            products = products.filter(category=category)
+        else:
+            products = products.none()
+
+    return products.order_by("name", "sku")
 
 
 class CategoryListView(APIView):
@@ -122,36 +157,7 @@ class ProductListView(APIView):
 
     def get(self, request):
         """List all active products with their category, prices, and current stock."""
-        branch_id = request.query_params.get("branch")
-        query = (request.query_params.get("search") or "").strip()
-        category_value = (request.query_params.get("category") or "").strip()
-        products = Product.objects.select_related("category").prefetch_related("units")
-
-        if branch_id:
-            products = products.annotate(
-                stock=Sum("inventory__quantity", filter=Q(inventory__branch_id=branch_id))
-            )
-        else:
-            products = products.annotate(stock=Sum("inventory__quantity"))
-
-        if query:
-            products = products.filter(
-                Q(name__icontains=query) | Q(sku__icontains=query)
-            )
-
-        if category_value:
-            category_qs = Category.objects.filter(name__iexact=category_value)
-            try:
-                category_qs = category_qs | Category.objects.filter(id=category_value)
-            except (ValueError, TypeError):
-                pass
-            category = category_qs.first()
-            if category:
-                products = products.filter(category=category)
-            else:
-                products = products.none()
-
-        products = products.order_by("name", "sku")
+        products = _build_product_queryset(request)
 
         paginator = StandardLimitOffsetPagination()
         page = paginator.paginate_queryset(products, request, view=self)
@@ -192,6 +198,67 @@ class ProductListView(APIView):
         if page is not products:
             return paginator.get_paginated_response(data)
         return Response(data)
+
+
+class ProductExportView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def get(self, request):
+        products = _build_product_queryset(request)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Products"
+
+        headers = [
+            "sku",
+            "name",
+            "category",
+            "base_unit_name",
+            "base_unit_code",
+            "cost_price",
+            "selling_price",
+            "retail_price",
+            "wholesale_price",
+            "wholesale_threshold",
+            "stock_quantity",
+            "is_active",
+        ]
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+
+        for product in products:
+            units = list(product.units.all())
+            base_unit = next((unit for unit in units if unit.is_base_unit), None)
+            ws.append([
+                product.sku,
+                product.name,
+                product.category.name if product.category else "",
+                base_unit.unit_name if base_unit else "",
+                base_unit.unit_code if base_unit else "",
+                product.cost_price,
+                product.selling_price,
+                product.retail_price if product.retail_price is not None else "",
+                product.wholesale_price if product.wholesale_price is not None else "",
+                product.wholesale_threshold if product.wholesale_threshold is not None else "",
+                int(product.stock or 0),
+                "Yes" if product.is_active else "No",
+            ])
+
+        for idx, header in enumerate(headers, start=1):
+            width = max(14, len(header) + 2)
+            ws.column_dimensions[get_column_letter(idx)].width = width
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        filename = f"products_export_{timezone.localdate().isoformat()}.xlsx"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        wb.save(response)
+        return response
 
 
 def _get_branch_from_value(value):

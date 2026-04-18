@@ -2,6 +2,7 @@ from django.urls import path
 from .views import (
     ProductBySkuView,
     ProductListView,
+    ProductExportView,
     ProductImportView,
     ProductImportTemplateView,
     CategoryListView,
@@ -19,6 +20,7 @@ from .views import (
 
 urlpatterns = [
     path("products/", ProductListView.as_view(), name="list_products"),
+    path("products/export/", ProductExportView.as_view(), name="product_export"),
     path("sku/<str:sku>/", ProductBySkuView.as_view(), name="product_by_sku"),
     path("products/import/", ProductImportView.as_view(), name="product_import"),
     path("products/import-template/", ProductImportTemplateView.as_view(), name="product_import_template"),
