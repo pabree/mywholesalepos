@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-18.03";
+const APP_BUILD = "2026-04-18.05";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -1083,6 +1083,8 @@ function captureMobileScreenState(tab = activeMobileTab) {
                 category: mobileActiveCategory || "all",
                 scrollY,
             };
+        case "cart":
+            return { scrollY };
         case "sales":
             return {
                 filter: mobileSalesFilter || "today",
@@ -1184,6 +1186,11 @@ function applyMobileScreenState(tab, state) {
             }
             return true;
         }
+        case "cart":
+            if (state.scrollY !== undefined) {
+                queueMobileScrollRestore(normalized, state.scrollY);
+            }
+            return true;
         case "sales":
             mobileSalesFilter = state.filter || "today";
             if (els.mobileSalesFilter) {
@@ -2716,6 +2723,7 @@ let mobileHistorySyncSuspended = false;
 function canAccessMobileTab(tab) {
     const role = getResolvedUserRole();
     switch (tab) {
+        case "cart":
         case "products":
         case "checkout":
             return ["cashier", "salesperson", "supervisor", "admin"].includes(role);
@@ -3137,6 +3145,9 @@ function refreshMobileTab(tab) {
     if (!isMobileLayout()) return;
     if (tab === "home") {
         loadMobileDashboardSummary();
+    }
+    if (tab === "cart") {
+        renderMobileCart();
     }
     if (tab === "sales") {
         loadMobileSales();
@@ -9651,7 +9662,13 @@ function renderCart() {
 function renderMobileCart() {
     if (!els.mobileCartList) return;
     if (!cart.length) {
-        els.mobileCartList.innerHTML = `<div class="sale-entry-empty">Cart is empty.</div>`;
+        els.mobileCartList.innerHTML = `
+            <div class="mobile-cart-empty">
+                <div class="mobile-cart-empty-title">Cart is empty</div>
+                <div class="mobile-cart-empty-text">Search products on the Sell screen and add them here before checkout.</div>
+                <button class="btn-secondary mobile-cart-empty-action" onclick="setMobileTab('products')">Continue selling</button>
+            </div>
+        `;
         return;
     }
 
@@ -9662,17 +9679,19 @@ function renderMobileCart() {
         const unitLabel = item.unit?.unit_name || item.unit?.unit_code || "unit";
         return `
             <div class="mobile-cart-item">
-                <div class="mobile-cart-meta">
+                <div class="mobile-cart-main">
                     <div class="mobile-cart-name">${esc(item.product.name)}</div>
                     <div class="mobile-cart-sub">SKU: ${esc(item.product.sku || "—")} • ${esc(unitLabel)}</div>
                     <div class="mobile-cart-sub">${fmtPrice(unitPrice)} each</div>
                 </div>
-                <div class="mobile-cart-controls">
-                    <button class="qty-btn" ${canSell ? "" : "disabled"} onclick="updateQty('${item.product.id}', -1)">−</button>
-                    <span class="qty-value">${item.qty}</span>
-                    <button class="qty-btn" ${canSell ? "" : "disabled"} onclick="updateQty('${item.product.id}', 1)">+</button>
-                    <button class="cart-item-remove" ${canSell ? "" : "disabled"} onclick="removeFromCart('${item.product.id}')" title="Remove">✕</button>
+                <div class="mobile-cart-side">
+                    <div class="mobile-cart-stepper" aria-label="Quantity controls">
+                        <button class="qty-btn" ${canSell ? "" : "disabled"} onclick="updateQty('${item.product.id}', -1)">−</button>
+                        <span class="qty-value">${item.qty}</span>
+                        <button class="qty-btn" ${canSell ? "" : "disabled"} onclick="updateQty('${item.product.id}', 1)">+</button>
+                    </div>
                     <div class="mobile-cart-total">${fmtPrice(total)}</div>
+                    <button class="cart-item-remove" ${canSell ? "" : "disabled"} onclick="removeFromCart('${item.product.id}')" title="Remove item">Remove</button>
                 </div>
             </div>
         `;
@@ -9826,6 +9845,12 @@ function updateTotals() {
     els.checkoutBtn.disabled = empty || !canSell || !completion.valid || mpesaPending;
     els.holdSaleBtn.disabled = empty || !canSell;
     els.clearCartBtn.disabled = !canSell;
+    if (els.mobileCartCheckout) {
+        els.mobileCartCheckout.disabled = empty || !canSell || !completion.valid || mpesaPending;
+    }
+    if (els.mobileCartPanel) {
+        els.mobileCartPanel.classList.toggle("is-empty", empty);
+    }
 
     if (POS_DEBUG) {
         posLog("[pos] totals", {
