@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-18.05";
+const APP_BUILD = "2026-04-20.01";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -852,6 +852,7 @@ const els = {
     mobileTileSales: document.getElementById("mobile-tile-sales"),
     mobileTileStock: document.getElementById("mobile-tile-stock"),
     mobileTileCustomers: document.getElementById("mobile-tile-customers"),
+    mobileTileCustomerOrders: document.getElementById("mobile-tile-customer-orders"),
     mobileTileReports: document.getElementById("mobile-tile-reports"),
     mobileTileDelivery: document.getElementById("mobile-tile-delivery"),
     mobileSalesPanel: document.getElementById("mobile-sales-panel"),
@@ -3201,6 +3202,15 @@ function initMobileDashboard() {
             setMobileTab("customers");
         });
     }
+    if (els.mobileTileCustomerOrders) {
+        els.mobileTileCustomerOrders.addEventListener("click", () => {
+            if (!canManageCustomerOrders()) {
+                toast("Orders are not available for your role.", "error");
+                return;
+            }
+            openCustomerOrdersModal();
+        });
+    }
     if (els.mobileTileReports) {
         els.mobileTileReports.addEventListener("click", () => {
             if (!canViewReports()) {
@@ -3354,6 +3364,7 @@ function updateMobileDashboardTiles() {
     const canSales = canViewMobileSales();
     const canStock = canViewStock();
     const canCustomers = canViewCustomers();
+    const canCustomerOrders = canManageCustomerOrders();
     const canReports = canViewReports();
     const canDelivery = canAccessDeliveryRun();
     const isDelivery = isDeliveryRole();
@@ -3368,6 +3379,7 @@ function updateMobileDashboardTiles() {
     setTileVisible(els.mobileTileSales, canSales && !isDelivery);
     setTileVisible(els.mobileTileStock, canStock && !isDelivery);
     setTileVisible(els.mobileTileCustomers, canCustomers && !isDelivery);
+    setTileVisible(els.mobileTileCustomerOrders, canCustomerOrders);
     setTileVisible(els.mobileTileReports, canReports && !isDelivery);
     setTileVisible(els.mobileTileDelivery, canDelivery);
 }
@@ -10838,11 +10850,11 @@ function newSale() {
 
 // ——— Customer Orders (Staff) ———
 function canManageCustomerOrders() {
-    return ["cashier", "salesperson", "supervisor", "admin", "deliver_person"].includes(normalizeRole(currentUserRole));
+    return ["cashier", "salesperson", "supervisor", "admin", "deliver_person", "delivery_person"].includes(normalizeRole(currentUserRole));
 }
 
 function canUpdateCustomerOrders() {
-    return ["salesperson", "supervisor", "admin", "deliver_person"].includes(normalizeRole(currentUserRole));
+    return ["salesperson", "supervisor", "admin", "deliver_person", "delivery_person"].includes(normalizeRole(currentUserRole));
 }
 
 function canAssignCustomerOrders() {

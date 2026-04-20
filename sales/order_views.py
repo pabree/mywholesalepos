@@ -116,7 +116,7 @@ def _orders_export_response(qs, filename):
 
 class CustomerOrderStaffListView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person"}
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person", "delivery_person"}
 
     def get(self, request):
         qs = _backoffice_orders_queryset(request)
@@ -132,7 +132,7 @@ class CustomerOrderStaffListView(APIView):
 
 class CustomerOrderStaffExportView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person"}
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person", "delivery_person"}
 
     def get(self, request):
         qs = _backoffice_orders_queryset(request)
@@ -200,7 +200,7 @@ class BackOfficeOrderExportView(APIView):
 
 class CustomerOrderStaffDetailView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person"}
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin", "deliver_person", "delivery_person"}
 
     def get(self, request, order_id):
         order = get_object_or_404(
@@ -248,7 +248,7 @@ class CustomerOrderAssignmentUpdateView(APIView):
 
 class CustomerOrderStatusUpdateView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"salesperson", "supervisor", "admin", "deliver_person"}
+    allowed_roles = {"salesperson", "supervisor", "admin", "deliver_person", "delivery_person"}
 
     def patch(self, request, order_id):
         with transaction.atomic():
