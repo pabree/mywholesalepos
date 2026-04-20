@@ -10,12 +10,13 @@ from rest_framework.views import APIView
 from accounts.permissions import RolePermission
 from accounts.models import User
 from core.pagination import StandardLimitOffsetPagination
-from sales.models import CustomerOrder
+from sales.models import CustomerOrder, Sale
 from .models import DeliveryRun, DeliveryLocationPing
 
 
 ACTIVE_STATUSES = {"assigned", "picked_up", "en_route", "arrived"}
 TERMINAL_STATUSES = {"delivered", "failed", "cancelled"}
+DELIVERY_ROLES = {"deliver_person", "delivery_person"}
 
 STATUS_TRANSITIONS = {
     "assigned": {"picked_up", "en_route"},
@@ -51,13 +52,72 @@ def _parse_datetime(value, *, field):
         raise ValueError(f"Invalid {field}. Use ISO format.")
 
 
+def _delivery_person_payload(user):
+    if not user:
+        return None
+    return {
+        "id": str(user.id),
+        "name": f"{user.first_name} {user.last_name}".strip() or user.username,
+        "username": user.username,
+        "role": _role(user),
+    }
+
+
+def _customer_payload(customer):
+    if not customer:
+        return None
+    return {
+        "id": str(customer.id),
+        "name": customer.name,
+    }
+
+
+def _branch_payload(branch):
+    if not branch:
+        return None
+    return {
+        "id": str(branch.id),
+        "name": branch.branch_name,
+    }
+
+
+def _safe_related_one_to_one(obj, attr):
+    if not obj:
+        return None
+    try:
+        return getattr(obj, attr)
+    except Exception:
+        return None
+
+
+def _sale_payload(sale):
+    if not sale:
+        return None
+    customer = getattr(sale, "customer", None)
+    assigned = getattr(sale, "assigned_to", None)
+    return {
+        "id": str(sale.id),
+        "sale_type": sale.sale_type,
+        "status": sale.status,
+        "payment_status": sale.payment_status,
+        "is_credit_sale": sale.is_credit_sale,
+        "total": str(sale.grand_total),
+        "amount_paid": str(sale.amount_paid),
+        "balance_due": str(sale.balance_due),
+        "assigned_to": _delivery_person_payload(assigned),
+        "customer": _customer_payload(customer),
+        "created_at": sale.completed_at.isoformat() if sale.completed_at else (sale.sale_date.isoformat() if sale.sale_date else None),
+    }
+
+
 def _serialize_run(run):
     order = run.order
-    sale = getattr(order, "sale", None)
+    sale = getattr(run, "sale", None) or getattr(order, "sale", None)
     customer = getattr(sale, "customer", None)
     delivery_person = run.delivery_person
     return {
         "id": str(run.id),
+        "source_type": "customer_order" if order else "sale",
         "status": run.status,
         "assigned_at": run.assigned_at.isoformat() if run.assigned_at else None,
         "started_at": run.started_at.isoformat() if run.started_at else None,
@@ -75,23 +135,16 @@ def _serialize_run(run):
         "recipient_phone": run.recipient_phone or None,
         "delivery_notes": run.delivery_notes or None,
         "delivered_at": run.delivered_at.isoformat() if run.delivered_at else None,
-        "delivery_person": {
-            "id": str(delivery_person.id) if delivery_person else None,
-            "name": f"{delivery_person.first_name} {delivery_person.last_name}".strip() if delivery_person else None,
-            "username": delivery_person.username if delivery_person else None,
-            "role": _role(delivery_person) if delivery_person else None,
-        },
-        "branch": {
-            "id": str(run.branch_id),
-            "name": run.branch.branch_name if run.branch else None,
-        },
+        "delivery_person": _delivery_person_payload(delivery_person),
+        "branch": _branch_payload(run.branch),
         "order": {
-            "id": str(order.id),
-            "status": order.status,
+            "id": str(order.id) if order else None,
+            "status": order.status if order else None,
             "sale_id": str(sale.id) if sale else None,
             "customer_id": str(customer.id) if customer else None,
             "customer_name": customer.name if customer else None,
-        },
+        } if order else None,
+        "sale": _sale_payload(sale),
     }
 
 
@@ -140,6 +193,63 @@ def _sync_order_status_from_delivery_run(run, *, outcome):
     return False
 
 
+def _eligible_delivery_sale_qs(request):
+    qs = Sale.objects.select_related(
+        "branch",
+        "customer",
+        "customer__route",
+        "assigned_to",
+    )
+    if not _is_admin(request.user):
+        qs = qs.filter(assigned_to=request.user)
+    return qs.filter(status="completed", assigned_to__role__in=list(DELIVERY_ROLES))
+
+
+def _serialize_delivery_queue_order(order):
+    sale = getattr(order, "sale", None)
+    customer = getattr(sale, "customer", None) if sale else None
+    assigned = getattr(sale, "assigned_to", None) if sale else None
+    existing_run = _safe_related_one_to_one(order, "delivery_run")
+    return {
+        "id": str(order.id),
+        "type": "customer_order",
+        "source_type": "customer_order",
+        "source_id": str(order.id),
+        "order_id": str(order.id),
+        "sale_id": str(sale.id) if sale else None,
+        "customer": _customer_payload(customer),
+        "status": order.status,
+        "total": str(sale.grand_total) if sale else None,
+        "delivery_person": _delivery_person_payload(assigned),
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+        "branch": _branch_payload(getattr(sale, "branch", None)),
+        "existing_run_id": str(existing_run.id) if existing_run else None,
+    }
+
+
+def _serialize_delivery_queue_sale(sale):
+    customer = getattr(sale, "customer", None)
+    assigned = getattr(sale, "assigned_to", None)
+    existing_run = _safe_related_one_to_one(sale, "delivery_run")
+    return {
+        "id": str(sale.id),
+        "type": "sale",
+        "source_type": "sale",
+        "source_id": str(sale.id),
+        "order_id": None,
+        "sale_id": str(sale.id),
+        "customer": _customer_payload(customer),
+        "status": sale.status,
+        "payment_status": sale.payment_status,
+        "is_credit_sale": sale.is_credit_sale,
+        "total": str(sale.grand_total),
+        "delivery_person": _delivery_person_payload(assigned),
+        "created_at": sale.completed_at.isoformat() if sale.completed_at else (sale.sale_date.isoformat() if sale.sale_date else None),
+        "branch": _branch_payload(sale.branch),
+        "existing_run_id": str(existing_run.id) if existing_run else None,
+    }
+
+
 class DeliveryRunListView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
     allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
@@ -151,7 +261,7 @@ class DeliveryRunListView(APIView):
         delivery_person_id = request.query_params.get("delivery_person")
         active_only = request.query_params.get("active") == "1"
 
-        qs = DeliveryRun.objects.select_related("order", "order__sale", "order__sale__customer", "delivery_person", "branch")
+        qs = DeliveryRun.objects.select_related("order", "order__sale", "sale", "sale__customer", "delivery_person", "branch")
 
         if not _is_admin(request.user):
             qs = qs.filter(delivery_person=request.user)
@@ -169,6 +279,8 @@ class DeliveryRunListView(APIView):
                 models.Q(order__id__icontains=query)
                 | models.Q(order__sale__id__icontains=query)
                 | models.Q(order__sale__customer__name__icontains=query)
+                | models.Q(sale__id__icontains=query)
+                | models.Q(sale__customer__name__icontains=query)
             )
 
         paginator = StandardLimitOffsetPagination()
@@ -181,48 +293,124 @@ class DeliveryRunListView(APIView):
         return Response(data)
 
 
+class DeliveryQueueView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"admin", "supervisor"}
+
+    def get(self, request):
+        query = (request.query_params.get("search") or "").strip()
+        branch_id = request.query_params.get("branch")
+        source_type = (request.query_params.get("type") or "").strip().lower()
+
+        orders_qs = CustomerOrder.objects.select_related(
+            "sale",
+            "sale__branch",
+            "sale__customer",
+            "sale__assigned_to",
+            "sale__customer__route",
+            "delivery_run",
+        )
+        if not _is_admin(request.user):
+            orders_qs = orders_qs.filter(sale__assigned_to=request.user)
+        orders_qs = orders_qs.exclude(status__in=TERMINAL_STATUSES).filter(
+            sale__assigned_to__role__in=list(DELIVERY_ROLES)
+        )
+
+        sales_qs = _eligible_delivery_sale_qs(request).prefetch_related()
+
+        if branch_id:
+            orders_qs = orders_qs.filter(sale__branch_id=branch_id)
+            sales_qs = sales_qs.filter(branch_id=branch_id)
+        if query:
+            orders_qs = orders_qs.filter(
+                models.Q(id__icontains=query)
+                | models.Q(sale__id__icontains=query)
+                | models.Q(sale__customer__name__icontains=query)
+            )
+            sales_qs = sales_qs.filter(
+                models.Q(id__icontains=query)
+                | models.Q(customer__name__icontains=query)
+            )
+
+        queue_rows = []
+        if source_type in ("", "customer_order"):
+            queue_rows.extend(_serialize_delivery_queue_order(order) for order in orders_qs)
+        if source_type in ("", "sale"):
+            queue_rows.extend(_serialize_delivery_queue_sale(sale) for sale in sales_qs)
+
+        queue_rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+        paginator = StandardLimitOffsetPagination()
+        page = paginator.paginate_queryset(queue_rows, request, view=self)
+        page = page if page is not None else queue_rows
+        if page is not queue_rows:
+            return paginator.get_paginated_response(page)
+        return Response(queue_rows)
+
+
 class DeliveryRunCreateView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
     allowed_roles = {"admin", "supervisor"}
 
     def post(self, request):
         data = request.data or {}
+        source_type = (data.get("source_type") or data.get("type") or "").strip().lower()
+        source_id = data.get("source_id")
         order_id = data.get("order_id") or data.get("order")
-        if not order_id:
-            return Response({"order": "Order is required."}, status=400)
+        sale_id = data.get("sale_id") or data.get("sale")
         delivery_person_id = data.get("delivery_person_id") or data.get("delivery_person")
 
-        order = get_object_or_404(CustomerOrder.objects.select_related("sale", "sale__customer"), id=order_id)
-        if order.status in ("cancelled", "delivered"):
-            return Response({"detail": "Cannot create a run for a cancelled or delivered order."}, status=400)
+        order = None
+        sale = None
+        if source_type == "sale" or sale_id:
+            sale = get_object_or_404(Sale.objects.select_related("branch", "customer", "assigned_to"), id=sale_id or source_id or order_id)
+            if sale.status != "completed":
+                return Response({"detail": "Only completed sales can be added to the delivery queue."}, status=400)
+            if not sale.assigned_to_id:
+                return Response({"detail": "Assign a delivery person to the sale before creating a run."}, status=400)
+            delivery_person = sale.assigned_to
+            if _role(delivery_person) not in DELIVERY_ROLES or not delivery_person.is_active:
+                return Response({"detail": "Assigned delivery person is not available."}, status=400)
+            if delivery_person_id and str(delivery_person.id) != str(delivery_person_id):
+                return Response(
+                    {"detail": "Delivery run must use the delivery person already assigned to this sale."},
+                    status=400,
+                )
+        else:
+            if not order_id and not source_id:
+                return Response({"order": "Order is required."}, status=400)
+            order = get_object_or_404(CustomerOrder.objects.select_related("sale", "sale__customer", "sale__assigned_to"), id=order_id or source_id)
+            if order.status in ("cancelled", "delivered"):
+                return Response({"detail": "Cannot create a run for a cancelled or delivered order."}, status=400)
 
-        sale = order.sale
-        if not sale or not sale.assigned_to_id:
-            return Response(
-                {"detail": "Assign a delivery person to the order before creating a delivery run."},
-                status=400,
-            )
+            sale = order.sale
+            if not sale or not sale.assigned_to_id:
+                return Response(
+                    {"detail": "Assign a delivery person to the order before creating a delivery run."},
+                    status=400,
+                )
 
-        delivery_person = sale.assigned_to
-        if delivery_person.role != "deliver_person" or not delivery_person.is_active:
-            return Response({"detail": "Assigned delivery person is not available."}, status=400)
-        if delivery_person_id and str(delivery_person.id) != str(delivery_person_id):
-            return Response(
-                {"detail": "Delivery run must use the delivery person already assigned to this order."},
-                status=400,
-            )
+            delivery_person = sale.assigned_to
+            if _role(delivery_person) not in DELIVERY_ROLES or not delivery_person.is_active:
+                return Response({"detail": "Assigned delivery person is not available."}, status=400)
+            if delivery_person_id and str(delivery_person.id) != str(delivery_person_id):
+                return Response(
+                    {"detail": "Delivery run must use the delivery person already assigned to this order."},
+                    status=400,
+                )
 
         with transaction.atomic():
             try:
                 run = DeliveryRun.objects.create(
                     order=order,
+                    sale=sale if source_type == "sale" or sale_id else None,
                     delivery_person=delivery_person,
                     branch=sale.branch,
                     status="assigned",
                     notes=str(data.get("notes") or "").strip(),
                 )
             except IntegrityError:
-                return Response({"detail": "A delivery run already exists for this order."}, status=400)
+                message = "A delivery run already exists for this order." if order else "A delivery run already exists for this sale."
+                return Response({"detail": message}, status=400)
 
         return Response({"id": str(run.id)}, status=201)
 
@@ -233,7 +421,7 @@ class DeliveryRunDetailView(APIView):
 
     def get(self, request, run_id):
         run = get_object_or_404(
-            DeliveryRun.objects.select_related("order", "order__sale", "order__sale__customer", "delivery_person", "branch"),
+            DeliveryRun.objects.select_related("order", "order__sale", "sale", "sale__customer", "delivery_person", "branch"),
             id=run_id,
         )
         if not _ensure_run_access(request, run):

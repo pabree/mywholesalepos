@@ -1598,13 +1598,47 @@
                     <div id="backoffice-delivery" class="backoffice-section hidden">
                         <div class="backoffice-toolbar">
                             <div class="backoffice-search">
-                                <input type="text" id="backoffice-delivery-search" class="summary-input" placeholder="Search order or customer">
+                                <input type="text" id="backoffice-delivery-search" class="summary-input" placeholder="Search order, sale, or customer">
                             </div>
                             <div class="backoffice-actions backoffice-delivery-scope">
                                 <button id="backoffice-delivery-scope-active" class="backoffice-subtab active" type="button" data-delivery-scope="active">Active</button>
                                 <button id="backoffice-delivery-scope-all" class="backoffice-subtab" type="button" data-delivery-scope="all">All</button>
                             </div>
                         </div>
+                        <div class="backoffice-actions backoffice-delivery-mode">
+                            <button id="backoffice-delivery-mode-queue" class="backoffice-subtab active" type="button" data-delivery-mode="queue">Delivery Queue</button>
+                            <button id="backoffice-delivery-mode-runs" class="backoffice-subtab" type="button" data-delivery-mode="runs">Delivery Runs</button>
+                        </div>
+                        <div id="backoffice-delivery-queue-panel">
+                            <div class="backoffice-filters">
+                                <select id="backoffice-delivery-queue-branch" class="summary-select">
+                                    <option value="">All branches</option>
+                                </select>
+                            </div>
+                            <div class="backoffice-table-wrap">
+                                <table class="backoffice-table" id="backoffice-delivery-queue-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Type</th>
+                                            <th>Reference</th>
+                                            <th>Customer</th>
+                                            <th>Status</th>
+                                            <th>Total</th>
+                                            <th>Delivery Person</th>
+                                            <th>Created</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pagination-controls">
+                                <button id="backoffice-delivery-queue-prev" class="btn-ghost" disabled>Prev</button>
+                                <span id="backoffice-delivery-queue-page" class="pagination-meta">Page 1 of 1</span>
+                                <button id="backoffice-delivery-queue-next" class="btn-ghost" disabled>Next</button>
+                            </div>
+                        </div>
+                        <div id="backoffice-delivery-runs-panel">
                         <div class="backoffice-filters">
                             <select id="backoffice-delivery-status" class="summary-select">
                                 <option value="">All statuses</option>
@@ -1644,6 +1678,7 @@
                             <button id="backoffice-delivery-prev" class="btn-ghost" disabled>Prev</button>
                             <span id="backoffice-delivery-page" class="pagination-meta">Page 1 of 1</span>
                             <button id="backoffice-delivery-next" class="btn-ghost" disabled>Next</button>
+                        </div>
                         </div>
                     </div>
                     <div id="backoffice-payments" class="backoffice-section hidden">

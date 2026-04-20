@@ -171,11 +171,20 @@ let backOfficeOrdersOffset = 0;
 let backOfficeOrdersLimit = 20;
 let backOfficeOrdersPage = { count: 0, next: null, previous: null, results: [] };
 let backOfficeDeliveryRuns = [];
+let backOfficeDeliveryQueue = [];
+let backOfficeDeliveryQueueIndex = new Map();
+let backOfficeDeliveryQueueSaleIndex = new Map();
+let backOfficeDeliveryQueueLoaded = false;
+let backOfficeDeliveryQueueLoading = null;
+let backOfficeDeliveryQueueHighlightSaleId = "";
 let backOfficeDeliveryQuery = "";
 let backOfficeDeliveryOffset = 0;
+let backOfficeDeliveryQueueOffset = 0;
 let backOfficeDeliveryLimit = 20;
 let backOfficeDeliveryPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficeDeliveryQueuePage = { count: 0, next: null, previous: null, results: [] };
 let backOfficeDeliveryScope = localStorage.getItem("backoffice_delivery_scope") || "active";
+let backOfficeDeliveryMode = localStorage.getItem("backoffice_delivery_mode") || "queue";
 let currentDeliveryRun = null;
 let backOfficePayments = [];
 let backOfficePaymentsQuery = "";
@@ -514,8 +523,17 @@ const els = {
     backofficeOrdersPage: document.getElementById("backoffice-orders-page"),
     backofficeOrdersExport: document.getElementById("backoffice-orders-export"),
     backofficeDeliverySearch: document.getElementById("backoffice-delivery-search"),
+    backofficeDeliveryModeQueue: document.getElementById("backoffice-delivery-mode-queue"),
+    backofficeDeliveryModeRuns: document.getElementById("backoffice-delivery-mode-runs"),
+    backofficeDeliveryQueuePanel: document.getElementById("backoffice-delivery-queue-panel"),
+    backofficeDeliveryRunsPanel: document.getElementById("backoffice-delivery-runs-panel"),
     backofficeDeliveryScopeActive: document.getElementById("backoffice-delivery-scope-active"),
     backofficeDeliveryScopeAll: document.getElementById("backoffice-delivery-scope-all"),
+    backofficeDeliveryQueueBranch: document.getElementById("backoffice-delivery-queue-branch"),
+    backofficeDeliveryQueueTable: document.getElementById("backoffice-delivery-queue-table"),
+    backofficeDeliveryQueuePrev: document.getElementById("backoffice-delivery-queue-prev"),
+    backofficeDeliveryQueueNext: document.getElementById("backoffice-delivery-queue-next"),
+    backofficeDeliveryQueuePage: document.getElementById("backoffice-delivery-queue-page"),
     backofficeDeliveryStatus: document.getElementById("backoffice-delivery-status"),
     backofficeDeliveryPerson: document.getElementById("backoffice-delivery-person"),
     backofficeDeliveryBranch: document.getElementById("backoffice-delivery-branch"),
@@ -2000,7 +2018,20 @@ document.addEventListener("DOMContentLoaded", () => {
         els.backofficeDeliverySearch.addEventListener("input", () => {
             backOfficeDeliveryQuery = els.backofficeDeliverySearch.value || "";
             backOfficeDeliveryOffset = 0;
-            loadBackOfficeDeliveryRuns();
+            backOfficeDeliveryQueueOffset = 0;
+            loadBackOfficeDeliveryPanel();
+        });
+    }
+    if (els.backofficeDeliveryModeQueue) {
+        els.backofficeDeliveryModeQueue.addEventListener("click", () => {
+            if (!canViewDeliveryTracking()) return;
+            setBackOfficeDeliveryMode("queue");
+        });
+    }
+    if (els.backofficeDeliveryModeRuns) {
+        els.backofficeDeliveryModeRuns.addEventListener("click", () => {
+            if (!canViewDeliveryTracking()) return;
+            setBackOfficeDeliveryMode("runs");
         });
     }
     if (els.backofficeDeliveryScopeActive) {
@@ -2033,6 +2064,12 @@ document.addEventListener("DOMContentLoaded", () => {
             loadBackOfficeDeliveryRuns();
         });
     }
+    if (els.backofficeDeliveryQueueBranch) {
+        els.backofficeDeliveryQueueBranch.addEventListener("change", () => {
+            backOfficeDeliveryQueueOffset = 0;
+            loadBackOfficeDeliveryQueue();
+        });
+    }
     if (els.backofficeDeliveryPrev) {
         els.backofficeDeliveryPrev.addEventListener("click", () => {
             if (backOfficeDeliveryOffset <= 0) return;
@@ -2045,6 +2082,20 @@ document.addEventListener("DOMContentLoaded", () => {
             if (backOfficeDeliveryOffset + backOfficeDeliveryLimit >= (backOfficeDeliveryPage?.count || 0)) return;
             backOfficeDeliveryOffset += backOfficeDeliveryLimit;
             loadBackOfficeDeliveryRuns();
+        });
+    }
+    if (els.backofficeDeliveryQueuePrev) {
+        els.backofficeDeliveryQueuePrev.addEventListener("click", () => {
+            if (backOfficeDeliveryQueueOffset <= 0) return;
+            backOfficeDeliveryQueueOffset = Math.max(0, backOfficeDeliveryQueueOffset - backOfficeDeliveryLimit);
+            loadBackOfficeDeliveryQueue();
+        });
+    }
+    if (els.backofficeDeliveryQueueNext) {
+        els.backofficeDeliveryQueueNext.addEventListener("click", () => {
+            if (backOfficeDeliveryQueueOffset + backOfficeDeliveryLimit >= (backOfficeDeliveryQueuePage?.count || 0)) return;
+            backOfficeDeliveryQueueOffset += backOfficeDeliveryLimit;
+            loadBackOfficeDeliveryQueue();
         });
     }
     if (els.backofficePaymentsSearch) {
@@ -5474,8 +5525,9 @@ function setBackOfficeSection(section) {
         loadBackOfficeOrders();
     }
     if (backOfficeActiveSection === "delivery") {
+        syncBackOfficeDeliveryModeUI();
         syncBackOfficeDeliveryScopeUI();
-        loadBackOfficeDeliveryRuns();
+        loadBackOfficeDeliveryPanel();
     }
     if (backOfficeActiveSection === "payments") {
         loadBackOfficePayments();
@@ -5494,7 +5546,19 @@ function setBackOfficeDeliveryScope(scope) {
     localStorage.setItem("backoffice_delivery_scope", nextScope);
     syncBackOfficeDeliveryScopeUI();
     backOfficeDeliveryOffset = 0;
-    loadBackOfficeDeliveryRuns();
+    if (backOfficeDeliveryMode === "runs") {
+        loadBackOfficeDeliveryRuns();
+    }
+}
+
+function setBackOfficeDeliveryMode(mode) {
+    const nextMode = mode === "runs" ? "runs" : "queue";
+    backOfficeDeliveryMode = nextMode;
+    localStorage.setItem("backoffice_delivery_mode", nextMode);
+    syncBackOfficeDeliveryModeUI();
+    backOfficeDeliveryOffset = 0;
+    backOfficeDeliveryQueueOffset = 0;
+    loadBackOfficeDeliveryPanel();
 }
 
 function syncBackOfficeDeliveryScopeUI() {
@@ -5504,6 +5568,43 @@ function syncBackOfficeDeliveryScopeUI() {
     if (els.backofficeDeliveryScopeAll) {
         els.backofficeDeliveryScopeAll.classList.toggle("active", backOfficeDeliveryScope === "all");
     }
+}
+
+function syncBackOfficeDeliveryModeUI() {
+    if (els.backofficeDeliveryModeQueue) {
+        els.backofficeDeliveryModeQueue.classList.toggle("active", backOfficeDeliveryMode !== "runs");
+    }
+    if (els.backofficeDeliveryModeRuns) {
+        els.backofficeDeliveryModeRuns.classList.toggle("active", backOfficeDeliveryMode === "runs");
+    }
+    if (els.backofficeDeliveryQueuePanel) {
+        els.backofficeDeliveryQueuePanel.classList.toggle("hidden", backOfficeDeliveryMode === "runs");
+    }
+    if (els.backofficeDeliveryRunsPanel) {
+        els.backofficeDeliveryRunsPanel.classList.toggle("hidden", backOfficeDeliveryMode !== "runs");
+    }
+    const scopeWrapper = els.backofficeDeliveryScopeActive?.closest(".backoffice-delivery-scope");
+    if (scopeWrapper) {
+        scopeWrapper.classList.toggle("hidden", backOfficeDeliveryMode !== "runs");
+    }
+    if (els.backofficeDeliveryStatus || els.backofficeDeliveryPerson || els.backofficeDeliveryBranch || els.backofficeDeliveryTable) {
+        const runsHidden = backOfficeDeliveryMode !== "runs";
+        [els.backofficeDeliveryStatus, els.backofficeDeliveryPerson, els.backofficeDeliveryBranch, els.backofficeDeliveryTable, els.backofficeDeliveryPrev, els.backofficeDeliveryNext, els.backofficeDeliveryPage]
+            .forEach(el => {
+                if (el && el.closest) {
+                    const wrapper = el.closest(".backoffice-filters, .backoffice-table-wrap, .pagination-controls");
+                    if (wrapper) wrapper.classList.toggle("hidden", runsHidden);
+                }
+            });
+    }
+}
+
+async function loadBackOfficeDeliveryPanel() {
+    if (backOfficeDeliveryMode === "runs") {
+        await loadBackOfficeDeliveryRuns();
+        return;
+    }
+    await loadBackOfficeDeliveryQueue();
 }
 
 function setBackOfficePurchasesTab(tab) {
@@ -6936,6 +7037,7 @@ async function loadBackOfficeSales() {
     if (!canAccessBackOffice()) return;
     try {
         await loadBackOfficeBranches();
+        await ensureDeliveryQueueCache();
         const endpoint = withParams("/sales/backoffice/sales/", {
             limit: backOfficeSalesLimit,
             offset: backOfficeSalesOffset,
@@ -6994,6 +7096,11 @@ function renderBackOfficeSales() {
         const paymentMethod = sale.payment_mode ? formatPaymentMode(sale.payment_mode) : "";
         const paymentStatus = sale.payment_status ? renderStatusBadge(sale.payment_status) : "";
         const paymentText = [paymentMethod, paymentStatus].filter(Boolean).join(" ") || "—";
+        const deliveryBadge = renderDeliverySaleBadge(sale);
+        const deliveryAction = renderDeliverySaleAction(sale, {
+            buttonClass: "btn-ghost",
+            compact: true,
+        });
         return `
             <tr>
                 <td>#${shortOrderId(sale.id)}</td>
@@ -7005,7 +7112,13 @@ function renderBackOfficeSales() {
                 <td>${fmtPrice(sale.balance_due || 0)}</td>
                 <td>${paymentText}</td>
                 <td>${formatDateTime(sale.sale_date)}</td>
-                <td><button class="btn-ghost" onclick="openBackOfficeSaleDetail('${sale.id}')">View</button></td>
+                <td>
+                    <div class="delivery-row-actions">
+                        ${deliveryBadge}
+                        ${deliveryAction}
+                        <button class="btn-ghost" onclick="openBackOfficeSaleDetail('${sale.id}')">View</button>
+                    </div>
+                </td>
             </tr>
         `;
     }).join("");
@@ -7474,6 +7587,43 @@ async function loadBackOfficeDeliveryRuns() {
     }
 }
 
+async function loadBackOfficeDeliveryQueue() {
+    if (!canAccessBackOffice()) return;
+    try {
+        await loadBackOfficeBranches();
+        const queueParams = {
+            limit: backOfficeDeliveryLimit,
+            offset: backOfficeDeliveryQueueOffset,
+            search: backOfficeDeliveryQuery,
+            branch: els.backofficeDeliveryQueueBranch?.value || "",
+            type: "sale",
+        };
+        const endpoint = withParams("/delivery/queue/", queueParams);
+        const data = await apiFetch(endpoint);
+        const page = normalizePaginated(data);
+        backOfficeDeliveryQueuePage = page;
+        backOfficeDeliveryQueue = ensureArray(page, "backOfficeDeliveryQueue");
+        syncDeliveryQueueIndex(backOfficeDeliveryQueue);
+        renderBackOfficeDeliveryQueue();
+        updatePager({
+            prevEl: els.backofficeDeliveryQueuePrev,
+            nextEl: els.backofficeDeliveryQueueNext,
+            pageEl: els.backofficeDeliveryQueuePage,
+            offset: backOfficeDeliveryQueueOffset,
+            limit: backOfficeDeliveryLimit,
+            pageData: page,
+        });
+    } catch (err) {
+        console.error("Failed to load delivery queue", err);
+        if (els.backofficeDeliveryQueueTable) {
+            const tbody = els.backofficeDeliveryQueueTable.querySelector("tbody");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="8">Failed to load delivery queue.</td></tr>`;
+            }
+        }
+    }
+}
+
 async function loadBackOfficeDeliveryPeople() {
     if (!els.backofficeDeliveryPerson) return;
     await ensureAssignableUsers();
@@ -7503,8 +7653,8 @@ function renderBackOfficeDeliveryRuns() {
         return;
     }
     tbody.innerHTML = rows.map(run => {
-        const orderId = run.order?.id ? `#${shortOrderId(run.order.id)}` : "—";
-        const customerName = run.order?.customer_name || "—";
+        const orderId = run.order?.id ? `#${shortOrderId(run.order.id)}` : (run.sale?.id ? `#${shortOrderId(run.sale.id)}` : "—");
+        const customerName = run.order?.customer_name || run.sale?.customer?.name || "—";
         const deliveryPerson = run.delivery_person?.name || run.delivery_person?.username || "—";
         const branchName = run.branch?.name || "—";
         const statusBadge = renderDeliveryStatusBadge(run.status);
@@ -7537,6 +7687,83 @@ function renderBackOfficeDeliveryRuns() {
     enhanceFriendlyLocationLabels(tbody);
 }
 
+function renderBackOfficeDeliveryQueue() {
+    if (!els.backofficeDeliveryQueueTable) return;
+    const tbody = els.backofficeDeliveryQueueTable.querySelector("tbody");
+    if (!tbody) return;
+    const rows = backOfficeDeliveryQueue;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="8">No delivery queue items found</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(item => {
+        const itemType = item.type || item.source_type || "customer_order";
+        const typeLabel = itemType === "sale" ? "POS Sale" : "Customer Order";
+        const ref = item.order_id || item.sale_id ? `#${shortOrderId(item.order_id || item.sale_id)}` : "—";
+        const customerName = item.customer?.name || "—";
+        const deliveryPerson = item.delivery_person?.name || item.delivery_person?.username || "—";
+        const createdAt = formatDateTime(item.created_at);
+        const statusBadge = renderDeliveryStatusBadge(item.status);
+        const total = fmtPrice(item.total || 0);
+        const runAction = item.existing_run_id
+            ? `<button class="btn-secondary btn-inline" onclick="openBackOfficeDeliveryDetail('${item.existing_run_id}')">View Run</button>`
+            : `<button class="btn-primary btn-inline" data-create-delivery-run="${itemType}" data-source-id="${item.source_id}" data-delivery-person="${item.delivery_person?.id || ""}">Create Run</button>`;
+        const sourceAction = item.order_id
+            ? `<button class="btn-ghost btn-inline" onclick="openBackOfficeOrderDetail('${item.order_id}')">View Order</button>`
+            : `<button class="btn-ghost btn-inline" onclick="openBackOfficeSaleDetail('${item.sale_id}')">View Sale</button>`;
+        const badge = `<span class="status-pill status-draft-queued">Delivery</span>`;
+        return `
+            <tr data-delivery-queue-sale-id="${esc(item.sale_id || item.order_id || "")}" class="${backOfficeDeliveryQueueHighlightSaleId && String(backOfficeDeliveryQueueHighlightSaleId) === String(item.sale_id || item.order_id || "") ? "delivery-queue-highlight" : ""}">
+                <td>${esc(typeLabel)}</td>
+                <td>${esc(ref)}</td>
+                <td>${esc(customerName)} ${badge}</td>
+                <td>${statusBadge}</td>
+                <td>${esc(total)}</td>
+                <td>${esc(deliveryPerson)}</td>
+                <td>${esc(createdAt)}</td>
+                <td>
+                    <div class="delivery-row-actions">
+                        ${sourceAction}
+                        ${runAction}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join("");
+    tbody.querySelectorAll("[data-create-delivery-run]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const sourceType = btn.dataset.createDeliveryRun;
+            const sourceId = btn.dataset.sourceId;
+            const deliveryPersonId = btn.dataset.deliveryPerson || "";
+            if (!sourceId) return;
+            try {
+                const res = await apiRequest("/delivery/runs/create/", {
+                    method: "POST",
+                    body: {
+                        source_type: sourceType,
+                        source_id: sourceId,
+                        delivery_person_id: deliveryPersonId || null,
+                    },
+                });
+                toast("Delivery run created", "success");
+                if (res?.id) {
+                    openBackOfficeDeliveryDetail(res.id);
+                    await loadBackOfficeDeliveryQueue();
+                }
+            } catch (err) {
+                toast(`Create run failed: ${err.message}`, "error");
+            }
+        });
+    });
+    if (backOfficeDeliveryQueueHighlightSaleId) {
+        const highlighted = tbody.querySelector(`[data-delivery-queue-sale-id="${CSS.escape(String(backOfficeDeliveryQueueHighlightSaleId))}"]`);
+        if (highlighted) {
+            highlighted.classList.add("delivery-queue-highlight");
+            highlighted.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    }
+}
+
 async function openBackOfficeDeliveryDetail(runId) {
     if (!runId || !els.backofficeDeliveryDetailModal) return;
     els.backofficeDeliveryDetailBody.innerHTML = `<div class="muted">Loading delivery run...</div>`;
@@ -7564,8 +7791,8 @@ function renderBackOfficeDeliveryDetail(run, history = []) {
         return;
     }
     const orderId = run.order?.id ? `#${shortOrderId(run.order.id)}` : "—";
-    const saleId = run.order?.sale_id ? `#${shortOrderId(run.order.sale_id)}` : "—";
-    const customerName = run.order?.customer_name || "—";
+    const saleId = run.order?.sale_id ? `#${shortOrderId(run.order.sale_id)}` : (run.sale?.id ? `#${shortOrderId(run.sale.id)}` : "—");
+    const customerName = run.order?.customer_name || run.sale?.customer?.name || "—";
     const deliveryPerson = run.delivery_person?.name || run.delivery_person?.username || "—";
     const branchName = run.branch?.name || "—";
     const statusBadge = renderDeliveryStatusBadge(run.status);
@@ -7573,7 +7800,7 @@ function renderBackOfficeDeliveryDetail(run, history = []) {
     const historyHtml = renderDeliveryRunHistoryList(history);
     const orderAction = run.order?.id
         ? `<div class="detail-actions"><button class="btn-secondary" onclick="openBackOfficeOrderDetail('${run.order.id}')">View Order</button></div>`
-        : "";
+        : (run.sale?.id ? `<div class="detail-actions"><button class="btn-secondary" onclick="openBackOfficeSaleDetail('${run.sale.id}')">View Sale</button></div>` : "");
     const proofSection = run.status === "delivered" || run.recipient_name
         ? `
         <div class="detail-section">
@@ -8422,6 +8649,7 @@ async function loadBackOfficeBranches() {
     const currentSalesBranch = els.backofficeSalesBranch?.value || "";
     const currentOrdersBranch = els.backofficeOrdersBranch?.value || "";
     const currentDeliveryBranch = els.backofficeDeliveryBranch?.value || "";
+    const currentDeliveryQueueBranch = els.backofficeDeliveryQueueBranch?.value || "";
     const currentPaymentsBranch = els.backofficePaymentsBranch?.value || "";
     const currentPurchaseBranch = els.backofficePurchasesBranch?.value || "";
     const currentBillsBranch = els.backofficeBillsBranch?.value || "";
@@ -8468,6 +8696,16 @@ async function loadBackOfficeBranches() {
         `;
         if (currentDeliveryBranch) {
             els.backofficeDeliveryBranch.value = currentDeliveryBranch;
+        }
+    }
+
+    if (els.backofficeDeliveryQueueBranch) {
+        els.backofficeDeliveryQueueBranch.innerHTML = `
+            <option value="">All branches</option>
+            ${branches.map(b => `<option value="${b.id}">${esc(b.name)} — ${esc(b.location || "")}</option>`).join("")}
+        `;
+        if (currentDeliveryQueueBranch) {
+            els.backofficeDeliveryQueueBranch.value = currentDeliveryQueueBranch;
         }
     }
 
@@ -10054,6 +10292,9 @@ function hydrateCreditSelectors() {
 
 async function loadCreditSales() {
     creditSalesCache = await apiFetch("/sales/credit/open/") || [];
+    if (canAccessDeliveryQueue()) {
+        await ensureDeliveryQueueCache();
+    }
     renderCreditSales();
 }
 
@@ -10073,12 +10314,23 @@ function renderCreditSales() {
     }
     els.creditSalesList.innerHTML = list.map(sale => {
         const active = selectedCreditSale && selectedCreditSale.id === sale.id;
+        const deliveryBadge = renderDeliverySaleBadge(sale);
+        const queueItem = getDeliveryQueueItemForSale(sale.id);
+        const queueRunId = queueItem?.existing_run_id || queueItem?.delivery_run_id || "";
+        const runLabel = queueRunId ? "View Run" : "Go to Delivery";
+        const runClick = queueRunId
+            ? `openBackOfficeDeliveryDetail('${queueRunId}')`
+            : `openDeliveryQueueForSale('${sale.id}')`;
         return `
             <div class="credit-sale-item ${active ? "active" : ""}" onclick="selectCreditSale('${sale.id}')">
                 <div>
                     <div>${esc(getCustomerName(sale.customer))}</div>
                     <div class="muted">${sale.id}</div>
                     <div class="muted">Due ${sale.due_date || "—"}</div>
+                    <div class="credit-sale-delivery-row">
+                        ${deliveryBadge}
+                        ${deliveryBadge ? `<button class="btn-secondary btn-inline" onclick="event.stopPropagation(); ${runClick}">${runLabel}</button>` : ""}
+                    </div>
                 </div>
                 <div>
                     <div>${fmtPrice(sale.balance_due ?? sale.balance ?? 0)}</div>
@@ -10104,6 +10356,13 @@ function renderCreditSaleDetail(sale) {
     }
     const payments = sale.payments || [];
     const paymentsHtml = renderPaymentHistoryList(payments, { compact: true });
+    const deliveryBadge = renderDeliverySaleBadge(sale);
+    const queueItem = getDeliveryQueueItemForSale(sale.id);
+    const queueRunId = queueItem?.existing_run_id || queueItem?.delivery_run_id || "";
+    const runLabel = queueRunId ? "View Run" : "Go to Delivery";
+    const runClick = queueRunId
+        ? `openBackOfficeDeliveryDetail('${queueRunId}')`
+        : `openDeliveryQueueForSale('${sale.id}')`;
 
     els.creditSaleDetail.innerHTML = `
         <div class="credit-detail-row"><span>Customer</span><strong>${esc(getCustomerName(sale.customer))}</strong></div>
@@ -10112,6 +10371,7 @@ function renderCreditSaleDetail(sale) {
         <div class="credit-detail-row"><span>Balance Due</span><strong>${fmtPrice(sale.balance_due ?? sale.balance ?? 0)}</strong></div>
         <div class="credit-detail-row"><span>Due Date</span><strong>${sale.due_date || "—"}</strong></div>
         <div class="credit-detail-row"><span>Status</span><strong>${renderStatusBadge(sale.payment_status)}</strong></div>
+        ${deliveryBadge ? `<div class="credit-detail-row credit-delivery-row"><span>Delivery</span><div>${deliveryBadge}<button class="btn-primary btn-inline" onclick="${runClick}">${runLabel}</button></div></div>` : ""}
         <div class="payment-history">
             <div class="credit-detail-row"><span>Payment History</span></div>
             ${paymentsHtml}
@@ -14491,6 +14751,86 @@ function getResolvedUserRole() {
 function isDeliveryRole(role = getResolvedUserRole()) {
     const normalized = normalizeRole(role);
     return normalized === "deliver_person" || normalized === "delivery_person";
+}
+
+function canAccessDeliveryQueue() {
+    return canViewDeliveryTracking();
+}
+
+function isDeliveryEligibleSale(sale) {
+    if (!sale) return false;
+    if (sale.delivery_required) return true;
+    const assignedRole = normalizeRole(sale.assigned_to?.role);
+    return assignedRole === "deliver_person" || assignedRole === "delivery_person";
+}
+
+function renderDeliverySaleBadge(sale) {
+    if (!isDeliveryEligibleSale(sale)) return "";
+    return `<span class="status-pill status-draft-queued">Delivery</span>`;
+}
+
+function renderDeliverySaleAction(sale, { buttonClass = "btn-ghost", compact = true } = {}) {
+    if (!isDeliveryEligibleSale(sale) || !canAccessDeliveryQueue()) return "";
+    const queueItem = getDeliveryQueueItemForSale(sale?.id);
+    const existingRunId = queueItem?.existing_run_id || queueItem?.delivery_run_id || "";
+    const label = existingRunId ? "View Run" : "Go to Delivery";
+    const click = existingRunId
+        ? `openBackOfficeDeliveryDetail('${existingRunId}')`
+        : `openDeliveryQueueForSale('${sale.id}')`;
+    const extraClass = compact ? "btn-inline" : "";
+    const classes = [buttonClass, extraClass].filter(Boolean).join(" ");
+    return `<button class="${classes}" onclick="${click}">${label}</button>`;
+}
+
+function syncDeliveryQueueIndex(rows) {
+    backOfficeDeliveryQueueIndex = new Map();
+    backOfficeDeliveryQueueSaleIndex = new Map();
+    (Array.isArray(rows) ? rows : []).forEach(item => {
+        if (!item?.id) return;
+        backOfficeDeliveryQueueIndex.set(String(item.id), item);
+        if (item.sale_id) backOfficeDeliveryQueueSaleIndex.set(String(item.sale_id), item);
+        if (item.order_id) backOfficeDeliveryQueueSaleIndex.set(String(item.order_id), item);
+    });
+    backOfficeDeliveryQueueLoaded = true;
+}
+
+async function ensureDeliveryQueueCache({ force = false } = {}) {
+    if (!canAccessDeliveryQueue()) return [];
+    if (backOfficeDeliveryQueueLoading) return backOfficeDeliveryQueueLoading;
+    if (backOfficeDeliveryQueueLoaded && !force) return backOfficeDeliveryQueue;
+    backOfficeDeliveryQueueLoading = (async () => {
+        const rows = await apiFetchAll(withParams("/delivery/queue/", { type: "sale" })) || [];
+        const items = ensureArray(rows, "deliveryQueueCache");
+        syncDeliveryQueueIndex(items);
+        backOfficeDeliveryQueue = items;
+        return items;
+    })().finally(() => {
+        backOfficeDeliveryQueueLoading = null;
+    });
+    return backOfficeDeliveryQueueLoading;
+}
+
+function getDeliveryQueueItemForSale(saleId) {
+    if (!saleId) return null;
+    return backOfficeDeliveryQueueSaleIndex.get(String(saleId)) || null;
+}
+
+function openDeliveryQueueForSale(saleId) {
+    if (!saleId) return;
+    if (!canAccessDeliveryQueue()) {
+        toast("Delivery Queue is not available for your role.", "error");
+        return;
+    }
+    if (!canAccessBackOffice()) {
+        toast("You do not have access to Delivery Queue.", "error");
+        return;
+    }
+    if (els.backofficeModal && els.backofficeModal.classList.contains("hidden")) {
+        openBackOffice();
+    }
+    backOfficeDeliveryQueueHighlightSaleId = String(saleId);
+    setBackOfficeSection("delivery");
+    setBackOfficeDeliveryMode("queue");
 }
 
 function canImportProducts() {

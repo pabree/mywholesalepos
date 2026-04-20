@@ -35,6 +35,15 @@ class DeliveryRun(BaseModel):
     order = models.OneToOneField(
         "sales.CustomerOrder",
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="delivery_run",
+    )
+    sale = models.OneToOneField(
+        "sales.Sale",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="delivery_run",
     )
     delivery_person = models.ForeignKey(

@@ -4499,6 +4499,14 @@ body.offline .offline-status {
     box-shadow: none;
 }
 
+.credit-sale-delivery-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+}
+
 .credit-empty {
     padding: 12px;
     color: var(--text-muted);
@@ -4515,6 +4523,19 @@ body.offline .offline-status {
     display: flex;
     justify-content: space-between;
     padding: 4px 0;
+}
+
+.credit-delivery-row {
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.credit-delivery-row > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
 }
 
 .credit-inline {
