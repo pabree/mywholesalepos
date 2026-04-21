@@ -93,6 +93,31 @@
                     <div id="mobile-summary-expenses-sub" class="summary-sub">—</div>
                 </div>
             </div>
+            <section id="mobile-delivery-dashboard" class="mobile-delivery-dashboard hidden" aria-label="Delivery dashboard">
+                <div class="mobile-delivery-dashboard-header">
+                    <div>
+                        <h3>My Work</h3>
+                        <p class="panel-subtitle">Assigned delivery orders and runs.</p>
+                    </div>
+                </div>
+                <div class="mobile-delivery-dashboard-grid">
+                    <button id="mobile-delivery-assigned-orders" type="button" class="mobile-summary-card mobile-summary-action">
+                        <span class="summary-label">Assigned Orders</span>
+                        <div id="mobile-delivery-assigned-orders-value" class="summary-value">—</div>
+                        <div id="mobile-delivery-assigned-orders-sub" class="summary-sub">—</div>
+                    </button>
+                    <button id="mobile-delivery-active-runs" type="button" class="mobile-summary-card mobile-summary-action">
+                        <span class="summary-label">Active Deliveries</span>
+                        <div id="mobile-delivery-active-runs-value" class="summary-value">—</div>
+                        <div id="mobile-delivery-active-runs-sub" class="summary-sub">—</div>
+                    </button>
+                    <button id="mobile-delivery-completed-today" type="button" class="mobile-summary-card mobile-summary-action">
+                        <span class="summary-label">Completed Today</span>
+                        <div id="mobile-delivery-completed-today-value" class="summary-value">—</div>
+                        <div id="mobile-delivery-completed-today-sub" class="summary-sub">—</div>
+                    </button>
+                </div>
+            </section>
             <div class="mobile-action-grid">
                 <button id="mobile-tile-sell" class="mobile-action-tile">
                     <span class="tile-icon" aria-hidden="true">
@@ -150,6 +175,31 @@
                     </span>
                     <span class="tile-title">Delivery</span>
                 </button>
+            </div>
+        </section>
+
+        <!-- MOBILE: Deliveries -->
+        <section id="mobile-deliveries-panel" class="mobile-panel mobile-section" data-mobile-tab="deliveries">
+            <div class="panel-header mobile-panel-header">
+                <button id="mobile-deliveries-back" class="btn-ghost">← Home</button>
+                <div>
+                    <h2>Deliveries</h2>
+                    <p id="mobile-deliveries-scope" class="panel-subtitle">Assigned runs</p>
+                </div>
+            </div>
+            <div class="mobile-filter-row">
+                <label for="mobile-deliveries-filter">Filter</label>
+                <select id="mobile-deliveries-filter" class="summary-select">
+                    <option value="active">Active</option>
+                    <option value="completed_today">Completed Today</option>
+                    <option value="all">All</option>
+                </select>
+            </div>
+            <div class="mobile-panel-body">
+                <div id="mobile-deliveries-loading" class="orders-loading hidden">Loading deliveries...</div>
+                <div id="mobile-deliveries-error" class="orders-error hidden"></div>
+                <div id="mobile-deliveries-list" class="orders-list"></div>
+                <div id="mobile-deliveries-empty" class="orders-empty">No deliveries found.</div>
             </div>
         </section>
 

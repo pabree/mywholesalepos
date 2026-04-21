@@ -1,6 +1,7 @@
 from django.urls import path
 from .delivery_views import (
     DeliveryRunListView,
+    DeliveryDashboardView,
     DeliveryQueueView,
     DeliveryRunCreateView,
     DeliveryRunDetailView,
@@ -15,6 +16,7 @@ from .delivery_views import (
 
 
 urlpatterns = [
+    path("dashboard/", DeliveryDashboardView.as_view(), name="delivery-dashboard"),
     path("runs/", DeliveryRunListView.as_view(), name="delivery-runs-list"),
     path("queue/", DeliveryQueueView.as_view(), name="delivery-queue"),
     path("runs/create/", DeliveryRunCreateView.as_view(), name="delivery-runs-create"),

@@ -156,6 +156,12 @@ let mobileCustomersLoading = false;
 let mobileCustomersTimer = null;
 let currentMobileCustomerId = null;
 let mobileCustomerPaymentSaving = false;
+let mobileDeliveriesFilter = localStorage.getItem("mobile_deliveries_filter") || "active";
+let mobileDeliveriesLoading = false;
+let mobileDeliveriesError = "";
+let mobileDeliveriesPage = { count: 0, next: null, previous: null, results: [] };
+let mobileDeliveries = [];
+let mobileDeliveryDashboardLoading = false;
 const MOBILE_UI_STATE_KEY = "mobile_ui_state_v1";
 let mobileUiState = loadMobileUiState();
 let mobileStateRestoring = false;
@@ -889,6 +895,16 @@ const els = {
     mobileSummarySalesSub: document.getElementById("mobile-summary-sales-sub"),
     mobileSummaryExpensesValue: document.getElementById("mobile-summary-expenses-value"),
     mobileSummaryExpensesSub: document.getElementById("mobile-summary-expenses-sub"),
+    mobileDeliveryDashboard: document.getElementById("mobile-delivery-dashboard"),
+    mobileDeliveryAssignedOrdersValue: document.getElementById("mobile-delivery-assigned-orders-value"),
+    mobileDeliveryAssignedOrdersSub: document.getElementById("mobile-delivery-assigned-orders-sub"),
+    mobileDeliveryActiveRunsValue: document.getElementById("mobile-delivery-active-runs-value"),
+    mobileDeliveryActiveRunsSub: document.getElementById("mobile-delivery-active-runs-sub"),
+    mobileDeliveryCompletedTodayValue: document.getElementById("mobile-delivery-completed-today-value"),
+    mobileDeliveryCompletedTodaySub: document.getElementById("mobile-delivery-completed-today-sub"),
+    mobileDeliveryAssignedOrdersBtn: document.getElementById("mobile-delivery-assigned-orders"),
+    mobileDeliveryActiveRunsBtn: document.getElementById("mobile-delivery-active-runs"),
+    mobileDeliveryCompletedTodayBtn: document.getElementById("mobile-delivery-completed-today"),
     mobileTileSell: document.getElementById("mobile-tile-sell"),
     mobileTileSales: document.getElementById("mobile-tile-sales"),
     mobileTileStock: document.getElementById("mobile-tile-stock"),
@@ -924,6 +940,14 @@ const els = {
     mobileReportsLowStock: document.getElementById("mobile-reports-low-stock"),
     mobileReportsTopProducts: document.getElementById("mobile-reports-top-products"),
     mobileReportsEmpty: document.getElementById("mobile-reports-empty"),
+    mobileDeliveriesPanel: document.getElementById("mobile-deliveries-panel"),
+    mobileDeliveriesBack: document.getElementById("mobile-deliveries-back"),
+    mobileDeliveriesFilter: document.getElementById("mobile-deliveries-filter"),
+    mobileDeliveriesScope: document.getElementById("mobile-deliveries-scope"),
+    mobileDeliveriesLoading: document.getElementById("mobile-deliveries-loading"),
+    mobileDeliveriesError: document.getElementById("mobile-deliveries-error"),
+    mobileDeliveriesList: document.getElementById("mobile-deliveries-list"),
+    mobileDeliveriesEmpty: document.getElementById("mobile-deliveries-empty"),
     mobileCustomerDetailModal: document.getElementById("mobile-customer-detail-modal"),
     mobileCustomerDetailClose: document.getElementById("mobile-customer-detail-close"),
     mobileCustomerDetailBody: document.getElementById("mobile-customer-detail-body"),
@@ -2850,7 +2874,7 @@ function isMobileLayout() {
     return window.matchMedia && window.matchMedia("(max-width: 900px)").matches;
 }
 
-const MOBILE_HISTORY_TABS = new Set(["home", "products", "cart", "sales", "stock", "customers", "reports", "checkout"]);
+const MOBILE_HISTORY_TABS = new Set(["home", "products", "cart", "sales", "stock", "customers", "reports", "checkout", "deliveries"]);
 const MOBILE_HISTORY_OVERLAYS = new Set([
     "mobile-sale-detail-modal",
     "mobile-customer-detail-modal",
@@ -2883,6 +2907,8 @@ function canAccessMobileTab(tab) {
             return canViewCustomers();
         case "reports":
             return canViewReports();
+        case "deliveries":
+            return isDeliveryRole();
         case "home":
         default:
             return true;
@@ -3309,6 +3335,9 @@ function refreshMobileTab(tab) {
     if (tab === "reports") {
         loadMobileReports();
     }
+    if (tab === "deliveries") {
+        loadMobileDeliveries();
+    }
 }
 
 function initMobileDashboard() {
@@ -3376,6 +3405,15 @@ function initMobileDashboard() {
             openDeliveryRunModal();
         });
     }
+    if (els.mobileDeliveryAssignedOrdersBtn) {
+        els.mobileDeliveryAssignedOrdersBtn.addEventListener("click", openDeliveryDashboardOrders);
+    }
+    if (els.mobileDeliveryActiveRunsBtn) {
+        els.mobileDeliveryActiveRunsBtn.addEventListener("click", () => openDeliveryDashboardDeliveries("active"));
+    }
+    if (els.mobileDeliveryCompletedTodayBtn) {
+        els.mobileDeliveryCompletedTodayBtn.addEventListener("click", () => openDeliveryDashboardDeliveries("completed_today"));
+    }
     if (els.mobileSalesBack) {
         els.mobileSalesBack.addEventListener("click", () => setMobileTab("home"));
     }
@@ -3390,6 +3428,14 @@ function initMobileDashboard() {
     }
     if (els.mobileReportsRetry) {
         els.mobileReportsRetry.addEventListener("click", () => loadMobileReports());
+    }
+    if (els.mobileDeliveriesBack) {
+        els.mobileDeliveriesBack.addEventListener("click", () => setMobileTab("home"));
+    }
+    if (els.mobileDeliveriesFilter) {
+        els.mobileDeliveriesFilter.addEventListener("change", () => {
+            setMobileDeliveriesFilter(els.mobileDeliveriesFilter.value);
+        });
     }
     if (els.mobileReportsPanel) {
         els.mobileReportsPanel.addEventListener("click", (event) => {
@@ -3529,6 +3575,9 @@ function updateMobileDashboardTiles() {
     setTileVisible(els.mobileTileCustomerOrders, canCustomerOrders);
     setTileVisible(els.mobileTileReports, canReports && !isDelivery);
     setTileVisible(els.mobileTileDelivery, canDelivery);
+    if (els.mobileDeliveryDashboard) {
+        els.mobileDeliveryDashboard.classList.toggle("hidden", !isDelivery);
+    }
 }
 
 async function loadMobileDashboardSummary() {
@@ -3538,6 +3587,9 @@ async function loadMobileDashboardSummary() {
         els.mobileSummarySalesSub.textContent = "Log in to view";
         els.mobileSummaryExpensesValue.textContent = "—";
         els.mobileSummaryExpensesSub.textContent = "Log in to view";
+        if (els.mobileDeliveryDashboard) {
+            els.mobileDeliveryDashboard.classList.add("hidden");
+        }
         restoreMobileScrollIfNeeded("home");
         return;
     }
@@ -3563,6 +3615,7 @@ async function loadMobileDashboardSummary() {
         els.mobileSummarySalesValue.textContent = "—";
         els.mobileSummarySalesSub.textContent = "Not available";
     }
+    await loadMobileDeliveryDashboardSummary();
 
     if (!canViewLedger()) {
         els.mobileSummaryExpensesValue.textContent = "—";
@@ -3583,6 +3636,44 @@ async function loadMobileDashboardSummary() {
         els.mobileSummaryExpensesSub.textContent = "Unable to load";
     }
     restoreMobileScrollIfNeeded("home");
+}
+
+async function loadMobileDeliveryDashboardSummary() {
+    if (!isMobileLayout() || !els.mobileDeliveryDashboard) return;
+    const deliveryRole = isDeliveryRole();
+    els.mobileDeliveryDashboard.classList.toggle("hidden", !deliveryRole);
+    if (!deliveryRole) return;
+    if (mobileDeliveryDashboardLoading) return;
+    if (!API_TOKEN || !currentUser) {
+        setMobileDeliveryDashboardState(null, "Log in to view", null, "—", null, "—");
+        return;
+    }
+    mobileDeliveryDashboardLoading = true;
+    setMobileDeliveryDashboardState("Loading...", "—", "Loading...", "—", "Loading...", "—");
+    try {
+        const summary = await apiFetch("/delivery/dashboard/");
+        setMobileDeliveryDashboardState(
+            String(summary?.assigned_orders_count ?? 0),
+            "Assigned to you",
+            String(summary?.active_deliveries_count ?? 0),
+            "In progress",
+            String(summary?.completed_today_count ?? 0),
+            "Delivered today",
+        );
+    } catch (err) {
+        setMobileDeliveryDashboardState("—", "Unable to load", "—", "Unable to load", "—", "Unable to load");
+    } finally {
+        mobileDeliveryDashboardLoading = false;
+    }
+}
+
+function setMobileDeliveryDashboardState(ordersValue, ordersSub, activeValue, activeSub, completedValue, completedSub) {
+    if (els.mobileDeliveryAssignedOrdersValue) els.mobileDeliveryAssignedOrdersValue.textContent = ordersValue ?? "—";
+    if (els.mobileDeliveryAssignedOrdersSub) els.mobileDeliveryAssignedOrdersSub.textContent = ordersSub ?? "—";
+    if (els.mobileDeliveryActiveRunsValue) els.mobileDeliveryActiveRunsValue.textContent = activeValue ?? "—";
+    if (els.mobileDeliveryActiveRunsSub) els.mobileDeliveryActiveRunsSub.textContent = activeSub ?? "—";
+    if (els.mobileDeliveryCompletedTodayValue) els.mobileDeliveryCompletedTodayValue.textContent = completedValue ?? "—";
+    if (els.mobileDeliveryCompletedTodaySub) els.mobileDeliveryCompletedTodaySub.textContent = completedSub ?? "—";
 }
 
 async function loadMobileSales() {
@@ -3670,6 +3761,133 @@ async function loadMobileSales() {
         mobileSalesLoading = false;
         restoreMobileScrollIfNeeded("sales");
     }
+}
+
+function setMobileDeliveriesFilter(filter) {
+    const nextFilter = ["active", "completed_today", "all"].includes(filter) ? filter : "active";
+    mobileDeliveriesFilter = nextFilter;
+    localStorage.setItem("mobile_deliveries_filter", nextFilter);
+    if (els.mobileDeliveriesFilter) {
+        els.mobileDeliveriesFilter.value = nextFilter;
+    }
+    if (activeMobileTab === "deliveries") {
+        loadMobileDeliveries();
+    }
+}
+
+async function loadMobileDeliveries() {
+    if (!els.mobileDeliveriesList || !isMobileLayout()) return;
+    if (!API_TOKEN || !currentUser) {
+        els.mobileDeliveriesList.innerHTML = `<div class="sale-entry-empty">Log in to view deliveries.</div>`;
+        if (els.mobileDeliveriesScope) els.mobileDeliveriesScope.textContent = "Assigned runs";
+        restoreMobileScrollIfNeeded("deliveries");
+        return;
+    }
+    if (!isDeliveryRole()) {
+        els.mobileDeliveriesList.innerHTML = `<div class="sale-entry-empty">Deliveries are not available for your role.</div>`;
+        restoreMobileScrollIfNeeded("deliveries");
+        return;
+    }
+
+    mobileDeliveriesLoading = true;
+    mobileDeliveriesError = "";
+    if (els.mobileDeliveriesLoading) els.mobileDeliveriesLoading.classList.remove("hidden");
+    if (els.mobileDeliveriesError) els.mobileDeliveriesError.classList.add("hidden");
+    if (els.mobileDeliveriesEmpty) els.mobileDeliveriesEmpty.classList.add("hidden");
+    if (els.mobileDeliveriesFilter) {
+        els.mobileDeliveriesFilter.value = mobileDeliveriesFilter;
+    }
+
+    const params = {};
+    if (mobileDeliveriesFilter === "active") {
+        params.active = 1;
+    } else if (mobileDeliveriesFilter === "completed_today") {
+        params.completed_today = 1;
+    }
+
+    try {
+        const data = await apiFetchAll(withParams("/delivery/runs/", params));
+        const rows = ensureArray(data, "mobileDeliveries");
+        mobileDeliveriesPage = { count: rows.length, next: null, previous: null, results: rows };
+        mobileDeliveries = rows;
+        if (els.mobileDeliveriesScope) {
+            els.mobileDeliveriesScope.textContent = mobileDeliveriesFilter === "active"
+                ? "Active deliveries"
+                : mobileDeliveriesFilter === "completed_today"
+                    ? "Completed today"
+                    : "All deliveries";
+        }
+        renderMobileDeliveries();
+    } catch (err) {
+        mobileDeliveriesError = err.message || "Failed to load deliveries.";
+        if (els.mobileDeliveriesError) {
+            els.mobileDeliveriesError.textContent = mobileDeliveriesError;
+            els.mobileDeliveriesError.classList.remove("hidden");
+        }
+        if (els.mobileDeliveriesList) {
+            els.mobileDeliveriesList.innerHTML = "";
+        }
+    } finally {
+        mobileDeliveriesLoading = false;
+        if (els.mobileDeliveriesLoading) els.mobileDeliveriesLoading.classList.add("hidden");
+        if (!mobileDeliveries.length && !mobileDeliveriesError && els.mobileDeliveriesEmpty) {
+            els.mobileDeliveriesEmpty.classList.remove("hidden");
+        }
+        restoreMobileScrollIfNeeded("deliveries");
+    }
+}
+
+function renderMobileDeliveries() {
+    if (!els.mobileDeliveriesList) return;
+    if (mobileDeliveriesError) {
+        els.mobileDeliveriesList.innerHTML = "";
+        return;
+    }
+    if (!mobileDeliveries.length) {
+        els.mobileDeliveriesList.innerHTML = "";
+        if (els.mobileDeliveriesEmpty) els.mobileDeliveriesEmpty.classList.remove("hidden");
+        return;
+    }
+    if (els.mobileDeliveriesEmpty) els.mobileDeliveriesEmpty.classList.add("hidden");
+    els.mobileDeliveriesList.innerHTML = mobileDeliveries.map((run) => {
+        const customerName = run.customer?.name || run.order?.customer_name || run.sale?.customer?.name || "Customer";
+        const branchName = run.branch?.name || "Branch";
+        const status = formatLabel(run.status || "unknown");
+        const createdAt = formatDateTime(run.completed_at || run.assigned_at || run.created_at);
+        const lastLocation = formatLocation(run.last_known_latitude, run.last_known_longitude);
+        const orderId = run.order?.id ? `#${shortOrderId(run.order.id)}` : (run.sale?.id ? `#${shortOrderId(run.sale.id)}` : "—");
+        return `
+            <div class="order-row mobile-delivery-row" data-delivery-run="${run.id}">
+                <div class="order-main">
+                    <div class="order-top">
+                        <div class="order-id">#${shortOrderId(run.id)}</div>
+                        <span class="status-pill">${esc(status)}</span>
+                    </div>
+                    <div class="order-meta">${esc(customerName)} • ${esc(branchName)}</div>
+                    <div class="order-meta small">Order/Sale: ${esc(orderId)}</div>
+                    <div class="order-meta small">${createdAt}</div>
+                    <div class="order-meta small">Last location: ${esc(lastLocation)}</div>
+                </div>
+                <div class="order-amount">
+                    <button class="btn-secondary btn-inline" data-open-delivery-run="${run.id}">View</button>
+                </div>
+            </div>
+        `;
+    }).join("");
+    els.mobileDeliveriesList.querySelectorAll("[data-open-delivery-run]").forEach((btn) => {
+        btn.addEventListener("click", () => openBackOfficeDeliveryDetail(btn.dataset.openDeliveryRun));
+    });
+}
+
+function openDeliveryDashboardOrders() {
+    if (!isDeliveryRole()) return;
+    openCustomerOrdersModal();
+}
+
+function openDeliveryDashboardDeliveries(filter) {
+    if (!isDeliveryRole()) return;
+    setMobileDeliveriesFilter(filter || "active");
+    setMobileTab("deliveries");
 }
 
 async function openMobileSaleDetail(saleId) {
@@ -12276,6 +12494,7 @@ function renderCustomerOrderDetail(order) {
     const assignedId = order.assigned_to?.id || "";
     const assignedLabel = order.assigned_to?.display_name || "Unassigned";
     const creditStatus = order.credit_approval_status || "not_requested";
+    const deliveryWorkflow = isDeliveryRole() && currentUser?.id && assignedId && String(assignedId) === String(currentUser.id);
     const assigneeOptions = assignableUsers.length
         ? `<option value="">Unassigned</option>` + assignableUsers.map(u => {
             const label = `${u.display_name || u.username} (${u.role})`;
@@ -12296,7 +12515,7 @@ function renderCustomerOrderDetail(order) {
 
     const deliveryBlocked = !saleCompleted;
     const actions = renderOrderActions(order.status, { saleCompleted });
-    const saleAction = sale.id
+    const saleAction = sale.id && !deliveryWorkflow
         ? saleCompleted
             ? saleHasBalance
                 ? `
@@ -12310,6 +12529,16 @@ function renderCustomerOrderDetail(order) {
                     Open Linked Sale
                 </button>
             `
+        : "";
+    const deliveryRunActionBlock = sale.id && deliveryWorkflow
+        ? `
+            <div class="sale-actions">
+                <div id="customer-order-delivery-run-actions" class="muted">Checking delivery run...</div>
+            </div>
+        `
+        : "";
+    const saleBlockedNote = !deliveryWorkflow && deliveryBlocked
+        ? `<div class="sale-blocked-note">Complete the linked sale before marking this order delivered.</div>`
         : "";
     const creditBadge = renderCreditApprovalBadge(creditStatus);
     const creditActions = renderCreditApprovalActions(order);
@@ -12358,9 +12587,10 @@ function renderCustomerOrderDetail(order) {
             ${sale.id ? `
                 <div class="sale-actions">
                     ${saleAction || ""}
-                    ${deliveryBlocked ? `<div class="sale-blocked-note">Complete the linked sale before marking this order delivered.</div>` : ""}
+                    ${saleBlockedNote}
                 </div>
             ` : ""}
+            ${deliveryRunActionBlock}
         </div>
         ${creditActions ? `
             <div class="order-detail-card">
@@ -12429,6 +12659,42 @@ function renderCustomerOrderDetail(order) {
             const reason = prompt("Reason for rejection (optional):") || "";
             rejectCustomerOrderCredit(order.id, reason);
         });
+    }
+
+    if (deliveryWorkflow) {
+        loadCustomerOrderRunActions(order);
+    }
+}
+
+async function loadCustomerOrderRunActions(order) {
+    if (!order) return;
+    const container = document.getElementById("customer-order-delivery-run-actions");
+    if (!container) return;
+    const sale = order.sale || {};
+    const assignedId = order.assigned_to?.id || "";
+    if (!isDeliveryRole() || !currentUser?.id || !assignedId || String(assignedId) !== String(currentUser.id)) {
+        container.innerHTML = "";
+        return;
+    }
+    if (sale.status !== "completed") {
+        container.innerHTML = `<div class="sale-blocked-note">Complete the linked sale before starting delivery.</div>`;
+        return;
+    }
+
+    container.innerHTML = `<div class="muted">Checking delivery run...</div>`;
+    const existingRun = await findDeliveryRunForOrder(order.id);
+    if (existingRun) {
+        container.innerHTML = `<button class="btn-secondary" data-view-run="${existingRun.id}">View Delivery Run</button>`;
+        const viewBtn = container.querySelector("[data-view-run]");
+        if (viewBtn) {
+            viewBtn.addEventListener("click", () => openBackOfficeDeliveryDetail(existingRun.id));
+        }
+        return;
+    }
+    container.innerHTML = `<button class="btn-primary" data-create-run="${order.id}">Start Delivery</button>`;
+    const createBtn = container.querySelector("[data-create-run]");
+    if (createBtn) {
+        createBtn.addEventListener("click", () => createDeliveryRunForOrder(order.id, order.assigned_to?.id));
     }
 }
 

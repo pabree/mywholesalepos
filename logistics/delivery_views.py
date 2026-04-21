@@ -18,6 +18,7 @@ from .models import DeliveryRun, DeliveryLocationPing
 ACTIVE_STATUSES = {"assigned", "picked_up", "en_route", "arrived"}
 TERMINAL_STATUSES = {"delivered", "failed", "cancelled"}
 DELIVERY_ROLES = {"deliver_person", "delivery_person"}
+DELIVERY_VISIBLE_ORDER_STATUSES = {"confirmed", "processing", "out_for_delivery"}
 
 STATUS_TRANSITIONS = {
     "assigned": {"picked_up", "en_route"},
@@ -359,6 +360,9 @@ class DeliveryRunListView(APIView):
                 | models.Q(sale__id__icontains=query)
                 | models.Q(sale__customer__name__icontains=query)
             )
+        if request.query_params.get("completed_today") == "1":
+            today = timezone.localdate()
+            qs = qs.filter(status="delivered", completed_at__date=today)
 
         paginator = StandardLimitOffsetPagination()
         page = paginator.paginate_queryset(qs, request, view=self)
@@ -368,6 +372,38 @@ class DeliveryRunListView(APIView):
         if page is not qs:
             return paginator.get_paginated_response(data)
         return Response(data)
+
+
+class DeliveryDashboardView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"deliver_person", "delivery_person"}
+
+    def get(self, request):
+        today = timezone.localdate()
+        branch_id = getattr(request.user, "branch_id", None)
+
+        orders_qs = CustomerOrder.objects.select_related("sale")
+        orders_qs = orders_qs.filter(
+            sale__assigned_to=request.user,
+            status__in=DELIVERY_VISIBLE_ORDER_STATUSES,
+        )
+        if branch_id:
+            orders_qs = orders_qs.filter(sale__branch_id=branch_id)
+
+        runs_qs = DeliveryRun.objects.filter(delivery_person=request.user)
+        if branch_id:
+            runs_qs = runs_qs.filter(branch_id=branch_id)
+
+        active_deliveries_count = runs_qs.filter(status__in=ACTIVE_STATUSES).count()
+        completed_today_count = runs_qs.filter(status="delivered", completed_at__date=today).count()
+
+        return Response(
+            {
+                "assigned_orders_count": orders_qs.count(),
+                "active_deliveries_count": active_deliveries_count,
+                "completed_today_count": completed_today_count,
+            }
+        )
 
 
 class DeliveryQueueView(APIView):
@@ -426,7 +462,7 @@ class DeliveryQueueView(APIView):
 
 class DeliveryRunCreateView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"admin", "supervisor"}
+    allowed_roles = {"admin", "supervisor", "deliver_person", "delivery_person"}
 
     def post(self, request):
         data = request.data or {}
@@ -435,6 +471,8 @@ class DeliveryRunCreateView(APIView):
         order_id = data.get("order_id") or data.get("order")
         sale_id = data.get("sale_id") or data.get("sale")
         delivery_person_id = data.get("delivery_person_id") or data.get("delivery_person")
+        actor_role = _role(request.user)
+        delivery_actor = actor_role in DELIVERY_ROLES and not _is_admin(request.user)
 
         order = None
         sale = None
@@ -447,6 +485,8 @@ class DeliveryRunCreateView(APIView):
             delivery_person = sale.assigned_to
             if _role(delivery_person) not in DELIVERY_ROLES or not delivery_person.is_active:
                 return Response({"detail": "Assigned delivery person is not available."}, status=400)
+            if delivery_actor and sale.assigned_to_id != request.user.id:
+                return Response({"detail": "You can only create runs for sales assigned to you."}, status=403)
             if delivery_person_id and str(delivery_person.id) != str(delivery_person_id):
                 return Response(
                     {"detail": "Delivery run must use the delivery person already assigned to this sale."},
@@ -469,6 +509,8 @@ class DeliveryRunCreateView(APIView):
             delivery_person = sale.assigned_to
             if _role(delivery_person) not in DELIVERY_ROLES or not delivery_person.is_active:
                 return Response({"detail": "Assigned delivery person is not available."}, status=400)
+            if delivery_actor and sale.assigned_to_id != request.user.id:
+                return Response({"detail": "You can only create runs for orders assigned to you."}, status=403)
             if delivery_person_id and str(delivery_person.id) != str(delivery_person_id):
                 return Response(
                     {"detail": "Delivery run must use the delivery person already assigned to this order."},

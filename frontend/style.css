@@ -454,6 +454,40 @@ body.overlay-open {
     min-height: 72px;
 }
 
+.mobile-summary-action {
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    color: inherit;
+}
+
+.mobile-summary-action:hover {
+    box-shadow: var(--shadow-sm);
+}
+
+.mobile-summary-action:active {
+    transform: translateY(1px);
+}
+
+.mobile-delivery-dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.mobile-delivery-dashboard-header h3 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.2;
+}
+
+.mobile-delivery-dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
 .summary-label {
     font-size: 11px;
     color: var(--text-muted);
@@ -5495,6 +5529,10 @@ body.offline .offline-status {
         margin-top: 2px;
     }
 
+    .mobile-delivery-dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
     .mobile-cart-item {
         grid-template-columns: 1fr;
     }
@@ -5545,6 +5583,10 @@ body.offline .offline-status {
     }
 
     body[data-mobile-tab="reports"] #mobile-reports-panel {
+        display: flex;
+    }
+
+    body[data-mobile-tab="deliveries"] #mobile-deliveries-panel {
         display: flex;
     }
 

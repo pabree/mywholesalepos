@@ -20,6 +20,33 @@ from .customer_serializers import (
     StaffCustomerOrderDetailSerializer,
 )
 
+DELIVERY_ROLES = {"deliver_person", "delivery_person"}
+DELIVERY_VISIBLE_ORDER_STATUSES = {"confirmed", "processing", "out_for_delivery"}
+
+
+def _role(user):
+    return (getattr(user, "role", "") or "").strip().lower()
+
+
+def _is_admin(user):
+    return getattr(user, "is_superuser", False) or _role(user) in ("admin", "supervisor")
+
+
+def _is_delivery_user(user):
+    return _role(user) in DELIVERY_ROLES
+
+
+def _can_access_delivery_order(user, order):
+    if _is_admin(user):
+        return True
+    if not _is_delivery_user(user) or not order or not getattr(order, "sale", None):
+        return False
+    sale = order.sale
+    return (
+        sale.assigned_to_id == getattr(user, "id", None)
+        and order.status in DELIVERY_VISIBLE_ORDER_STATUSES
+    )
+
 
 def _backoffice_orders_queryset(request):
     status_filter = request.query_params.get("status")
@@ -55,6 +82,12 @@ def _backoffice_orders_queryset(request):
         qs = qs.filter(sale__branch_id=branch_id)
     if route_id:
         qs = qs.filter(sale__customer__route_id=route_id)
+
+    if _is_delivery_user(request.user) and not _is_admin(request.user):
+        qs = qs.filter(
+            sale__assigned_to=request.user,
+            status__in=DELIVERY_VISIBLE_ORDER_STATUSES,
+        )
 
     return qs
 
@@ -217,6 +250,8 @@ class CustomerOrderStaffDetailView(APIView):
             ),
             id=order_id,
         )
+        if not _can_access_delivery_order(request.user, order):
+            return Response({"detail": "Not permitted to view this order."}, status=403)
         serializer = StaffCustomerOrderDetailSerializer(order)
         return Response(serializer.data)
 
@@ -253,6 +288,8 @@ class CustomerOrderStatusUpdateView(APIView):
     def patch(self, request, order_id):
         with transaction.atomic():
             order = get_object_or_404(CustomerOrder.objects.select_for_update(), id=order_id)
+            if not _can_access_delivery_order(request.user, order):
+                return Response({"detail": "Not permitted to update this order."}, status=status.HTTP_403_FORBIDDEN)
             serializer = CustomerOrderStatusSerializer(order, data=request.data, partial=True)
             if not serializer.is_valid():
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
