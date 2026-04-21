@@ -5561,7 +5561,7 @@ function renderExpenseCategoryOptions() {
 }
 
 async function loadAssignableUsers() {
-    if (!els.assignedTo) return;
+    if (!els.assignedTo || !canAssignCustomerOrders()) return;
     assignableUsers = await apiFetch("/accounts/assignable/") || [];
     if (!assignableUsers.length) {
         els.assignedTo.innerHTML = `<option value="">No delivery/sales users found</option>`;
@@ -11739,7 +11739,9 @@ function openCustomerOrdersModal({ statusList = null } = {}) {
     } else {
         loadCustomerOrders();
     }
-    ensureAssignableUsers();
+    if (canAssignCustomerOrders()) {
+        ensureAssignableUsers();
+    }
 }
 
 function closeCustomerOrdersModal() {
@@ -12314,6 +12316,10 @@ function getCurrentPosition(options = {}) {
 }
 
 async function ensureAssignableUsers() {
+    if (!canAssignCustomerOrders()) {
+        assignableUsers = [];
+        return;
+    }
     if (assignableUsers.length) return;
     const users = await apiFetch("/accounts/assignable/");
     assignableUsers = Array.isArray(users) ? users : [];
@@ -12495,12 +12501,14 @@ function renderCustomerOrderDetail(order) {
     const assignedLabel = order.assigned_to?.display_name || "Unassigned";
     const creditStatus = order.credit_approval_status || "not_requested";
     const deliveryWorkflow = isDeliveryRole() && currentUser?.id && assignedId && String(assignedId) === String(currentUser.id);
-    const assigneeOptions = assignableUsers.length
-        ? `<option value="">Unassigned</option>` + assignableUsers.map(u => {
-            const label = `${u.display_name || u.username} (${u.role})`;
-            return `<option value="${u.id}" ${u.id === assignedId ? "selected" : ""}>${label}</option>`;
-        }).join("")
-        : `<option value="">No delivery/sales users</option>`;
+    const assigneeOptions = canAssignCustomerOrders()
+        ? (assignableUsers.length
+            ? `<option value="">Unassigned</option>` + assignableUsers.map(u => {
+                const label = `${u.display_name || u.username} (${u.role})`;
+                return `<option value="${u.id}" ${u.id === assignedId ? "selected" : ""}>${label}</option>`;
+            }).join("")
+            : `<option value="">Loading assignees…</option>`)
+        : "";
 
     const itemsHtml = (order.items || []).map(item => `
         <div class="order-item-row">
@@ -12600,17 +12608,19 @@ function renderCustomerOrderDetail(order) {
                 </div>
             </div>
         ` : ""}
+        ${canAssignCustomerOrders() ? `
         <div class="order-detail-card">
             <div class="order-detail-row">
                 <div>
                     <div class="label">Assigned To</div>
                     <div class="assigned-current">${esc(assignedLabel)}</div>
                 </div>
-                <select id="customer-order-assign" class="summary-select" ${canAssignCustomerOrders() ? "" : "disabled"}>
+                <select id="customer-order-assign" class="summary-select">
                     ${assigneeOptions}
                 </select>
             </div>
         </div>
+        ` : ""}
         <div class="order-detail-card">
             <h4>Items</h4>
             <div class="order-items">${itemsHtml || "<div class='orders-detail-empty'>No items found.</div>"}</div>
