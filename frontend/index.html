@@ -1687,12 +1687,17 @@
                                 <input type="text" id="backoffice-payments-search" class="summary-input" placeholder="Search reference, phone, or sale ID">
                             </div>
                             <div class="backoffice-actions">
+                                <button id="backoffice-payments-mode-all" class="btn-ghost backoffice-payments-mode active">All Payments</button>
+                                <button id="backoffice-payments-mode-delivery" class="btn-ghost backoffice-payments-mode">Delivery Collections</button>
                                 <button id="backoffice-payments-export" class="btn-secondary">Export CSV</button>
                             </div>
                         </div>
                         <div class="backoffice-filters">
                             <select id="backoffice-payments-branch" class="summary-select">
                                 <option value="">All branches</option>
+                            </select>
+                            <select id="backoffice-payments-delivery-person" class="summary-select">
+                                <option value="">All delivery persons</option>
                             </select>
                             <select id="backoffice-payments-method" class="summary-select">
                                 <option value="">All methods</option>
@@ -1705,18 +1710,49 @@
                                 <option value="pending">Pending</option>
                                 <option value="failed">Failed</option>
                             </select>
+                            <select id="backoffice-payments-collection-stage" class="summary-select">
+                                <option value="">All collection stages</option>
+                                <option value="checkout">Checkout</option>
+                                <option value="delivery">Delivery</option>
+                                <option value="credit">Credit</option>
+                            </select>
+                            <select id="backoffice-payments-remittance" class="summary-select">
+                                <option value="">All remittance statuses</option>
+                                <option value="pending">Pending remittance</option>
+                                <option value="remitted">Remitted</option>
+                                <option value="disputed">Disputed</option>
+                            </select>
                             <input type="date" id="backoffice-payments-from" class="summary-input">
                             <input type="date" id="backoffice-payments-to" class="summary-input">
+                        </div>
+                        <div id="backoffice-payments-bulk-bar" class="backoffice-bulk-bar hidden">
+                            <div class="backoffice-bulk-meta">
+                                <strong id="backoffice-payments-bulk-count">0 selected</strong>
+                                <input id="backoffice-payments-bulk-note" class="summary-input" type="text" placeholder="Optional remittance note">
+                            </div>
+                            <div class="backoffice-bulk-actions">
+                                <button id="backoffice-payments-bulk-submit" class="btn-secondary" type="button">Mark Selected Remitted</button>
+                                <button id="backoffice-payments-bulk-clear" class="btn-ghost" type="button">Clear Selection</button>
+                            </div>
                         </div>
                         <div class="backoffice-table-wrap">
                             <table class="backoffice-table" id="backoffice-payments-table">
                                 <thead>
                                     <tr>
+                                        <th id="backoffice-payments-select-all-cell" class="backoffice-payments-select-cell hidden">
+                                            <label class="checkbox-row checkbox-row-tight">
+                                                <input type="checkbox" id="backoffice-payments-select-all">
+                                                <span>Select</span>
+                                            </label>
+                                        </th>
                                         <th>Payment</th>
                                         <th>Sale</th>
                                         <th>Customer</th>
                                         <th>Branch</th>
+                                        <th>Delivery Person</th>
                                         <th>Method</th>
+                                        <th>Collection</th>
+                                        <th>Remittance</th>
                                         <th>Status</th>
                                         <th>Amount</th>
                                         <th>Reference</th>
@@ -1727,7 +1763,7 @@
                                 </thead>
                                 <tbody>
                                     <tr>
-                                        <td colspan="11" class="muted">Loading payments...</td>
+                                        <td colspan="14" class="muted">Loading payments...</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1989,6 +2025,28 @@
                         <label class="pod-notes">Delivery Notes
                             <textarea id="delivery-pod-notes" class="summary-input" rows="3" placeholder="Optional notes"></textarea>
                         </label>
+                    </div>
+                    <div class="delivery-payment-section">
+                        <div class="pod-title">Record Delivery Payment <span class="muted">(optional)</span></div>
+                        <div class="pod-note muted">Leave amounts blank if no payment was collected at delivery.</div>
+                        <div class="pod-grid">
+                            <label>Cash Collected
+                                <input id="delivery-payment-cash" type="number" min="0" step="0.01" class="summary-input" placeholder="0.00">
+                            </label>
+                            <label>M-Pesa Collected
+                                <input id="delivery-payment-mpesa" type="number" min="0" step="0.01" class="summary-input" placeholder="0.00">
+                            </label>
+                            <label>M-Pesa Reference
+                                <input id="delivery-payment-reference" class="summary-input" placeholder="Transaction code">
+                            </label>
+                            <label>M-Pesa Phone
+                                <input id="delivery-payment-phone" type="tel" class="summary-input" placeholder="07XXXXXXXX">
+                            </label>
+                            <label class="pod-notes">Payment Notes
+                                <textarea id="delivery-payment-notes" class="summary-input" rows="2" placeholder="Optional delivery collection notes"></textarea>
+                            </label>
+                        </div>
+                        <div id="delivery-payment-summary" class="delivery-payment-summary muted">No payment collected.</div>
                     </div>
                     <div class="pod-actions">
                         <button id="delivery-pod-submit" class="btn-primary">Submit Proof</button>

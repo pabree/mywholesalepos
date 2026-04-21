@@ -658,6 +658,82 @@ body.overlay-open {
     font-size: 12px;
 }
 
+.backoffice-payments-mode {
+    white-space: nowrap;
+}
+
+.backoffice-payments-mode.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.backoffice-bulk-bar {
+    margin-bottom: 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.backoffice-bulk-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    flex: 1 1 320px;
+}
+
+.backoffice-bulk-meta .summary-input {
+    min-width: 240px;
+    flex: 1 1 320px;
+}
+
+.backoffice-bulk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.backoffice-payments-select-cell {
+    width: 48px;
+    text-align: center;
+}
+
+.checkbox-row-tight {
+    align-items: center;
+    gap: 6px;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.delivery-collection-row {
+    background: rgba(245, 158, 11, 0.04);
+}
+
+.payment-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
 .mobile-empty-state {
     border: 1px dashed var(--border);
     border-radius: var(--radius-md);
@@ -2193,6 +2269,24 @@ body.offline .offline-status {
     gap: 8px;
     justify-content: flex-end;
     flex-wrap: wrap;
+}
+
+.delivery-payment-section {
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-light);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.delivery-payment-section .pod-note {
+    font-size: 12px;
+}
+
+.delivery-payment-summary {
+    font-size: 12px;
+    color: var(--text-secondary);
 }
 
 .delivery-run-location-header {
@@ -4720,6 +4814,16 @@ body.offline .offline-status {
 .status-pending {
     background: rgba(245, 158, 11, 0.15);
     color: var(--warning);
+}
+
+.status-remitted {
+    background: rgba(22, 163, 74, 0.15);
+    color: var(--success);
+}
+
+.status-disputed {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
 }
 
 .status-active {

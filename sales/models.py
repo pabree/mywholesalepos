@@ -195,6 +195,8 @@ class Sale(BaseModel):
         reference="",
         phone_number="",
         note="",
+        delivery_run=None,
+        collection_stage="credit",
     ):
         if self.status != "completed":
             raise ValueError("Payments can only be recorded for completed sales.")
@@ -215,11 +217,13 @@ class Sale(BaseModel):
             customer=self.customer,
             amount=amount,
             method=method or "cash",
+            collection_stage=collection_stage or "credit",
             status=status or "completed",
             received_by=received_by,
             reference=reference or "",
             phone_number=phone_number or "",
             note=note or "",
+            delivery_run=delivery_run,
         )
 
         if payment.status == "completed":
@@ -240,6 +244,8 @@ class Sale(BaseModel):
         reference="",
         phone_number="",
         note="",
+        delivery_run=None,
+        collection_stage="checkout",
     ):
         if amount is None:
             raise ValueError("Payment amount is required.")
@@ -251,11 +257,13 @@ class Sale(BaseModel):
             customer=self.customer,
             amount=amount,
             method=method or "cash",
+            collection_stage=collection_stage or "checkout",
             status=status or "completed",
             received_by=received_by,
             reference=reference or "",
             phone_number=phone_number or "",
             note=note or "",
+            delivery_run=delivery_run,
         )
 
     @transaction.atomic
@@ -316,6 +324,16 @@ class SalePayment(BaseModel):
         ("cash", "Cash"),
         ("mpesa", "M-Pesa"),
     ]
+    REMITTANCE_STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("remitted", "Remitted"),
+        ("disputed", "Disputed"),
+    ]
+    COLLECTION_STAGE_CHOICES = [
+        ("checkout", "Checkout"),
+        ("delivery", "Delivery"),
+        ("credit", "Credit"),
+    ]
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("completed", "Completed"),
@@ -326,6 +344,7 @@ class SalePayment(BaseModel):
     customer = models.ForeignKey("customers.Customer", on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default="cash")
+    collection_stage = models.CharField(max_length=20, choices=COLLECTION_STAGE_CHOICES, default="checkout")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="completed")
     reference = models.CharField(max_length=120, blank=True, default="")
     phone_number = models.CharField(max_length=20, blank=True, default="")
@@ -336,6 +355,23 @@ class SalePayment(BaseModel):
     provider_result_desc = models.CharField(max_length=255, blank=True, default="")
     provider_metadata = models.JSONField(blank=True, default=dict)
     raw_callback = models.JSONField(blank=True, default=dict)
+    delivery_run = models.ForeignKey(
+        "logistics.DeliveryRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments",
+    )
+    remittance_status = models.CharField(max_length=20, choices=REMITTANCE_STATUS_CHOICES, default="pending")
+    remitted_at = models.DateTimeField(null=True, blank=True)
+    remitted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="remitted_payments",
+    )
+    remittance_note = models.TextField(blank=True, default="")
     received_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -523,6 +559,8 @@ class LedgerEntry(BaseModel):
             "reference": payment.reference or "",
             "metadata": {
                 "payment_method": payment.method or "",
+                "collection_stage": getattr(payment, "collection_stage", "") or "",
+                "delivery_run_id": str(payment.delivery_run_id) if getattr(payment, "delivery_run_id", None) else "",
             },
         }
         entry, _ = cls.objects.get_or_create(

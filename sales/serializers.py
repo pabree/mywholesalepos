@@ -477,9 +477,27 @@ def _compute_totals(*args, **kwargs):  # backward compatibility shim
 class SalePaymentSerializer(serializers.ModelSerializer):
     payment_method = serializers.CharField(source="method", read_only=True)
     received_by_name = serializers.SerializerMethodField()
+    delivery_run_id = serializers.SerializerMethodField()
+    remitted_by_name = serializers.SerializerMethodField()
 
     def get_received_by_name(self, obj):
         user = obj.received_by
+        if not user:
+            return ""
+        display = getattr(user, "display_name", "") or ""
+        if display:
+            return display
+        if hasattr(user, "get_full_name"):
+            full_name = user.get_full_name()
+            if full_name:
+                return full_name
+        return getattr(user, "username", "") or ""
+
+    def get_delivery_run_id(self, obj):
+        return str(obj.delivery_run_id) if getattr(obj, "delivery_run_id", None) else None
+
+    def get_remitted_by_name(self, obj):
+        user = obj.remitted_by
         if not user:
             return ""
         display = getattr(user, "display_name", "") or ""
@@ -500,6 +518,13 @@ class SalePaymentSerializer(serializers.ModelSerializer):
             "amount",
             "method",
             "payment_method",
+            "collection_stage",
+            "delivery_run_id",
+            "remittance_status",
+            "remitted_at",
+            "remitted_by",
+            "remitted_by_name",
+            "remittance_note",
             "status",
             "received_by",
             "received_by_name",

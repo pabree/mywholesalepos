@@ -47,7 +47,10 @@ def _backoffice_payments_queryset(request):
     sale_param = (request.query_params.get("sale") or "").strip()
     customer_id = request.query_params.get("customer")
     branch_id = request.query_params.get("branch")
+    delivery_person_id = request.query_params.get("delivery_person")
     method = request.query_params.get("method")
+    collection_stage = request.query_params.get("collection_stage")
+    remittance_status = request.query_params.get("remittance_status")
     status_filter = request.query_params.get("status")
     date_from = parse_date(request.query_params.get("date_from") or "")
     date_to = parse_date(request.query_params.get("date_to") or "")
@@ -57,14 +60,23 @@ def _backoffice_payments_queryset(request):
         "sale__branch",
         "customer",
         "received_by",
+        "remitted_by",
+        "delivery_run",
+        "delivery_run__delivery_person",
     )
 
     if method:
         qs = qs.filter(method=method)
+    if collection_stage:
+        qs = qs.filter(collection_stage=collection_stage)
+    if remittance_status:
+        qs = qs.filter(remittance_status=remittance_status)
     if status_filter:
         qs = qs.filter(status=status_filter)
     if branch_id:
         qs = qs.filter(sale__branch_id=branch_id)
+    if delivery_person_id:
+        qs = qs.filter(delivery_run__delivery_person_id=delivery_person_id)
     if customer_id:
         qs = qs.filter(customer_id=customer_id)
     if reference:
@@ -80,6 +92,7 @@ def _backoffice_payments_queryset(request):
             | Q(provider_checkout_id__icontains=query)
             | Q(provider_request_id__icontains=query)
             | Q(sale_id__icontains=query)
+            | Q(delivery_run_id__icontains=query)
             | Q(customer__name__icontains=query)
         )
     if date_from:
@@ -96,6 +109,16 @@ class MpesaStkPushSerializer(serializers.Serializer):
     sale_id = serializers.UUIDField()
     phone_number = serializers.CharField(max_length=20)
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class DeliveryCollectionRemitSerializer(serializers.Serializer):
+    payment_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        allow_empty=False,
+    )
+    note = serializers.CharField(required=False, allow_blank=True)
+    remittance_status = serializers.ChoiceField(choices=["remitted", "disputed"], required=False)
 
 
 class MpesaStkPushView(APIView):
@@ -185,6 +208,7 @@ class MpesaStkPushView(APIView):
             customer=sale.customer,
             amount=amount,
             method="mpesa",
+            collection_stage="checkout",
             status="pending",
             phone_number=normalized_phone,
             received_by=request.user,
@@ -349,6 +373,7 @@ class BackOfficePaymentsListView(APIView):
             sale = payment.sale
             branch = sale.branch if sale else None
             customer = payment.customer
+            delivery_person = payment.delivery_run.delivery_person if getattr(payment, "delivery_run", None) and payment.delivery_run.delivery_person_id else None
             data.append(
                 {
                     "id": str(payment.id),
@@ -368,11 +393,24 @@ class BackOfficePaymentsListView(APIView):
                     },
                     "amount": str(payment.amount),
                     "method": payment.method,
+                    "collection_stage": payment.collection_stage,
+                    "remittance_status": payment.remittance_status,
+                    "remitted_at": payment.remitted_at,
+                    "remitted_by": {
+                        "id": str(payment.remitted_by_id),
+                        "name": _display_user(payment.remitted_by),
+                    } if payment.remitted_by_id else None,
+                    "remittance_note": payment.remittance_note,
+                    "delivery_person": {
+                        "id": str(delivery_person.id),
+                        "name": _display_user(delivery_person),
+                    } if delivery_person else None,
                     "status": payment.status,
                     "reference": payment.reference,
                     "phone_number": payment.phone_number,
                     "provider_checkout_id": payment.provider_checkout_id,
                     "provider_request_id": payment.provider_request_id,
+                    "delivery_run_id": str(payment.delivery_run_id) if payment.delivery_run_id else None,
                     "received_by": {
                         "id": str(payment.received_by_id),
                         "name": _display_user(payment.received_by),
@@ -408,8 +446,15 @@ class BackOfficePaymentsExportView(APIView):
             "sale_id",
             "customer",
             "branch",
+            "delivery_person",
             "amount",
             "method",
+            "collection_stage",
+            "remittance_status",
+            "remitted_at",
+            "remitted_by",
+            "remittance_note",
+            "delivery_run_id",
             "status",
             "reference",
             "phone",
@@ -420,14 +465,22 @@ class BackOfficePaymentsExportView(APIView):
             sale = payment.sale
             branch = sale.branch if sale else None
             customer = payment.customer
+            delivery_person = payment.delivery_run.delivery_person if getattr(payment, "delivery_run", None) and payment.delivery_run.delivery_person_id else None
             reference = payment.reference or payment.provider_checkout_id or payment.provider_request_id or ""
             writer.writerow([
                 str(payment.id),
                 str(payment.sale_id) if payment.sale_id else "",
                 customer.name if customer else "",
                 branch.branch_name if branch else "",
+                _display_user(delivery_person),
                 str(payment.amount),
                 payment.method,
+                payment.collection_stage,
+                payment.remittance_status,
+                _format_dt(payment.remitted_at),
+                _display_user(payment.remitted_by),
+                payment.remittance_note,
+                str(payment.delivery_run_id) if payment.delivery_run_id else "",
                 payment.status,
                 reference,
                 payment.phone_number or "",
@@ -449,6 +502,9 @@ class BackOfficePaymentDetailView(APIView):
                 "customer",
                 "received_by",
                 "verified_by",
+                "remitted_by",
+                "delivery_run",
+                "delivery_run__delivery_person",
             ),
             id=payment_id,
         )
@@ -474,6 +530,19 @@ class BackOfficePaymentDetailView(APIView):
             "provider_result_code": payment.provider_result_code,
             "provider_result_desc": payment.provider_result_desc,
             "provider_metadata": payment.provider_metadata,
+            "collection_stage": payment.collection_stage,
+            "delivery_run_id": str(payment.delivery_run_id) if payment.delivery_run_id else None,
+            "remittance_status": payment.remittance_status,
+            "remitted_at": payment.remitted_at,
+            "remitted_by": {
+                "id": str(payment.remitted_by_id),
+                "name": _display_user(payment.remitted_by),
+            } if payment.remitted_by_id else None,
+            "remittance_note": payment.remittance_note,
+            "delivery_person": {
+                "id": str(payment.delivery_run.delivery_person_id),
+                "name": _display_user(payment.delivery_run.delivery_person),
+            } if getattr(payment, "delivery_run", None) and payment.delivery_run.delivery_person_id else None,
             "received_by": {
                 "id": str(payment.received_by_id),
                 "name": _display_user(payment.received_by),
@@ -506,12 +575,75 @@ class BackOfficePaymentDetailView(APIView):
         return Response(data)
 
 
+class BackOfficeDeliveryCollectionRemitView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"supervisor", "admin"}
+
+    def post(self, request, payment_id=None):
+        serializer = DeliveryCollectionRemitSerializer(data=request.data or {})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_ids = serializer.validated_data.get("payment_ids") or ([payment_id] if payment_id else [])
+        if not payment_ids:
+            return Response({"payment_ids": "At least one payment is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        note = (serializer.validated_data.get("note") or "").strip()
+        target_status = serializer.validated_data.get("remittance_status") or "remitted"
+        remitted_count = 0
+        already_done = []
+        invalid = []
+
+        with transaction.atomic():
+            payments = (
+                SalePayment.objects.select_for_update()
+                .select_related("sale", "sale__branch", "customer", "received_by", "remitted_by", "delivery_run")
+                .filter(id__in=payment_ids)
+            )
+            payment_map = {str(payment.id): payment for payment in payments}
+
+            for pid in payment_ids:
+                payment = payment_map.get(str(pid))
+                if not payment:
+                    invalid.append(str(pid))
+                    continue
+                if payment.collection_stage != "delivery":
+                    invalid.append(str(pid))
+                    continue
+                if payment.remittance_status == "remitted":
+                    already_done.append(str(pid))
+                    continue
+
+                payment.remittance_status = target_status
+                payment.remitted_at = timezone.now()
+                payment.remitted_by = request.user
+                payment.remittance_note = note
+                payment.save(update_fields=["remittance_status", "remitted_at", "remitted_by", "remittance_note", "updated_at"])
+                remitted_count += 1
+
+        if invalid and not remitted_count and not already_done:
+            return Response({"detail": "No valid delivery payments found to update.", "invalid": invalid}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                "updated": remitted_count,
+                "already_remitted": already_done,
+                "invalid": invalid,
+                "remittance_status": target_status,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class PaymentStatusView(APIView):
     permission_classes = [IsAuthenticated, RolePermission]
     allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
 
     def get(self, request, payment_id):
-        payment = get_object_or_404(SalePayment, id=payment_id)
+        payment = get_object_or_404(
+            SalePayment.objects.select_related("delivery_run", "delivery_run__delivery_person"),
+            id=payment_id,
+        )
         sale = payment.sale
         return Response(
             {
@@ -532,6 +664,19 @@ class PaymentStatusView(APIView):
                 "provider_result_desc": payment.provider_result_desc,
                 "payment_date": payment.payment_date,
                 "verified_at": payment.verified_at,
+                "collection_stage": payment.collection_stage,
+                "delivery_run_id": str(payment.delivery_run_id) if payment.delivery_run_id else None,
+                "remittance_status": payment.remittance_status,
+                "remitted_at": payment.remitted_at,
+                "remitted_by": {
+                    "id": str(payment.remitted_by_id),
+                    "name": _display_user(payment.remitted_by),
+                } if payment.remitted_by_id else None,
+                "remittance_note": payment.remittance_note,
+                "delivery_person": {
+                    "id": str(payment.delivery_run.delivery_person_id),
+                    "name": _display_user(payment.delivery_run.delivery_person),
+                } if getattr(payment, "delivery_run", None) and payment.delivery_run.delivery_person_id else None,
                 "received_by": payment.received_by_id,
                 "received_by_name": SalePaymentSerializer(payment).data.get("received_by_name"),
             }
@@ -543,7 +688,11 @@ class MpesaStatusByCheckoutView(APIView):
     allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
 
     def get(self, request, checkout_id):
-        payment = get_object_or_404(SalePayment, provider_checkout_id=checkout_id, method="mpesa")
+        payment = get_object_or_404(
+            SalePayment.objects.select_related("delivery_run", "delivery_run__delivery_person"),
+            provider_checkout_id=checkout_id,
+            method="mpesa",
+        )
         sale = payment.sale
         return Response(
             {
@@ -564,5 +713,18 @@ class MpesaStatusByCheckoutView(APIView):
                 "provider_result_desc": payment.provider_result_desc,
                 "payment_date": payment.payment_date,
                 "verified_at": payment.verified_at,
+                "collection_stage": payment.collection_stage,
+                "delivery_run_id": str(payment.delivery_run_id) if payment.delivery_run_id else None,
+                "remittance_status": payment.remittance_status,
+                "remitted_at": payment.remitted_at,
+                "remitted_by": {
+                    "id": str(payment.remitted_by_id),
+                    "name": _display_user(payment.remitted_by),
+                } if payment.remitted_by_id else None,
+                "remittance_note": payment.remittance_note,
+                "delivery_person": {
+                    "id": str(payment.delivery_run.delivery_person_id),
+                    "name": _display_user(payment.delivery_run.delivery_person),
+                } if getattr(payment, "delivery_run", None) and payment.delivery_run.delivery_person_id else None,
             }
         )

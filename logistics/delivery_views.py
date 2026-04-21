@@ -6,11 +6,12 @@ from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework import serializers
 
 from accounts.permissions import RolePermission
 from accounts.models import User
 from core.pagination import StandardLimitOffsetPagination
-from sales.models import CustomerOrder, Sale
+from sales.models import CustomerOrder, Sale, SalePayment
 from .models import DeliveryRun, DeliveryLocationPing
 
 
@@ -81,6 +82,25 @@ def _branch_payload(branch):
     }
 
 
+def _payment_payload(payment):
+    if not payment:
+        return None
+    return {
+        "id": str(payment.id),
+        "amount": str(payment.amount),
+        "method": payment.method,
+        "collection_stage": getattr(payment, "collection_stage", "") or "",
+        "status": payment.status,
+        "reference": payment.reference or "",
+        "phone_number": payment.phone_number or "",
+        "note": payment.note or "",
+        "payment_date": payment.payment_date.isoformat() if payment.payment_date else None,
+        "received_by": _delivery_person_payload(payment.received_by),
+        "received_by_name": _delivery_person_payload(payment.received_by)["name"] if payment.received_by else "",
+        "delivery_run_id": str(payment.delivery_run_id) if getattr(payment, "delivery_run_id", None) else None,
+    }
+
+
 def _safe_related_one_to_one(obj, attr):
     if not obj:
         return None
@@ -95,6 +115,12 @@ def _sale_payload(sale):
         return None
     customer = getattr(sale, "customer", None)
     assigned = getattr(sale, "assigned_to", None)
+    payments = []
+    try:
+        delivery_payments = sale.payments.filter(collection_stage="delivery").select_related("received_by", "delivery_run").order_by("-payment_date", "-created_at")
+        payments = [_payment_payload(payment) for payment in delivery_payments]
+    except Exception:
+        payments = []
     return {
         "id": str(sale.id),
         "sale_type": sale.sale_type,
@@ -107,6 +133,8 @@ def _sale_payload(sale):
         "assigned_to": _delivery_person_payload(assigned),
         "customer": _customer_payload(customer),
         "created_at": sale.completed_at.isoformat() if sale.completed_at else (sale.sale_date.isoformat() if sale.sale_date else None),
+        "delivery_payments": payments,
+        "delivery_payment_total": str(sum((Decimal(str(p.get("amount") or "0")) for p in payments), Decimal("0.00"))),
     }
 
 
@@ -160,6 +188,55 @@ def _serialize_ping(ping):
         "recorded_at": ping.recorded_at.isoformat() if ping.recorded_at else None,
         "delivery_person_id": str(ping.delivery_person_id) if ping.delivery_person_id else None,
     }
+
+
+class DeliveryPaymentItemSerializer(serializers.Serializer):
+    method = serializers.ChoiceField(choices=[choice[0] for choice in SalePayment.METHOD_CHOICES])
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    reference = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    note = serializers.CharField(required=False, allow_blank=True)
+
+
+class DeliveryRunCompleteSerializer(serializers.Serializer):
+    recipient_name = serializers.CharField(max_length=150)
+    recipient_phone = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    delivery_notes = serializers.CharField(required=False, allow_blank=True)
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    delivery_payments = DeliveryPaymentItemSerializer(many=True, required=False, default=list)
+
+    def validate(self, attrs):
+        normalized_payments = []
+        total = Decimal("0.00")
+        for payment in attrs.get("delivery_payments") or []:
+            amount = Decimal(str(payment.get("amount") or "0")).quantize(Decimal("0.01"))
+            if amount < 0:
+                raise serializers.ValidationError({"delivery_payments": "Delivery payment amounts cannot be negative."})
+            if amount <= 0:
+                continue
+            method = (payment.get("method") or "cash").strip().lower()
+            if method not in dict(SalePayment.METHOD_CHOICES):
+                raise serializers.ValidationError({"delivery_payments": f"Unsupported payment method: {method}."})
+            reference = (payment.get("reference") or "").strip()
+            phone_number = (payment.get("phone_number") or "").strip()
+            if method == "mpesa":
+                if not reference:
+                    raise serializers.ValidationError({"delivery_payments": "M-Pesa reference is required for delivery payments."})
+                if not phone_number:
+                    raise serializers.ValidationError({"delivery_payments": "M-Pesa phone number is required for delivery payments."})
+            note = (payment.get("note") or "").strip()
+            normalized_payments.append({
+                "method": method,
+                "amount": amount,
+                "reference": reference,
+                "phone_number": phone_number,
+                "note": note,
+            })
+            total += amount
+        attrs["delivery_payments"] = normalized_payments
+        attrs["delivery_payment_total"] = total
+        return attrs
 
 
 def _ensure_run_access(request, run):
@@ -591,6 +668,10 @@ class DeliveryRunCompleteView(APIView):
 
     def post(self, request, run_id):
         data = request.data or {}
+        serializer = DeliveryRunCompleteSerializer(data=data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        payload = serializer.validated_data
         with transaction.atomic():
             run = get_object_or_404(DeliveryRun.objects.select_for_update(), id=run_id)
             if not _ensure_run_access(request, run):
@@ -598,22 +679,34 @@ class DeliveryRunCompleteView(APIView):
             if run.status in TERMINAL_STATUSES:
                 return Response({"detail": "Run is already completed."}, status=400)
 
-            recipient_name = str(data.get("recipient_name") or "").strip()
-            if not recipient_name:
-                return Response({"recipient_name": "Recipient name is required."}, status=400)
+            recipient_name = payload["recipient_name"].strip()
+            lat = payload.get("latitude")
+            lng = payload.get("longitude")
+            sale = getattr(run, "sale", None) or getattr(getattr(run, "order", None), "sale", None)
+            if sale and sale.status != "completed":
+                return Response({"detail": "Delivery payments require a completed sale."}, status=400)
 
-            try:
-                lat = _parse_decimal(data.get("latitude"), field="latitude")
-                lng = _parse_decimal(data.get("longitude"), field="longitude")
-            except ValueError as exc:
-                return Response({"detail": str(exc)}, status=400)
+            delivery_payments = payload.get("delivery_payments") or []
+            delivery_payment_total = payload.get("delivery_payment_total") or Decimal("0.00")
+            raw_balance = None
+            if sale:
+                raw_balance = getattr(sale, "balance_due", None)
+                if raw_balance is None:
+                    raw_balance = max(Decimal("0.00"), Decimal(str(getattr(sale, "grand_total", 0))) - Decimal(str(getattr(sale, "amount_paid", 0))))
+            outstanding = money(raw_balance if raw_balance is not None else Decimal("0.00"))
+            if not sale and delivery_payments:
+                return Response({"detail": "Delivery payments require a linked sale."}, status=400)
+            if sale and outstanding > 0 and not sale.is_credit_sale:
+                return Response({"detail": "Outstanding delivery balances require a credit sale."}, status=400)
+            if delivery_payment_total > outstanding:
+                return Response({"delivery_payments": "Collected amount cannot exceed outstanding balance."}, status=400)
 
             run.status = "delivered"
             run.completed_at = timezone.now()
             run.delivered_at = run.delivered_at or run.completed_at
             run.recipient_name = recipient_name
-            run.recipient_phone = str(data.get("recipient_phone") or "").strip()
-            run.delivery_notes = str(data.get("delivery_notes") or "").strip()
+            run.recipient_phone = payload.get("recipient_phone") or ""
+            run.delivery_notes = payload.get("delivery_notes") or ""
             if lat is not None and lng is not None:
                 run.end_latitude = lat
                 run.end_longitude = lng
@@ -621,6 +714,17 @@ class DeliveryRunCompleteView(APIView):
                 run.last_known_longitude = lng
                 run.last_ping_at = timezone.now()
             run.save()
+            for payment_data in delivery_payments:
+                sale.apply_payment(
+                    amount=payment_data["amount"],
+                    received_by=request.user if request.user.is_authenticated else None,
+                    method=payment_data["method"],
+                    reference=payment_data.get("reference", ""),
+                    phone_number=payment_data.get("phone_number", ""),
+                    note=payment_data.get("note", ""),
+                    delivery_run=run,
+                    collection_stage="delivery",
+                )
             _sync_order_status_from_delivery_run(run, outcome="delivered")
         return Response({"id": str(run.id), "status": run.status}, status=200)
 

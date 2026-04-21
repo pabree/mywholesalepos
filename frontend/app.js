@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-20.01";
+const APP_BUILD = "2026-04-21.01";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -191,6 +191,11 @@ let backOfficePaymentsQuery = "";
 let backOfficePaymentsOffset = 0;
 let backOfficePaymentsLimit = 20;
 let backOfficePaymentsPage = { count: 0, next: null, previous: null, results: [] };
+let backOfficePaymentsMode = localStorage.getItem("backoffice_payments_mode") || "all";
+let currentBackOfficePaymentDetailId = null;
+let backOfficePaymentsDeliveryPerson = "";
+let backOfficePaymentsBulkSelection = new Set();
+let backOfficePaymentsBulkNote = "";
 let performanceData = {
     cashiers: [],
     salespeople: [],
@@ -413,6 +418,12 @@ const els = {
     deliveryPodName: document.getElementById("delivery-pod-name"),
     deliveryPodPhone: document.getElementById("delivery-pod-phone"),
     deliveryPodNotes: document.getElementById("delivery-pod-notes"),
+    deliveryPaymentCash: document.getElementById("delivery-payment-cash"),
+    deliveryPaymentMpesa: document.getElementById("delivery-payment-mpesa"),
+    deliveryPaymentReference: document.getElementById("delivery-payment-reference"),
+    deliveryPaymentPhone: document.getElementById("delivery-payment-phone"),
+    deliveryPaymentNotes: document.getElementById("delivery-payment-notes"),
+    deliveryPaymentSummary: document.getElementById("delivery-payment-summary"),
     deliveryPodSubmit: document.getElementById("delivery-pod-submit"),
     deliveryPodCancel: document.getElementById("delivery-pod-cancel"),
     ledgerModal: document.getElementById("ledger-modal"),
@@ -542,9 +553,21 @@ const els = {
     backofficeDeliveryNext: document.getElementById("backoffice-delivery-next"),
     backofficeDeliveryPage: document.getElementById("backoffice-delivery-page"),
     backofficePaymentsSearch: document.getElementById("backoffice-payments-search"),
+    backofficePaymentsModeAll: document.getElementById("backoffice-payments-mode-all"),
+    backofficePaymentsModeDelivery: document.getElementById("backoffice-payments-mode-delivery"),
+    backofficePaymentsBulkBar: document.getElementById("backoffice-payments-bulk-bar"),
+    backofficePaymentsBulkCount: document.getElementById("backoffice-payments-bulk-count"),
+    backofficePaymentsBulkNote: document.getElementById("backoffice-payments-bulk-note"),
+    backofficePaymentsBulkSubmit: document.getElementById("backoffice-payments-bulk-submit"),
+    backofficePaymentsBulkClear: document.getElementById("backoffice-payments-bulk-clear"),
+    backofficePaymentsSelectAll: document.getElementById("backoffice-payments-select-all"),
+    backofficePaymentsSelectAllCell: document.getElementById("backoffice-payments-select-all-cell"),
     backofficePaymentsBranch: document.getElementById("backoffice-payments-branch"),
+    backofficePaymentsDeliveryPerson: document.getElementById("backoffice-payments-delivery-person"),
     backofficePaymentsMethod: document.getElementById("backoffice-payments-method"),
     backofficePaymentsStatus: document.getElementById("backoffice-payments-status"),
+    backofficePaymentsCollectionStage: document.getElementById("backoffice-payments-collection-stage"),
+    backofficePaymentsRemittance: document.getElementById("backoffice-payments-remittance"),
     backofficePaymentsFrom: document.getElementById("backoffice-payments-from"),
     backofficePaymentsTo: document.getElementById("backoffice-payments-to"),
     backofficePaymentsTable: document.getElementById("backoffice-payments-table"),
@@ -2101,38 +2124,103 @@ document.addEventListener("DOMContentLoaded", () => {
     if (els.backofficePaymentsSearch) {
         els.backofficePaymentsSearch.addEventListener("input", () => {
             backOfficePaymentsQuery = els.backofficePaymentsSearch.value || "";
+            clearBackOfficePaymentsSelection();
             backOfficePaymentsOffset = 0;
             loadBackOfficePayments();
         });
     }
+    if (els.backofficePaymentsModeAll) {
+        els.backofficePaymentsModeAll.addEventListener("click", () => {
+            clearBackOfficePaymentsSelection();
+            setBackOfficePaymentsMode("all");
+        });
+    }
+    if (els.backofficePaymentsModeDelivery) {
+        els.backofficePaymentsModeDelivery.addEventListener("click", () => {
+            clearBackOfficePaymentsSelection();
+            setBackOfficePaymentsMode("delivery");
+        });
+    }
     if (els.backofficePaymentsBranch) {
         els.backofficePaymentsBranch.addEventListener("change", () => {
+            clearBackOfficePaymentsSelection();
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsDeliveryPerson) {
+        els.backofficePaymentsDeliveryPerson.addEventListener("change", () => {
+            backOfficePaymentsDeliveryPerson = els.backofficePaymentsDeliveryPerson.value || "";
+            clearBackOfficePaymentsSelection();
             backOfficePaymentsOffset = 0;
             loadBackOfficePayments();
         });
     }
     if (els.backofficePaymentsMethod) {
         els.backofficePaymentsMethod.addEventListener("change", () => {
+            clearBackOfficePaymentsSelection();
             backOfficePaymentsOffset = 0;
             loadBackOfficePayments();
         });
     }
     if (els.backofficePaymentsStatus) {
         els.backofficePaymentsStatus.addEventListener("change", () => {
+            clearBackOfficePaymentsSelection();
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsCollectionStage) {
+        els.backofficePaymentsCollectionStage.addEventListener("change", () => {
+            if (backOfficePaymentsMode === "delivery") return;
+            clearBackOfficePaymentsSelection();
+            backOfficePaymentsOffset = 0;
+            loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsRemittance) {
+        els.backofficePaymentsRemittance.addEventListener("change", () => {
+            clearBackOfficePaymentsSelection();
             backOfficePaymentsOffset = 0;
             loadBackOfficePayments();
         });
     }
     if (els.backofficePaymentsFrom) {
         els.backofficePaymentsFrom.addEventListener("change", () => {
+            clearBackOfficePaymentsSelection();
             backOfficePaymentsOffset = 0;
             loadBackOfficePayments();
         });
     }
     if (els.backofficePaymentsTo) {
         els.backofficePaymentsTo.addEventListener("change", () => {
+            clearBackOfficePaymentsSelection();
             backOfficePaymentsOffset = 0;
             loadBackOfficePayments();
+        });
+    }
+    if (els.backofficePaymentsBulkSubmit) {
+        els.backofficePaymentsBulkSubmit.addEventListener("click", submitBackOfficeDeliveryRemittanceBulk);
+    }
+    if (els.backofficePaymentsBulkClear) {
+        els.backofficePaymentsBulkClear.addEventListener("click", clearBackOfficePaymentsSelection);
+    }
+    if (els.backofficePaymentsBulkNote) {
+        els.backofficePaymentsBulkNote.addEventListener("input", () => {
+            backOfficePaymentsBulkNote = els.backofficePaymentsBulkNote.value || "";
+        });
+    }
+    if (els.backofficePaymentsSelectAll) {
+        els.backofficePaymentsSelectAll.addEventListener("change", () => {
+            if (backOfficePaymentsMode !== "delivery") return;
+            const visibleSelectable = getVisibleSelectableBackOfficePaymentIds();
+            if (els.backofficePaymentsSelectAll.checked) {
+                setBackOfficePaymentsSelection(Array.from(new Set([...backOfficePaymentsBulkSelection, ...visibleSelectable])));
+            } else {
+                const next = new Set(backOfficePaymentsBulkSelection);
+                visibleSelectable.forEach(id => next.delete(id));
+                setBackOfficePaymentsSelection(Array.from(next));
+            }
         });
     }
     if (els.backofficeOrdersPrev) {
@@ -2168,6 +2256,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (els.backofficePaymentsPrev) {
         els.backofficePaymentsPrev.addEventListener("click", () => {
             if (backOfficePaymentsOffset <= 0) return;
+            clearBackOfficePaymentsSelection();
             backOfficePaymentsOffset = Math.max(0, backOfficePaymentsOffset - backOfficePaymentsLimit);
             loadBackOfficePayments();
         });
@@ -2175,6 +2264,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (els.backofficePaymentsNext) {
         els.backofficePaymentsNext.addEventListener("click", () => {
             if (backOfficePaymentsOffset + backOfficePaymentsLimit >= (backOfficePaymentsPage?.count || 0)) return;
+            clearBackOfficePaymentsSelection();
             backOfficePaymentsOffset += backOfficePaymentsLimit;
             loadBackOfficePayments();
         });
@@ -2367,6 +2457,12 @@ document.addEventListener("DOMContentLoaded", () => {
             closeDeliveryProofForm();
         });
     }
+    [els.deliveryPaymentCash, els.deliveryPaymentMpesa, els.deliveryPaymentReference, els.deliveryPaymentPhone, els.deliveryPaymentNotes].forEach(input => {
+        if (input) {
+            input.addEventListener("input", updateDeliveryPaymentSummary);
+            input.addEventListener("change", updateDeliveryPaymentSummary);
+        }
+    });
     if (els.deliveryRunLocationRefresh) {
         els.deliveryRunLocationRefresh.addEventListener("click", () => {
             if (currentDeliveryRun?.id) {
@@ -7797,6 +7893,8 @@ function renderBackOfficeDeliveryDetail(run, history = []) {
     const branchName = run.branch?.name || "—";
     const statusBadge = renderDeliveryStatusBadge(run.status);
     const lastLocation = formatLocation(run.last_known_latitude, run.last_known_longitude);
+    const deliveryPayments = ensureArray(run.sale?.delivery_payments || [], "deliveryPayments");
+    const deliveryPaymentTotal = run.sale?.delivery_payment_total || (deliveryPayments.length ? deliveryPayments.reduce((sum, payment) => sum + parseFloat(payment.amount || "0"), 0) : 0);
     const historyHtml = renderDeliveryRunHistoryList(history);
     const orderAction = run.order?.id
         ? `<div class="detail-actions"><button class="btn-secondary" onclick="openBackOfficeOrderDetail('${run.order.id}')">View Order</button></div>`
@@ -7835,10 +7933,17 @@ function renderBackOfficeDeliveryDetail(run, history = []) {
                 <div class="detail-row"><span>Last Location</span><strong class="location-inline">${renderLocationDisplay(run.last_known_latitude, run.last_known_longitude, { mapsUrl: buildMapsUrl(run.last_known_latitude, run.last_known_longitude) })}</strong></div>
                 <div class="detail-row"><span>Start</span><strong class="location-inline">${renderLocationDisplay(run.start_latitude, run.start_longitude, { mapsUrl: buildMapsUrl(run.start_latitude, run.start_longitude) })}</strong></div>
                 <div class="detail-row"><span>End</span><strong class="location-inline">${renderLocationDisplay(run.end_latitude, run.end_longitude, { mapsUrl: buildMapsUrl(run.end_latitude, run.end_longitude) })}</strong></div>
+                ${deliveryPayments.length ? `<div class="detail-row"><span>Delivery Payments</span><strong>${fmtPrice(deliveryPaymentTotal)}</strong></div>` : ""}
             </div>
         </div>
         ${orderAction}
         ${proofSection}
+        ${deliveryPayments.length ? `
+        <div class="detail-section">
+            <h4>Delivery Payments</h4>
+            <div class="payment-history">${renderPaymentHistoryList(deliveryPayments, { compact: true })}</div>
+        </div>
+        ` : ""}
         <div class="detail-section">
             <h4>Route History</h4>
             <div class="delivery-run-history">${historyHtml}</div>
@@ -7847,20 +7952,228 @@ function renderBackOfficeDeliveryDetail(run, history = []) {
     enhanceFriendlyLocationLabels(els.backofficeDeliveryDetailBody);
 }
 
+function syncBackOfficePaymentsModeUI() {
+    if (els.backofficePaymentsModeAll) {
+        els.backofficePaymentsModeAll.classList.toggle("active", backOfficePaymentsMode !== "delivery");
+    }
+    if (els.backofficePaymentsModeDelivery) {
+        els.backofficePaymentsModeDelivery.classList.toggle("active", backOfficePaymentsMode === "delivery");
+    }
+    if (els.backofficePaymentsCollectionStage) {
+        if (backOfficePaymentsMode === "delivery") {
+            els.backofficePaymentsCollectionStage.value = "delivery";
+            els.backofficePaymentsCollectionStage.disabled = true;
+        } else {
+            els.backofficePaymentsCollectionStage.disabled = false;
+            if (els.backofficePaymentsCollectionStage.value === "delivery") {
+                els.backofficePaymentsCollectionStage.value = "";
+            }
+        }
+    }
+}
+
+async function loadBackOfficePaymentDeliveryPeople() {
+    if (!els.backofficePaymentsDeliveryPerson) return;
+    await ensureAssignableUsers();
+    const current = els.backofficePaymentsDeliveryPerson.value || backOfficePaymentsDeliveryPerson || "";
+    const deliveryUsers = assignableUsers.filter(u => {
+        const role = normalizeRole(u.role);
+        return role === "deliver_person" || role === "delivery_person";
+    });
+    els.backofficePaymentsDeliveryPerson.innerHTML = [
+        `<option value="">All delivery persons</option>`,
+        ...deliveryUsers.map(user => {
+            const label = `${user.display_name || user.username || "User"}`;
+            return `<option value="${user.id}">${esc(label)}</option>`;
+        }),
+    ].join("");
+    if (current) {
+        els.backofficePaymentsDeliveryPerson.value = current;
+    }
+}
+
+function setBackOfficePaymentsMode(mode, { reload = true } = {}) {
+    backOfficePaymentsMode = mode === "delivery" ? "delivery" : "all";
+    localStorage.setItem("backoffice_payments_mode", backOfficePaymentsMode);
+    syncBackOfficePaymentsModeUI();
+    if (reload) {
+        backOfficePaymentsOffset = 0;
+        loadBackOfficePayments();
+    }
+}
+
+function getBackOfficePaymentsQueryParams() {
+    const params = {
+        limit: backOfficePaymentsLimit,
+        offset: backOfficePaymentsOffset,
+        q: backOfficePaymentsQuery,
+        branch: els.backofficePaymentsBranch?.value || "",
+        method: els.backofficePaymentsMethod?.value || "",
+        status: els.backofficePaymentsStatus?.value || "",
+        date_from: els.backofficePaymentsFrom?.value || "",
+        date_to: els.backofficePaymentsTo?.value || "",
+    };
+    const collectionStage = els.backofficePaymentsCollectionStage?.value || "";
+    const remittanceStatus = els.backofficePaymentsRemittance?.value || "";
+    const deliveryPerson = els.backofficePaymentsDeliveryPerson?.value || "";
+    if (backOfficePaymentsMode === "delivery") {
+        params.collection_stage = "delivery";
+    } else if (collectionStage) {
+        params.collection_stage = collectionStage;
+    }
+    if (remittanceStatus) {
+        params.remittance_status = remittanceStatus;
+    }
+    if (deliveryPerson) {
+        params.delivery_person = deliveryPerson;
+    }
+    return params;
+}
+
+function renderRemittanceBadge(payment) {
+    if (!payment) return `<span class="status-pill status-unpaid">—</span>`;
+    const stage = payment.collection_stage || "";
+    const status = payment.remittance_status || "";
+    if (stage !== "delivery") {
+        return `<span class="status-pill status-unpaid">—</span>`;
+    }
+    const cls = status === "remitted"
+        ? "status-remitted"
+        : status === "disputed"
+            ? "status-disputed"
+            : "status-pending";
+    return `<span class="status-pill ${cls}">${esc(formatLabel(status || "pending"))}</span>`;
+}
+
+function isSelectableDeliveryPayment(payment) {
+    return Boolean(payment)
+        && payment.collection_stage === "delivery"
+        && payment.remittance_status !== "remitted"
+        && canAccessBackOffice();
+}
+
+function clearBackOfficePaymentsSelection() {
+    backOfficePaymentsBulkSelection = new Set();
+    backOfficePaymentsBulkNote = "";
+    if (els.backofficePaymentsBulkNote) {
+        els.backofficePaymentsBulkNote.value = "";
+    }
+    syncBackOfficePaymentsSelectionUI();
+}
+
+function getVisibleSelectableBackOfficePaymentIds() {
+    return backOfficePayments
+        .filter(isSelectableDeliveryPayment)
+        .map(payment => String(payment.id));
+}
+
+function syncBackOfficePaymentsSelectionUI() {
+    const active = backOfficePaymentsMode === "delivery" && backOfficePaymentsBulkSelection.size > 0;
+    if (els.backofficePaymentsBulkBar) {
+        els.backofficePaymentsBulkBar.classList.toggle("hidden", !active);
+    }
+    if (els.backofficePaymentsBulkCount) {
+        els.backofficePaymentsBulkCount.textContent = `${backOfficePaymentsBulkSelection.size} selected`;
+    }
+    if (els.backofficePaymentsBulkNote) {
+        els.backofficePaymentsBulkNote.value = backOfficePaymentsBulkNote || "";
+    }
+    if (els.backofficePaymentsSelectAll) {
+        const visibleSelectable = getVisibleSelectableBackOfficePaymentIds();
+        const selectedVisible = visibleSelectable.filter(id => backOfficePaymentsBulkSelection.has(id));
+        els.backofficePaymentsSelectAll.checked = visibleSelectable.length > 0 && selectedVisible.length === visibleSelectable.length;
+        els.backofficePaymentsSelectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleSelectable.length;
+        els.backofficePaymentsSelectAll.disabled = visibleSelectable.length === 0;
+    }
+    if (els.backofficePaymentsBulkSubmit) {
+        els.backofficePaymentsBulkSubmit.disabled = backOfficePaymentsBulkSelection.size === 0 || backOfficePaymentsMode !== "delivery";
+    }
+}
+
+function setBackOfficePaymentsSelection(nextIds = []) {
+    backOfficePaymentsBulkSelection = new Set((Array.isArray(nextIds) ? nextIds : []).map(id => String(id)).filter(Boolean));
+    syncBackOfficePaymentsSelectionUI();
+}
+
+function toggleBackOfficePaymentSelection(paymentId, checked) {
+    if (!paymentId) return;
+    const next = new Set(backOfficePaymentsBulkSelection);
+    const id = String(paymentId);
+    if (checked) next.add(id);
+    else next.delete(id);
+    backOfficePaymentsBulkSelection = next;
+    syncBackOfficePaymentsSelectionUI();
+}
+
+async function submitBackOfficeDeliveryRemittanceBulk() {
+    if (backOfficePaymentsMode !== "delivery") return;
+    const paymentIds = Array.from(backOfficePaymentsBulkSelection);
+    if (!paymentIds.length) {
+        toast("Select one or more delivery payments first.", "info");
+        return;
+    }
+    const note = (els.backofficePaymentsBulkNote?.value || "").trim();
+    const confirmed = window.confirm(`Mark ${paymentIds.length} selected delivery payment(s) as remitted?`);
+    if (!confirmed) return;
+    try {
+        const res = await apiRequest("/payments/backoffice/remit/", {
+            method: "POST",
+            body: {
+                payment_ids: paymentIds,
+                note,
+                remittance_status: "remitted",
+            },
+        });
+        const updated = res?.updated || 0;
+        const already = Array.isArray(res?.already_remitted) ? res.already_remitted.length : 0;
+        const invalid = Array.isArray(res?.invalid) ? res.invalid.length : 0;
+        const msgParts = [];
+        if (updated) msgParts.push(`${updated} remitted`);
+        if (already) msgParts.push(`${already} already remitted`);
+        if (invalid) msgParts.push(`${invalid} invalid`);
+        toast(msgParts.length ? `Bulk remittance complete: ${msgParts.join(", ")}` : "Bulk remittance complete", updated ? "success" : "info");
+        clearBackOfficePaymentsSelection();
+        await loadBackOfficePayments();
+    } catch (err) {
+        toast(`Bulk remittance failed: ${err.message}`, "error");
+    }
+}
+
+async function remitBackOfficeDeliveryPayment(paymentId) {
+    if (!paymentId) return;
+    const note = window.prompt("Optional remittance note:", "");
+    if (note === null) return;
+    const confirmed = window.confirm("Mark this delivery payment as remitted?");
+    if (!confirmed) return;
+    try {
+        const res = await apiRequest("/payments/backoffice/remit/", {
+            method: "POST",
+            body: {
+                payment_ids: [paymentId],
+                note: note || "",
+                remittance_status: "remitted",
+            },
+        });
+        toast((res?.updated || 0) ? "Delivery payment marked as remitted" : "No delivery payments were updated", "success");
+        await loadBackOfficePayments();
+        if (currentBackOfficePaymentDetailId === paymentId) {
+            await openBackOfficePaymentDetail(paymentId);
+        }
+    } catch (err) {
+        toast(`Remittance update failed: ${err.message}`, "error");
+    }
+}
+
 async function loadBackOfficePayments() {
     if (!canAccessBackOffice()) return;
     try {
         await loadBackOfficeBranches();
-        const endpoint = withParams("/payments/backoffice/", {
-            limit: backOfficePaymentsLimit,
-            offset: backOfficePaymentsOffset,
-            q: backOfficePaymentsQuery,
-            branch: els.backofficePaymentsBranch?.value || "",
-            method: els.backofficePaymentsMethod?.value || "",
-            status: els.backofficePaymentsStatus?.value || "",
-            date_from: els.backofficePaymentsFrom?.value || "",
-            date_to: els.backofficePaymentsTo?.value || "",
-        });
+        await loadBackOfficePaymentDeliveryPeople();
+        syncBackOfficePaymentsModeUI();
+        if (backOfficePaymentsMode !== "delivery") {
+            clearBackOfficePaymentsSelection();
+        }
+        const endpoint = withParams("/payments/backoffice/", getBackOfficePaymentsQueryParams());
         const data = await apiFetch(endpoint);
         const page = normalizePaginated(data);
         backOfficePaymentsPage = page;
@@ -7879,7 +8192,7 @@ async function loadBackOfficePayments() {
         if (els.backofficePaymentsTable) {
             const tbody = els.backofficePaymentsTable.querySelector("tbody");
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="11">Failed to load payments.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="14">Failed to load payments.</td></tr>`;
             }
         }
     }
@@ -7887,16 +8200,13 @@ async function loadBackOfficePayments() {
 
 function exportBackOfficePayments() {
     if (!canAccessBackOffice()) return;
-    downloadCsv("/payments/backoffice/export/", "backoffice-payments.csv", {
-        limit: backOfficePaymentsLimit,
-        offset: backOfficePaymentsOffset,
-        q: backOfficePaymentsQuery,
-        branch: els.backofficePaymentsBranch?.value || "",
-        method: els.backofficePaymentsMethod?.value || "",
-        status: els.backofficePaymentsStatus?.value || "",
-        date_from: els.backofficePaymentsFrom?.value || "",
-        date_to: els.backofficePaymentsTo?.value || "",
-    });
+    const filename = backOfficePaymentsMode === "delivery"
+        ? "delivery-collections.csv"
+        : "backoffice-payments.csv";
+    const params = getBackOfficePaymentsQueryParams();
+    delete params.limit;
+    delete params.offset;
+    downloadCsv("/payments/backoffice/export/", filename, params);
 }
 
 function renderBackOfficePayments() {
@@ -7904,8 +8214,13 @@ function renderBackOfficePayments() {
     const tbody = els.backofficePaymentsTable.querySelector("tbody");
     if (!tbody) return;
     const rows = backOfficePayments;
+    const deliveryMode = backOfficePaymentsMode === "delivery";
+    if (els.backofficePaymentsSelectAllCell) {
+        els.backofficePaymentsSelectAllCell.classList.toggle("hidden", !deliveryMode);
+    }
     if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="11">No payments found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${deliveryMode ? 15 : 14}">No payments found</td></tr>`;
+        syncBackOfficePaymentsSelectionUI();
         return;
     }
     tbody.innerHTML = rows.map(payment => {
@@ -7913,30 +8228,60 @@ function renderBackOfficePayments() {
         const saleId = shortOrderId(payment.sale_id);
         const customerName = payment.customer?.name || "—";
         const branchName = payment.branch?.name || "—";
+        const deliveryPersonName = payment.delivery_person?.name || payment.received_by?.name || "—";
         const methodLabel = formatPaymentMethod(payment.method);
         const statusBadge = renderStatusBadge(payment.status);
+        const collectionBadge = `<span class="status-pill ${payment.collection_stage === "delivery" ? "status-active" : payment.collection_stage === "credit" ? "status-pending" : "status-unpaid"}">${esc(formatLabel(payment.collection_stage || "—"))}</span>`;
+        const remittanceBadge = renderRemittanceBadge(payment);
         const refValue = payment.reference || payment.provider_checkout_id || payment.provider_request_id || "—";
         const phoneValue = payment.phone_number || "—";
+        const remitAction = payment.collection_stage === "delivery" && payment.remittance_status !== "remitted"
+            ? `<button class="btn-ghost btn-inline" onclick="remitBackOfficeDeliveryPayment('${payment.id}')">Mark Remitted</button>`
+            : "";
+        const selectable = deliveryMode && isSelectableDeliveryPayment(payment);
+        const checked = backOfficePaymentsBulkSelection.has(String(payment.id)) ? "checked" : "";
         return `
-            <tr>
+            <tr class="${selectable ? "delivery-collection-row" : ""}">
+                ${deliveryMode ? `
+                <td class="backoffice-payments-select-cell">
+                    <label class="checkbox-row checkbox-row-tight ${selectable ? "" : "muted"}">
+                        <input type="checkbox" data-payment-select="${esc(payment.id)}" ${selectable ? "" : "disabled"} ${checked}>
+                        <span class="sr-only">Select payment</span>
+                    </label>
+                </td>` : ""}
                 <td>${paymentId}</td>
                 <td>${saleId}</td>
                 <td>${esc(customerName)}</td>
                 <td>${esc(branchName)}</td>
+                <td>${esc(deliveryPersonName)}</td>
                 <td>${methodLabel}</td>
+                <td>${collectionBadge}</td>
+                <td>${remittanceBadge}</td>
                 <td>${statusBadge}</td>
                 <td>${fmtPrice(payment.amount || 0)}</td>
                 <td><span class="payment-ref">${esc(refValue)}</span></td>
                 <td>${esc(phoneValue)}</td>
                 <td>${formatDateTime(payment.payment_date)}</td>
-                <td><button class="btn-ghost" onclick="openBackOfficePaymentDetail('${payment.id}')">View</button></td>
+                <td>
+                    <div class="payment-actions">
+                        <button class="btn-ghost btn-inline" onclick="openBackOfficePaymentDetail('${payment.id}')">View</button>
+                        ${remitAction}
+                    </div>
+                </td>
             </tr>
         `;
     }).join("");
+    if (deliveryMode) {
+        tbody.querySelectorAll("[data-payment-select]").forEach(cb => {
+            cb.addEventListener("change", () => toggleBackOfficePaymentSelection(cb.dataset.paymentSelect, cb.checked));
+        });
+    }
+    syncBackOfficePaymentsSelectionUI();
 }
 
 async function openBackOfficePaymentDetail(paymentId) {
     if (!paymentId || !els.backofficePaymentDetailModal) return;
+    currentBackOfficePaymentDetailId = paymentId;
     const detail = await apiFetch(`/payments/backoffice/${paymentId}/`);
     if (!detail) {
         toast("Failed to load payment details", "error");
@@ -7948,6 +8293,7 @@ async function openBackOfficePaymentDetail(paymentId) {
 
 function closeBackOfficePaymentDetail() {
     if (!els.backofficePaymentDetailModal) return;
+    currentBackOfficePaymentDetailId = null;
     closeOverlay(els.backofficePaymentDetailModal);
 }
 
@@ -7963,8 +8309,11 @@ function renderBackOfficePaymentDetail(payment) {
     const sale = payment.sale || {};
     const customerName = payment.customer?.name || "—";
     const branchName = payment.branch?.name || "—";
+    const deliveryPerson = payment.delivery_person?.name || payment.received_by?.name || "—";
     const receivedBy = payment.received_by?.name || "—";
     const verifiedBy = payment.verified_by?.name || "—";
+    const remittedBy = payment.remitted_by?.name || "—";
+    const remittanceBadge = renderRemittanceBadge(payment);
     const metadataJson = payment.provider_metadata ? JSON.stringify(payment.provider_metadata, null, 2) : "";
     const metadataBlock = metadataJson
         ? `<pre class="detail-json">${esc(metadataJson)}</pre>`
@@ -7972,6 +8321,9 @@ function renderBackOfficePaymentDetail(payment) {
 
     const saleAction = sale.id
         ? `<div class="detail-actions"><button class="btn-secondary" onclick="openBackOfficeSaleDetail('${sale.id}')">View Sale</button></div>`
+        : "";
+    const remitAction = payment.collection_stage === "delivery" && payment.remittance_status !== "remitted"
+        ? `<div class="detail-actions"><button class="btn-secondary" onclick="remitBackOfficeDeliveryPayment('${payment.id}')">Mark Remitted</button></div>`
         : "";
 
     els.backofficePaymentDetailBody.innerHTML = `
@@ -7996,9 +8348,18 @@ function renderBackOfficePaymentDetail(payment) {
                 <div class="detail-row"><span>Payment Status</span><strong>${sale.payment_status ? renderStatusBadge(sale.payment_status) : "—"}</strong></div>
                 <div class="detail-row"><span>Customer</span><strong>${esc(customerName)}</strong></div>
                 <div class="detail-row"><span>Branch</span><strong>${esc(branchName)}</strong></div>
+                <div class="detail-row"><span>Delivery Person</span><strong>${esc(deliveryPerson)}</strong></div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-row"><span>Collection Stage</span><strong>${esc(formatLabel(payment.collection_stage || "—"))}</strong></div>
+                <div class="detail-row"><span>Remittance</span><strong>${remittanceBadge}</strong></div>
+                <div class="detail-row"><span>Remitted By</span><strong>${esc(remittedBy)}</strong></div>
+                <div class="detail-row"><span>Remitted At</span><strong>${formatDateTime(payment.remitted_at)}</strong></div>
+                <div class="detail-row"><span>Remittance Note</span><strong>${esc(payment.remittance_note || "—")}</strong></div>
             </div>
         </div>
         ${saleAction}
+        ${remitAction}
         <div class="detail-section">
             <h4>Sale Totals</h4>
             <div class="detail-list">
@@ -10321,6 +10682,9 @@ function renderCreditSales() {
         const runClick = queueRunId
             ? `openBackOfficeDeliveryDetail('${queueRunId}')`
             : `openDeliveryQueueForSale('${sale.id}')`;
+        const deliveryAction = isDeliveryEligibleSale(sale) && canAccessDeliveryQueue()
+            ? `<button class="btn-secondary btn-inline" onclick="event.stopPropagation(); ${runClick}">${runLabel}</button>`
+            : "";
         return `
             <div class="credit-sale-item ${active ? "active" : ""}" onclick="selectCreditSale('${sale.id}')">
                 <div>
@@ -10329,7 +10693,7 @@ function renderCreditSales() {
                     <div class="muted">Due ${sale.due_date || "—"}</div>
                     <div class="credit-sale-delivery-row">
                         ${deliveryBadge}
-                        ${deliveryBadge ? `<button class="btn-secondary btn-inline" onclick="event.stopPropagation(); ${runClick}">${runLabel}</button>` : ""}
+                        ${deliveryAction}
                     </div>
                 </div>
                 <div>
@@ -10363,6 +10727,9 @@ function renderCreditSaleDetail(sale) {
     const runClick = queueRunId
         ? `openBackOfficeDeliveryDetail('${queueRunId}')`
         : `openDeliveryQueueForSale('${sale.id}')`;
+    const deliveryAction = isDeliveryEligibleSale(sale) && canAccessDeliveryQueue()
+        ? `<button class="btn-primary btn-inline" onclick="${runClick}">${runLabel}</button>`
+        : "";
 
     els.creditSaleDetail.innerHTML = `
         <div class="credit-detail-row"><span>Customer</span><strong>${esc(getCustomerName(sale.customer))}</strong></div>
@@ -10371,7 +10738,7 @@ function renderCreditSaleDetail(sale) {
         <div class="credit-detail-row"><span>Balance Due</span><strong>${fmtPrice(sale.balance_due ?? sale.balance ?? 0)}</strong></div>
         <div class="credit-detail-row"><span>Due Date</span><strong>${sale.due_date || "—"}</strong></div>
         <div class="credit-detail-row"><span>Status</span><strong>${renderStatusBadge(sale.payment_status)}</strong></div>
-        ${deliveryBadge ? `<div class="credit-detail-row credit-delivery-row"><span>Delivery</span><div>${deliveryBadge}<button class="btn-primary btn-inline" onclick="${runClick}">${runLabel}</button></div></div>` : ""}
+        ${deliveryBadge ? `<div class="credit-detail-row credit-delivery-row"><span>Delivery</span><div>${deliveryBadge}${deliveryAction}</div></div>` : ""}
         <div class="payment-history">
             <div class="credit-detail-row"><span>Payment History</span></div>
             ${paymentsHtml}
@@ -11234,6 +11601,8 @@ function renderDeliveryRunMeta(run) {
     const customerName = run.order?.customer_name || "—";
     const branchName = run.branch?.name || "—";
     const lastLocation = formatLocation(run.last_known_latitude, run.last_known_longitude);
+    const deliveryPayments = ensureArray(run.sale?.delivery_payments || [], "deliveryPayments");
+    const deliveryPaymentTotal = run.sale?.delivery_payment_total || (deliveryPayments.length ? deliveryPayments.reduce((sum, payment) => sum + parseFloat(payment.amount || "0"), 0) : 0);
     els.deliveryRunMeta.innerHTML = `
         <div class="detail-grid">
             <div class="detail-card">
@@ -11247,6 +11616,7 @@ function renderDeliveryRunMeta(run) {
                 <div class="detail-row"><span>Started</span><strong>${formatDateTime(run.started_at)}</strong></div>
                 <div class="detail-row"><span>Last Ping</span><strong>${formatDateTime(run.last_ping_at)}</strong></div>
                 <div class="detail-row"><span>Last Location</span><strong>${lastLocation}</strong></div>
+                ${deliveryPayments.length ? `<div class="detail-row"><span>Delivery Payments</span><strong>${fmtPrice(deliveryPaymentTotal)}</strong></div>` : ""}
             </div>
         </div>
     `;
@@ -11293,6 +11663,12 @@ function openDeliveryProofForm() {
     }
     if (els.deliveryPodPhone) els.deliveryPodPhone.value = "";
     if (els.deliveryPodNotes) els.deliveryPodNotes.value = "";
+    if (els.deliveryPaymentCash) els.deliveryPaymentCash.value = "";
+    if (els.deliveryPaymentMpesa) els.deliveryPaymentMpesa.value = "";
+    if (els.deliveryPaymentReference) els.deliveryPaymentReference.value = "";
+    if (els.deliveryPaymentPhone) els.deliveryPaymentPhone.value = "";
+    if (els.deliveryPaymentNotes) els.deliveryPaymentNotes.value = "";
+    updateDeliveryPaymentSummary();
 }
 
 function closeDeliveryProofForm() {
@@ -11301,6 +11677,12 @@ function closeDeliveryProofForm() {
     if (els.deliveryPodName) els.deliveryPodName.value = "";
     if (els.deliveryPodPhone) els.deliveryPodPhone.value = "";
     if (els.deliveryPodNotes) els.deliveryPodNotes.value = "";
+    if (els.deliveryPaymentCash) els.deliveryPaymentCash.value = "";
+    if (els.deliveryPaymentMpesa) els.deliveryPaymentMpesa.value = "";
+    if (els.deliveryPaymentReference) els.deliveryPaymentReference.value = "";
+    if (els.deliveryPaymentPhone) els.deliveryPaymentPhone.value = "";
+    if (els.deliveryPaymentNotes) els.deliveryPaymentNotes.value = "";
+    updateDeliveryPaymentSummary();
 }
 
 async function submitDeliveryProof(runId) {
@@ -11308,8 +11690,13 @@ async function submitDeliveryProof(runId) {
     const recipientName = (els.deliveryPodName?.value || "").trim();
     const recipientPhone = (els.deliveryPodPhone?.value || "").trim();
     const deliveryNotes = (els.deliveryPodNotes?.value || "").trim();
+    const deliveryPayments = collectDeliveryPayments();
     if (!recipientName) {
         setDeliveryRunError("Recipient name is required.");
+        return;
+    }
+    if (deliveryPayments.error) {
+        setDeliveryRunError(deliveryPayments.error);
         return;
     }
     setDeliveryRunError("");
@@ -11317,8 +11704,75 @@ async function submitDeliveryProof(runId) {
         recipient_name: recipientName,
         recipient_phone: recipientPhone,
         delivery_notes: deliveryNotes,
+        delivery_payments: deliveryPayments.items,
     });
     if (ok) closeDeliveryProofForm();
+}
+
+function collectDeliveryPayments() {
+    const payments = [];
+    const cashAmount = parseFloat(els.deliveryPaymentCash?.value || "0");
+    const mpesaAmount = parseFloat(els.deliveryPaymentMpesa?.value || "0");
+    const reference = (els.deliveryPaymentReference?.value || "").trim();
+    const phoneNumber = (els.deliveryPaymentPhone?.value || "").trim();
+    const note = (els.deliveryPaymentNotes?.value || "").trim();
+
+    if (Number.isNaN(cashAmount) || cashAmount < 0) {
+        return { error: "Cash collected must be zero or greater." };
+    }
+    if (Number.isNaN(mpesaAmount) || mpesaAmount < 0) {
+        return { error: "M-Pesa collected must be zero or greater." };
+    }
+    if (cashAmount > 0) {
+        payments.push({
+            method: "cash",
+            amount: cashAmount.toFixed(2),
+            note,
+        });
+    }
+    if (mpesaAmount > 0) {
+        if (!reference) {
+            return { error: "M-Pesa reference is required when recording M-Pesa delivery payment." };
+        }
+        if (!phoneNumber) {
+            return { error: "M-Pesa phone number is required when recording M-Pesa delivery payment." };
+        }
+        payments.push({
+            method: "mpesa",
+            amount: mpesaAmount.toFixed(2),
+            reference,
+            phone_number: phoneNumber,
+            note,
+        });
+    }
+    const collected = payments.reduce((sum, payment) => sum + parseFloat(payment.amount || "0"), 0);
+    const balance = getCurrentDeliveryBalance();
+    if (collected - balance > 0.009) {
+        return { error: "Collected amount cannot exceed the outstanding balance." };
+    }
+    return { items: payments };
+}
+
+function getCurrentDeliveryBalance() {
+    const sale = currentDeliveryRun?.sale;
+    if (!sale) return 0;
+    const balance = parseFloat(sale.balance_due ?? sale.grand_total ?? sale.balance ?? "0");
+    return Number.isFinite(balance) ? balance : 0;
+}
+
+function updateDeliveryPaymentSummary() {
+    if (!els.deliveryPaymentSummary) return;
+    const deliveryPayments = collectDeliveryPayments();
+    if (deliveryPayments.error) {
+        els.deliveryPaymentSummary.textContent = deliveryPayments.error;
+        return;
+    }
+    const collected = deliveryPayments.items.reduce((sum, payment) => sum + parseFloat(payment.amount || "0"), 0);
+    const balance = getCurrentDeliveryBalance();
+    const remaining = Math.max(0, balance - collected);
+    els.deliveryPaymentSummary.textContent = collected > 0
+        ? `Collected ${fmtPrice(collected)} · Remaining credit ${fmtPrice(remaining)}`
+        : "No payment collected.";
 }
 
 function buildDeliveryStatusOptions(status) {
