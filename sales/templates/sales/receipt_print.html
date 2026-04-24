@@ -1,0 +1,188 @@
+{% load humanize %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Receipt #{{ receipt.sale_id }}</title>
+    <style>
+        @page {
+            size: {{ paper_width_mm }}mm auto;
+            margin: 4mm;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            color: #000;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+        body {
+            width: {{ paper_width_mm }}mm;
+            max-width: 100%;
+            box-sizing: border-box;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+        .receipt {
+            padding: 0;
+        }
+        .center { text-align: center; }
+        .muted { color: #444; font-size: 11px; }
+        .title {
+            font-size: 16px;
+            font-weight: 700;
+            margin: 0 0 4px;
+            text-align: center;
+        }
+        .line {
+            border-top: 1px dashed #999;
+            margin: 8px 0;
+        }
+        .row {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: baseline;
+            padding: 2px 0;
+            word-break: break-word;
+        }
+        .row strong { font-weight: 700; }
+        .items {
+            margin-top: 4px;
+        }
+        .item {
+            padding: 4px 0;
+            border-bottom: 1px dotted #ccc;
+        }
+        .item:last-child { border-bottom: 0; }
+        .item-name {
+            font-weight: 600;
+            word-break: break-word;
+        }
+        .item-meta {
+            margin-top: 2px;
+            font-size: 11px;
+            color: #444;
+        }
+        .item-total {
+            font-weight: 700;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .totals {
+            margin-top: 6px;
+        }
+        .grand {
+            border-top: 1px dashed #999;
+            margin-top: 6px;
+            padding-top: 6px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+        .paid {
+            color: #006a3d;
+            font-weight: 700;
+        }
+        .balance {
+            font-weight: 700;
+        }
+        .payments {
+            margin-top: 8px;
+        }
+        .payments h4 {
+            margin: 0 0 4px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .payment {
+            font-size: 11px;
+            padding: 2px 0;
+        }
+        .footer {
+            margin-top: 10px;
+            text-align: center;
+            font-size: 10px;
+            color: #444;
+        }
+        @media print {
+            .no-print { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="receipt">
+        <div class="center">
+            <div class="title">Sale Receipt</div>
+            <div>Sale #{{ receipt.sale_id }}</div>
+            <div class="muted">{{ receipt.date|date:"Y-m-d H:i" }}</div>
+            {% if receipt.branch_name %}<div class="muted">{{ receipt.branch_name }}</div>{% endif %}
+            {% if receipt.customer_name %}<div class="muted">Customer: {{ receipt.customer_name }}</div>{% endif %}
+            {% if receipt.served_by %}<div class="muted">Served by: {{ receipt.served_by.display_name }}</div>{% endif %}
+        </div>
+
+        <div class="line"></div>
+
+        <div class="items">
+            {% for item in receipt.items %}
+                <div class="item">
+                    <div class="row">
+                        <div class="item-name">{{ item.product }} × {{ item.quantity }}</div>
+                        <div class="item-total">{{ item.total|floatformat:2 }}</div>
+                    </div>
+                    <div class="item-meta">@ {{ item.unit_price|floatformat:2 }}</div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="line"></div>
+
+        <div class="totals">
+            <div class="row"><span>Subtotal</span><span>{{ receipt.subtotal|floatformat:2 }}</span></div>
+            <div class="row"><span>VAT (included)</span><span>{{ receipt.tax|floatformat:2 }}</span></div>
+            <div class="row"><span>Net (ex VAT)</span><span>{{ receipt.net_total|floatformat:2 }}</span></div>
+            <div class="row grand"><span>Total</span><span>{{ receipt.total|floatformat:2 }}</span></div>
+            <div class="row paid"><span>Paid</span><span>{{ receipt.paid|floatformat:2 }}</span></div>
+            <div class="row balance"><span>Balance</span><span>{{ receipt.balance_due|floatformat:2 }}</span></div>
+            {% if receipt.is_credit_sale %}
+                <div class="row"><span>Status</span><span>{{ receipt.payment_status|capfirst }}</span></div>
+                {% if receipt.due_date %}<div class="row"><span>Due Date</span><span>{{ receipt.due_date|date:"Y-m-d" }}</span></div>{% endif %}
+            {% endif %}
+        </div>
+
+        <div class="payments">
+            <h4>Payments</h4>
+            {% if receipt.payments %}
+                {% for payment in receipt.payments %}
+                    <div class="payment">
+                        {{ payment.method|upper }} — {{ payment.amount|floatformat:2 }}
+                        {% if payment.reference %} ({{ payment.reference }}){% endif %}
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="payment muted">No payments recorded.</div>
+            {% endif %}
+        </div>
+
+        <div class="footer">Thank you for your business</div>
+    </div>
+    <script>
+        window.addEventListener("load", () => {
+            setTimeout(() => {
+                try {
+                    window.focus();
+                    window.print();
+                } catch (err) {
+                    console.warn("Receipt print failed", err);
+                }
+            }, 150);
+        });
+        window.addEventListener("afterprint", () => {
+            try { window.close(); } catch (err) {}
+        });
+    </script>
+</body>
+</html>

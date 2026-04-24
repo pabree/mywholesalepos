@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, serializers
 from rest_framework.permissions import IsAuthenticated
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -26,6 +26,45 @@ from .serializers import (
     SaleReturnCreateSerializer,
     SaleReturnSerializer,
 )
+
+
+def _sale_receipt_payload(sale):
+    items = [
+        {
+            "product": item.product.name,
+            "quantity": item.quantity,
+            "unit_price": item.unit_price,
+            "total": item.total_price,
+        }
+        for item in sale.items.select_related("product").all()
+    ]
+    served_by = sale.completed_by or sale.updated_by or sale.created_by
+    return {
+        "sale_id": sale.id,
+        "date": sale.sale_date,
+        "items": items,
+        "subtotal": sale.total_amount,
+        "tax": sale.tax,
+        "net_total": max(Decimal("0.00"), sale.grand_total - sale.tax),
+        "total": sale.grand_total,
+        "paid": sale.amount_paid,
+        "balance": sale.balance,
+        "balance_due": sale.balance_due,
+        "payment_status": sale.payment_status,
+        "payments": SalePaymentSerializer(sale.payments.select_related("received_by", "delivery_run").all(), many=True).data,
+        "branch_name": sale.branch.branch_name if sale.branch else "",
+        "customer_name": sale.customer.name if sale.customer else "",
+        "served_by": (
+            {
+                "display_name": f"{served_by.first_name} {served_by.last_name}".strip() or served_by.username,
+                "role": served_by.role,
+            }
+            if served_by
+            else None
+        ),
+        "is_credit_sale": sale.is_credit_sale,
+        "due_date": sale.due_date,
+    }
 
 
 def _backoffice_sales_queryset(request):
@@ -763,32 +802,37 @@ class SaleReceiptView(APIView):
         sale = get_object_or_404(Sale, id=sale_id)
         if sale.status != "completed":
             return Response({"error": "Sale is not completed"}, status=400)
+        return Response(_sale_receipt_payload(sale))
 
-        items = [
+
+class SaleReceiptPrintView(APIView):
+    permission_classes = [IsAuthenticated, RolePermission]
+    allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
+
+    def get(self, request, sale_id):
+        sale = get_object_or_404(
+            Sale.objects.select_related("branch", "customer", "completed_by", "updated_by", "created_by").prefetch_related(
+                "items__product",
+                "payments__received_by",
+                "payments__delivery_run",
+            ),
+            id=sale_id,
+        )
+        if sale.status != "completed":
+            return Response({"error": "Sale is not completed"}, status=400)
+        receipt = _sale_receipt_payload(sale)
+        paper_width = request.query_params.get("paper", "80").strip()
+        if paper_width not in {"58", "80"}:
+            paper_width = "80"
+        return render(
+            request,
+            "sales/receipt_print.html",
             {
-                "product": item.product.name,
-                "quantity": item.quantity,
-                "unit_price": item.unit_price,
-                "total": item.total_price,
-            }
-            for item in sale.items.all()
-        ]
-
-        receipt = {
-            "sale_id": sale.id,
-            "date": sale.sale_date,
-            "items": items,
-            "subtotal": sale.total_amount,
-            "tax": sale.tax,
-            "total": sale.grand_total,
-            "paid": sale.amount_paid,
-            "balance": sale.balance,
-            "balance_due": sale.balance_due,
-            "payment_status": sale.payment_status,
-            "payments": SalePaymentSerializer(sale.payments.all(), many=True).data,
-        }
-
-        return Response(receipt)
+                "receipt": receipt,
+                "sale": sale,
+                "paper_width_mm": paper_width,
+            },
+        )
 
 
 class SaleReturnListCreateView(APIView):

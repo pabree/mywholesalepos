@@ -68,9 +68,11 @@ def _delivery_person_payload(user):
 def _customer_payload(customer):
     if not customer:
         return None
+    user = getattr(customer, "user", None)
     return {
         "id": str(customer.id),
         "name": customer.name,
+        "phone": getattr(user, "phone", "") or "",
     }
 
 

@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-21.01";
+const APP_BUILD = "2026-04-24.01";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -247,6 +247,7 @@ let mpesaPendingPayment = null;
 let mpesaPollTimer = null;
 let mpesaPollAttempts = 0;
 let autoPrintedSales = new Set();
+let currentReceiptSaleId = null;
 let offlineMode = !navigator.onLine;
 let offlineSyncing = false;
 let currentOfflineDraftId = null;
@@ -940,6 +941,8 @@ const els = {
     mobileReportsLowStock: document.getElementById("mobile-reports-low-stock"),
     mobileReportsTopProducts: document.getElementById("mobile-reports-top-products"),
     mobileReportsEmpty: document.getElementById("mobile-reports-empty"),
+    deliveryRunQuickActions: document.getElementById("delivery-run-quick-actions"),
+    deliveryRunStatusActions: document.getElementById("delivery-run-status-actions"),
     mobileDeliveriesPanel: document.getElementById("mobile-deliveries-panel"),
     mobileDeliveriesBack: document.getElementById("mobile-deliveries-back"),
     mobileDeliveriesFilter: document.getElementById("mobile-deliveries-filter"),
@@ -11527,6 +11530,11 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
         servedBy ? `<div class="receipt-subline">Served by: ${esc(servedBy)}</div>` : "",
     ].filter(Boolean).join("");
 
+    currentReceiptSaleId = saleId;
+    if (els.receiptModal) {
+        els.receiptModal.dataset.saleId = String(saleId);
+    }
+
     els.receiptContent.innerHTML = `
         <div class="receipt-success">✅</div>
         <div class="receipt-header">
@@ -11603,6 +11611,16 @@ function setAutoPrintEnabled(enabled) {
 }
 
 function printReceipt() {
+    const saleId = currentReceiptSaleId || els.receiptModal?.dataset?.saleId || "";
+    if (saleId) {
+        const paperWidth = localStorage.getItem("pos_receipt_paper_width_mm") || "80";
+        const width = paperWidth === "58" ? "58" : "80";
+        const printUrl = `/sales/${saleId}/receipt/print/?paper=${encodeURIComponent(width)}`;
+        const win = window.open(printUrl, "_blank", "width=420,height=760");
+        if (win) {
+            return;
+        }
+    }
     const contentEl = document.getElementById("receipt-content");
     if (!contentEl) {
         window.print();
@@ -11683,6 +11701,10 @@ function newSale() {
     clearCart();
     currentSaleId = null;
     currentSaleType = "retail";
+    currentReceiptSaleId = null;
+    if (els.receiptModal) {
+        delete els.receiptModal.dataset.saleId;
+    }
     els.saleTypeSelect.value = "retail";
     if (els.creditToggle) {
         els.creditToggle.checked = false;
@@ -11821,6 +11843,8 @@ function renderDeliveryRunMeta(run) {
     const customerName = run.order?.customer_name || "—";
     const branchName = run.branch?.name || "—";
     const lastLocation = formatLocation(run.last_known_latitude, run.last_known_longitude);
+    const contactPhone = getDeliveryCustomerPhone(run);
+    const directionsUrl = buildDeliveryDirectionsUrl(run);
     const deliveryPayments = ensureArray(run.sale?.delivery_payments || [], "deliveryPayments");
     const deliveryPaymentTotal = run.sale?.delivery_payment_total || (deliveryPayments.length ? deliveryPayments.reduce((sum, payment) => sum + parseFloat(payment.amount || "0"), 0) : 0);
     els.deliveryRunMeta.innerHTML = `
@@ -11840,12 +11864,24 @@ function renderDeliveryRunMeta(run) {
             </div>
         </div>
     `;
+    renderDeliveryRunQuickActions(run, { contactPhone, directionsUrl });
 }
 
 function updateDeliveryRunActions(run) {
     const status = run?.status || "";
     const isActive = ["assigned", "picked_up", "en_route", "arrived"].includes(status);
     const isTerminal = ["delivered", "failed", "cancelled"].includes(status);
+    const statusActions = buildDeliveryQuickStatusActions(run);
+    if (!run) {
+        if (els.deliveryRunQuickActions) {
+            els.deliveryRunQuickActions.classList.add("hidden");
+            els.deliveryRunQuickActions.innerHTML = "";
+        }
+        if (els.deliveryRunStatusActions) {
+            els.deliveryRunStatusActions.classList.add("hidden");
+            els.deliveryRunStatusActions.innerHTML = "";
+        }
+    }
 
     if (els.deliveryRunStart) {
         els.deliveryRunStart.disabled = !run || status !== "assigned";
@@ -11869,6 +11905,147 @@ function updateDeliveryRunActions(run) {
     if (els.deliveryRunStatusSubmit) {
         els.deliveryRunStatusSubmit.disabled = !run || !els.deliveryRunStatus || els.deliveryRunStatus.disabled;
     }
+    if (els.deliveryRunStatusActions) {
+        if (statusActions) {
+            els.deliveryRunStatusActions.classList.remove("hidden");
+            els.deliveryRunStatusActions.innerHTML = statusActions;
+            els.deliveryRunStatusActions.querySelectorAll("[data-delivery-action]").forEach((btn) => {
+                btn.addEventListener("click", () => updateDeliveryRunStatusFromButton(run?.id, btn.dataset.deliveryAction));
+            });
+        } else {
+            els.deliveryRunStatusActions.classList.add("hidden");
+            els.deliveryRunStatusActions.innerHTML = "";
+        }
+    }
+}
+
+function renderDeliveryRunQuickActions(run, { contactPhone = "", directionsUrl = "" } = {}) {
+    if (!els.deliveryRunQuickActions) return;
+    if (!run || ["delivered", "failed", "cancelled"].includes((run.status || "").toLowerCase())) {
+        els.deliveryRunQuickActions.classList.add("hidden");
+        els.deliveryRunQuickActions.innerHTML = "";
+        return;
+    }
+    const actions = [];
+    const phone = sanitizePhoneNumber(contactPhone);
+    if (phone) {
+        actions.push(`
+            <button type="button" class="btn-secondary btn-inline" data-delivery-call="${esc(phone)}">Call</button>
+        `);
+        actions.push(`
+            <button type="button" class="btn-secondary btn-inline" data-delivery-copy="${esc(phone)}">Copy</button>
+        `);
+    }
+    if (directionsUrl) {
+        actions.push(`
+            <a class="btn-secondary btn-inline" href="${esc(directionsUrl)}" target="_blank" rel="noopener">Maps</a>
+        `);
+    }
+    if (!actions.length) {
+        els.deliveryRunQuickActions.classList.add("hidden");
+        els.deliveryRunQuickActions.innerHTML = "";
+        return;
+    }
+    els.deliveryRunQuickActions.classList.remove("hidden");
+    els.deliveryRunQuickActions.innerHTML = actions.join("");
+    const callBtn = els.deliveryRunQuickActions.querySelector("[data-delivery-call]");
+    if (callBtn) {
+        callBtn.addEventListener("click", () => {
+            const phoneValue = callBtn.dataset.deliveryCall || "";
+            if (!phoneValue) return;
+            window.location.href = `tel:${phoneValue}`;
+        });
+    }
+    const copyBtn = els.deliveryRunQuickActions.querySelector("[data-delivery-copy]");
+    if (copyBtn) {
+        copyBtn.addEventListener("click", async () => {
+            const phoneValue = copyBtn.dataset.deliveryCopy || "";
+            if (!phoneValue) return;
+            const ok = await copyTextToClipboard(phoneValue);
+            toast(ok ? "Copied" : "Copy failed", ok ? "success" : "warning");
+        });
+    }
+}
+
+function buildDeliveryQuickStatusActions(run) {
+    if (!run) return "";
+    const status = (run.status || "").toLowerCase();
+    if (["delivered", "failed", "cancelled"].includes(status)) return "";
+    const actions = [];
+    if (status === "assigned") {
+        actions.push({ value: "start", label: "Start Delivery", cls: "btn-primary" });
+    }
+    if (status === "picked_up" || status === "en_route") {
+        actions.push({ value: "arrived", label: "Mark Arrived", cls: "btn-secondary" });
+    }
+    if (status === "arrived") {
+        actions.push({ value: "complete", label: "Complete Delivery", cls: "btn-primary" });
+    }
+    return actions.map(action => `<button type="button" class="${action.cls} btn-inline" data-delivery-action="${action.value}">${action.label}</button>`).join("");
+}
+
+async function updateDeliveryRunStatusFromButton(runId, action) {
+    if (!runId || !action) return;
+    if (action === "start") {
+        await startDeliveryRun(runId);
+        return;
+    }
+    if (action === "complete") {
+        openDeliveryProofForm();
+        return;
+    }
+    if (!els.deliveryRunStatus) return;
+    if (!Array.from(els.deliveryRunStatus.options || []).some(opt => opt.value === action)) return;
+    els.deliveryRunStatus.value = action;
+    await updateDeliveryRunStatus(runId);
+}
+
+function getDeliveryCustomerPhone(run) {
+    const direct = run?.recipient_phone || "";
+    if (direct) return direct;
+    const customerPhone = run?.sale?.customer?.phone || run?.order?.customer?.phone || "";
+    return customerPhone || "";
+}
+
+function buildDeliveryDirectionsUrl(run) {
+    const lat = run?.last_known_latitude ?? run?.end_latitude ?? run?.start_latitude;
+    const lng = run?.last_known_longitude ?? run?.end_longitude ?? run?.start_longitude;
+    if (lat == null || lng == null || lat === "" || lng === "") return "";
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}`;
+}
+
+async function copyTextToClipboard(text) {
+    const value = (text || "").toString().trim();
+    if (!value) return false;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+    } catch (err) {
+        // fall through to legacy path
+    }
+    try {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        return ok;
+    } catch (err) {
+        return false;
+    }
+}
+
+function sanitizePhoneNumber(phone) {
+    const value = (phone || "").toString().trim();
+    if (!value) return "";
+    const cleaned = value.replace(/[^\d+]/g, "");
+    return cleaned || "";
 }
 
 function openDeliveryProofForm() {

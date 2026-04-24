@@ -2081,6 +2081,27 @@ body.offline .offline-status {
     width: min(760px, 96vw);
 }
 
+.delivery-run-quick-actions,
+.delivery-run-status-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 12px;
+}
+
+.delivery-run-quick-actions.hidden,
+.delivery-run-status-actions.hidden {
+    display: none;
+}
+
+.delivery-run-quick-actions .btn-ghost,
+.delivery-run-quick-actions .btn-secondary,
+.delivery-run-status-actions .btn-primary,
+.delivery-run-status-actions .btn-secondary,
+.delivery-run-status-actions .btn-ghost {
+    min-height: 42px;
+}
+
 .product-form {
     display: flex;
     flex-direction: column;
