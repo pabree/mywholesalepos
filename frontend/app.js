@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-24.01";
+const APP_BUILD = "2026-04-24.02";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -11615,7 +11615,15 @@ function printReceipt() {
     if (saleId) {
         const paperWidth = localStorage.getItem("pos_receipt_paper_width_mm") || "80";
         const width = paperWidth === "58" ? "58" : "80";
-        const printUrl = `/sales/${saleId}/receipt/print/?paper=${encodeURIComponent(width)}`;
+        const printPath = `/sales/${saleId}/receipt/print/?paper=${encodeURIComponent(width)}`;
+        const printUrl = new URL(printPath, window.location.origin).toString();
+        if (window.electronAPI && typeof window.electronAPI.printReceipt === "function") {
+            window.electronAPI.printReceipt(printUrl).catch((err) => {
+                console.warn("[receipt] electron print failed", err);
+                window.open(printUrl, "_blank");
+            });
+            return;
+        }
         const win = window.open(printUrl, "_blank", "width=420,height=760");
         if (win) {
             return;
