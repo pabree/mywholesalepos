@@ -11618,6 +11618,7 @@ function printReceipt() {
         const printPath = `/sales/${saleId}/receipt/print/?paper=${encodeURIComponent(width)}`;
         const printUrl = new URL(printPath, window.location.origin).toString();
         if (window.electronAPI && typeof window.electronAPI.printReceipt === "function") {
+            console.info("[receipt] electron print URL", printUrl);
             window.electronAPI.printReceipt(printUrl).catch((err) => {
                 console.warn("[receipt] electron print failed", err);
                 window.open(printUrl, "_blank");

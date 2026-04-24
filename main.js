@@ -16,6 +16,17 @@ function resolvePosUrl() {
 
 async function printReceiptUrl(url) {
   if (!url) throw new Error("Receipt URL is required");
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    throw new Error("Main window is not available");
+  }
+
+  const authToken = await mainWindow.webContents.executeJavaScript(
+    'localStorage.getItem("pos_api_token") || ""',
+    true
+  );
+  if (!authToken) {
+    throw new Error("POS auth token is unavailable");
+  }
 
   const printWindow = new BrowserWindow({
     show: false,
@@ -25,11 +36,12 @@ async function printReceiptUrl(url) {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      session: mainWindow.webContents.session,
     },
   });
 
   try {
-    await printWindow.loadURL(url);
+    const extraHeaders = `Authorization: Token ${authToken}\r\n`;
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
@@ -46,29 +58,35 @@ async function printReceiptUrl(url) {
 
       const startPrint = async () => {
         try {
-          printWindow.webContents.print(
-            {
-              silent: true,
-              printBackground: true,
-            },
-            (success, failureReason) => {
-              if (!success) {
-                done(new Error(failureReason || "Receipt print failed"));
-                return;
-              }
-              done();
+          setTimeout(() => {
+            try {
+              printWindow.webContents.print(
+                {
+                  silent: true,
+                  printBackground: true,
+                },
+                (success, failureReason) => {
+                  if (!success) {
+                    done(new Error(failureReason || "Receipt print failed"));
+                    return;
+                  }
+                  done();
+                }
+              );
+            } catch (err) {
+              done(err);
             }
-          );
+          }, 300);
         } catch (err) {
           done(err);
         }
       };
 
-      if (printWindow.webContents.isLoading()) {
-        printWindow.webContents.once("did-finish-load", startPrint);
-      } else {
-        startPrint();
-      }
+      printWindow.webContents.once("did-finish-load", startPrint);
+      printWindow.webContents.once("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+        done(new Error(`Failed to load receipt page (${errorCode}): ${errorDescription} ${validatedURL || ""}`.trim()));
+      });
+      printWindow.loadURL(url, { extraHeaders }).catch((err) => done(err));
     });
   } finally {
     if (!printWindow.isDestroyed()) {
