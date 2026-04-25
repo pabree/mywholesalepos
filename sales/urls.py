@@ -8,7 +8,7 @@ from .views import (
     SaleCompleteView,
     HeldSalesListView,
     SaleReceiptView,
-    SaleReceiptPrintView,
+    receipt_print_view,
     SalePaymentCreateView,
     OverdueCreditSalesView,
     OpenCreditSalesView,
@@ -67,6 +67,6 @@ urlpatterns = [
     path("<uuid:sale_id>/complete/", SaleCompleteView.as_view(), name="sale-complete"),
     path("<uuid:sale_id>/payments/", SalePaymentCreateView.as_view(), name="sale-payment-create"),
     path("<uuid:sale_id>/receipt/", SaleReceiptView.as_view(), name="sale-receipt"),
-    path("<uuid:sale_id>/receipt/print/", SaleReceiptPrintView.as_view(), name="sale-receipt-print"),
+    path("<uuid:sale_id>/receipt/print/", receipt_print_view, name="sale-receipt-print"),
     path("<uuid:sale_id>/returns/", SaleReturnListCreateView.as_view(), name="sale-returns"),
 ]

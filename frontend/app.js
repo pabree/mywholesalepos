@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-24.02";
+const APP_BUILD = "2026-04-25.02";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -15,6 +15,7 @@ window.__APP_BUILD__ = APP_BUILD;
 const POS_DEBUG = new URLSearchParams(window.location.search).has("posDebug")
     || localStorage.getItem("pos_debug") === "1";
 const AUTO_PRINT_KEY = "pos_auto_print_receipt";
+const PRINT_BRIDGE_URL = "http://127.0.0.1:9777";
 const posLog = (...args) => {
     if (POS_DEBUG) console.debug(...args);
 };
@@ -11610,25 +11611,89 @@ function setAutoPrintEnabled(enabled) {
     localStorage.setItem(AUTO_PRINT_KEY, enabled ? "1" : "0");
 }
 
+async function checkPrintBridge() {
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 1000);
+        const res = await fetch(`${PRINT_BRIDGE_URL}/health`, {
+            method: "GET",
+            signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!res.ok) return false;
+        const data = await res.json().catch(() => null);
+        const online = !!data?.ok;
+        console.info("[receipt] bridge online", online);
+        return online;
+    } catch (err) {
+        console.info("[receipt] bridge offline", err?.message || err);
+        return false;
+    }
+}
+
+async function sendPrintBridgeJob(printUrl, paperWidth) {
+    const payload = {
+        receiptUrl: printUrl,
+        printerName: localStorage.getItem("pos_receipt_printer_name") || "",
+        paperWidth: paperWidth || "80",
+    };
+    const res = await fetch(`${PRINT_BRIDGE_URL}/print-receipt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `Bridge print failed (HTTP ${res.status})`);
+    }
+    return data;
+}
+
 function printReceipt() {
     const saleId = currentReceiptSaleId || els.receiptModal?.dataset?.saleId || "";
     if (saleId) {
         const paperWidth = localStorage.getItem("pos_receipt_paper_width_mm") || "80";
         const width = paperWidth === "58" ? "58" : "80";
-        const printPath = `/sales/${saleId}/receipt/print/?paper=${encodeURIComponent(width)}`;
+        const printPath = `/api/sales/${saleId}/receipt/print/?paper=${encodeURIComponent(width)}`;
         const printUrl = new URL(printPath, window.location.origin).toString();
-        if (window.electronAPI && typeof window.electronAPI.printReceipt === "function") {
-            console.info("[receipt] electron print URL", printUrl);
+        const electronPrint = !!(window.electronAPI && typeof window.electronAPI.printReceipt === "function");
+        console.info("[receipt] print mode", { electron: electronPrint, url: printUrl });
+        if (electronPrint) {
             window.electronAPI.printReceipt(printUrl).catch((err) => {
                 console.warn("[receipt] electron print failed", err);
-                window.open(printUrl, "_blank");
+                checkPrintBridge().then((bridgeOnline) => {
+                    if (bridgeOnline) {
+                        console.info("[receipt] print mode", { electron: false, bridge: true, url: printUrl });
+                        return sendPrintBridgeJob(printUrl, width).catch((bridgeErr) => {
+                            console.warn("[receipt] bridge print failed", bridgeErr);
+                            toast("Receipt bridge print failed; opening browser print.", "warning");
+                            window.open(printUrl, "_blank");
+                        });
+                    }
+                    console.info("[receipt] print mode", { electron: false, bridge: false, url: printUrl });
+                    window.open(printUrl, "_blank");
+                });
             });
             return;
         }
-        const win = window.open(printUrl, "_blank", "width=420,height=760");
-        if (win) {
-            return;
-        }
+        checkPrintBridge().then((bridgeOnline) => {
+            if (bridgeOnline) {
+                console.info("[receipt] print mode", { electron: false, bridge: true, url: printUrl });
+                sendPrintBridgeJob(printUrl, width).catch((bridgeErr) => {
+                    console.warn("[receipt] bridge print failed", bridgeErr);
+                    toast("Receipt bridge print failed; opening browser print.", "warning");
+                    const win = window.open(printUrl, "_blank", "width=420,height=760");
+                    if (!win) window.print();
+                });
+                return;
+            }
+            console.info("[receipt] print mode", { electron: false, bridge: false, url: printUrl });
+            const win = window.open(printUrl, "_blank", "width=420,height=760");
+            if (!win) {
+                window.print();
+            }
+        });
+        return;
     }
     const contentEl = document.getElementById("receipt-content");
     if (!contentEl) {

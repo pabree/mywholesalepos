@@ -42,6 +42,8 @@ def _sale_receipt_payload(sale):
     return {
         "sale_id": sale.id,
         "date": sale.sale_date,
+        "sale_type": sale.sale_type,
+        "payment_mode": sale.payment_mode or "",
         "items": items,
         "subtotal": sale.total_amount,
         "tax": sale.tax,
@@ -805,34 +807,32 @@ class SaleReceiptView(APIView):
         return Response(_sale_receipt_payload(sale))
 
 
-class SaleReceiptPrintView(APIView):
-    permission_classes = [IsAuthenticated, RolePermission]
-    allowed_roles = {"cashier", "salesperson", "supervisor", "admin"}
+def receipt_print_view(request, sale_id):
+    print("PRINT VIEW HIT", sale_id)
+    sale = get_object_or_404(
+        Sale.objects.select_related("branch", "customer", "completed_by", "updated_by", "created_by").prefetch_related(
+            "items__product",
+            "payments__received_by",
+            "payments__delivery_run",
+        ),
+        id=sale_id,
+    )
+    if sale.status != "completed":
+        return HttpResponse("Sale is not completed", status=400)
 
-    def get(self, request, sale_id):
-        sale = get_object_or_404(
-            Sale.objects.select_related("branch", "customer", "completed_by", "updated_by", "created_by").prefetch_related(
-                "items__product",
-                "payments__received_by",
-                "payments__delivery_run",
-            ),
-            id=sale_id,
-        )
-        if sale.status != "completed":
-            return Response({"error": "Sale is not completed"}, status=400)
-        receipt = _sale_receipt_payload(sale)
-        paper_width = request.query_params.get("paper", "80").strip()
-        if paper_width not in {"58", "80"}:
-            paper_width = "80"
-        return render(
-            request,
-            "sales/receipt_print.html",
-            {
-                "receipt": receipt,
-                "sale": sale,
-                "paper_width_mm": paper_width,
-            },
-        )
+    receipt = _sale_receipt_payload(sale)
+    paper_width = (request.GET.get("paper") or "80").strip()
+    if paper_width not in {"58", "80"}:
+        paper_width = "80"
+    return render(
+        request,
+        "sales/receipt_print.html",
+        {
+            "receipt": receipt,
+            "sale": sale,
+            "paper_width_mm": paper_width,
+        },
+    )
 
 
 class SaleReturnListCreateView(APIView):

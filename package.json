@@ -2,14 +2,67 @@
   "name": "wholesale-pos-electron",
   "version": "1.0.0",
   "private": true,
+  "productName": "Stery POS",
+  "appId": "com.stery.pos",
   "description": "Electron wrapper for the Wholesale POS web app",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "POS_URL=http://localhost:3000 electron .",
-    "prod": "POS_URL=https://your-pos-domain.example electron ."
+    "prod": "electron .",
+    "bridge:build": "npm --prefix print-bridge run build:win",
+    "dist": "electron-builder",
+    "dist:win": "npm run bridge:build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.stery.pos",
+    "productName": "Stery POS",
+    "artifactName": "Stery-POS-Setup-${version}.${ext}",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "frontend/**",
+      "sales/templates/sales/receipt_print.html"
+    ],
+    "extraResources": [
+      {
+        "from": "print-bridge/dist",
+        "to": "print-bridge"
+      },
+      {
+        "from": "print-bridge/bridge.config.json",
+        "to": "print-bridge/bridge.config.json"
+      }
+    ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "frontend/logo-512.png"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "pabree",
+        "repo": "mywholesalepos"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }
