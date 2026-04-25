@@ -1,0 +1,7 @@
+{
+  "port": 9777,
+  "printMode": "escpos",
+  "printerName": "TM-T20III",
+  "paperWidth": "80",
+  "characterSet": "SLOVENIA"
+}
