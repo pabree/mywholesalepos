@@ -50,7 +50,6 @@
       "target": ["nsis", "portable"],
       "icon": "frontend/logo-512.png"
     },
-    "publish": "never",
     "nsis": {
       "oneClick": false,
       "perMachine": false,
