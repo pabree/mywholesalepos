@@ -50,13 +50,7 @@
       "target": ["nsis", "portable"],
       "icon": "frontend/logo-512.png"
     },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "pabree",
-        "repo": "mywholesalepos"
-      }
-    ],
+    "publish": "never"
     "nsis": {
       "oneClick": false,
       "perMachine": false,
