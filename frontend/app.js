@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.01";
+const APP_BUILD = "2026-04-29.02";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -1732,7 +1732,9 @@ document.addEventListener("DOMContentLoaded", () => {
         els.mobileSuccessClose.addEventListener("click", closeMobileSuccessModal);
     }
     if (els.mobileSuccessReceipt) {
-        els.mobileSuccessReceipt.addEventListener("click", () => {
+        els.mobileSuccessReceipt.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             if (!lastMobileSaleId) return;
             closeMobileSuccessModal();
             showReceipt(lastMobileSaleId, { autoPrint: false });
@@ -2663,7 +2665,9 @@ document.addEventListener("DOMContentLoaded", () => {
     els.checkoutBtn.addEventListener("click", checkout);
     posLog("[pos] checkout button bound", { found: Boolean(els.checkoutBtn) });
     if (els.printReceiptBtn) {
-        els.printReceiptBtn.addEventListener("click", () => {
+        els.printReceiptBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             void printReceipt();
         });
     }
@@ -3526,7 +3530,9 @@ function initMobileDashboard() {
         els.mobileSaleDetailClose.addEventListener("click", () => closeOverlay(els.mobileSaleDetailModal));
     }
     if (els.mobileSaleDetailReceipt) {
-        els.mobileSaleDetailReceipt.addEventListener("click", () => {
+        els.mobileSaleDetailReceipt.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             if (currentMobileSaleDetailId) {
                 showReceipt(currentMobileSaleDetailId);
             }
@@ -11665,53 +11671,216 @@ async function sendPrintBridgeJob(receipt) {
     return data;
 }
 
-async function printReceipt() {
-    const saleId = currentReceiptSaleId || els.receiptModal?.dataset?.saleId || "";
-    const receipt = currentReceiptPayload || null;
-    const printUrl = saleId ? getReceiptPrintUrl(saleId) : "";
-    const mode = getSelectedPrintMode();
+function syncPrintModeControl() {
+    if (!els.printModeSelect) return;
+    els.printModeSelect.value = getSelectedPrintMode();
+}
 
+function getDefaultPrintMode() {
+    return isMobileLayout() ? "android" : "pc";
+}
+
+function getSelectedPrintMode() {
+    const saved = localStorage.getItem(PRINT_MODE_KEY);
+    if (saved === "pc" || saved === "android" || saved === "none") return saved;
+    const fallback = getDefaultPrintMode();
+    localStorage.setItem(PRINT_MODE_KEY, fallback);
+    return fallback;
+}
+
+function setSelectedPrintMode(mode) {
+    const next = mode === "pc" || mode === "android" || mode === "none" ? mode : getDefaultPrintMode();
+    localStorage.setItem(PRINT_MODE_KEY, next);
+    syncPrintModeControl();
+    return next;
+}
+
+function asNumber(value, fallback = null) {
+    if (value === null || value === undefined || value === "") return fallback;
+    const cleaned = String(value).replace(/,/g, "").replace(/[^0-9.-]/g, "");
+    const parsed = Number.parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function pickValue(source, paths, fallback = "") {
+    for (const path of paths) {
+        const value = path.split(".").reduce((acc, key) => {
+            if (acc === null || acc === undefined) return undefined;
+            return acc[key];
+        }, source);
+        if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return fallback;
+}
+
+function normalizeReceiptItem(item = {}) {
+    const name = pickValue(item, ["product_name", "name", "product.name", "product.product_name", "description"], "Item");
+    const qty = asNumber(pickValue(item, ["qty", "quantity"], 1), 1);
+    const unitPrice = asNumber(pickValue(item, ["unit_price", "unitPrice", "price", "rate"], 0), 0);
+    const lineTotal = asNumber(pickValue(item, ["line_total", "lineTotal", "total", "amount"], qty * unitPrice), qty * unitPrice);
+    return {
+        name: String(name || "Item"),
+        qty,
+        unitPrice,
+        lineTotal,
+    };
+}
+
+function resolveBranchName(value) {
+    if (!value) return "";
+    if (typeof value === "object") {
+        return value.name || value.branch_name || value.title || "";
+    }
+    const branch = branches.find((entry) => String(entry.id) === String(value) || String(entry.code) === String(value));
+    return branch?.name || String(value);
+}
+
+function resolveCustomerName(value) {
+    if (!value) return "";
+    if (typeof value === "object") {
+        return value.name || value.full_name || value.fullName || value.customer_name || value.username || value.email || "";
+    }
+    return String(value);
+}
+
+function buildReceiptPayload(sale = {}) {
+    const source = sale && typeof sale === "object" ? sale : {};
+    const receiptSource = source.receipt && typeof source.receipt === "object" ? source.receipt : source;
+    const saleSource = source.sale && typeof source.sale === "object" ? source.sale : source;
+    const paymentList = ensureArray(
+        pickValue(receiptSource, ["payments"], null) || pickValue(saleSource, ["payments"], null) || [],
+        "receiptPayments"
+    );
+    const itemsSource = ensureArray(
+        pickValue(receiptSource, ["items"], null)
+            || pickValue(saleSource, ["items"], null)
+            || pickValue(saleSource, ["sale_items"], null)
+            || pickValue(saleSource, ["lines"], null)
+            || [],
+        "receiptItems"
+    );
+    const items = itemsSource.map(normalizeReceiptItem);
+    const subtotal = asNumber(pickValue(receiptSource, ["subtotal", "sub_total"], null), null);
+    const discount = asNumber(pickValue(receiptSource, ["discount"], null), null);
+    const tax = asNumber(pickValue(receiptSource, ["tax", "vat"], null), null);
+    const total = asNumber(
+        pickValue(receiptSource, ["total", "grand_total", "grandTotal"], null),
+        items.reduce((sum, item) => sum + item.lineTotal, 0)
+    );
+    const paid = asNumber(pickValue(receiptSource, ["paid", "amount_paid", "amountPaid"], null), null);
+    const change = asNumber(pickValue(receiptSource, ["change", "balance_change"], null), null);
+    const paymentMethod = pickValue(receiptSource, ["paymentMethod", "payment_method", "paymentMode"], "");
+    const inferredMethod = paymentMethod || (paymentList.length > 1 ? "Split Payment" : pickValue(paymentList[0] || {}, ["payment_method", "paymentMethod", "method", "type"], ""));
+    const branch = resolveBranchName(
+        pickValue(receiptSource, ["branch", "branch_name", "branchName", "branch_id"], null)
+            || pickValue(saleSource, ["branch", "branch_name", "branchName", "branch_id"], null)
+    );
+    const cashier = pickValue(receiptSource, ["cashier", "served_by", "servedBy", "user_name"], null)
+        || pickValue(saleSource, ["cashier", "served_by", "servedBy", "user_name"], null)
+        || (currentUser?.display_name || currentUser?.username || currentUser?.email || "");
+    const customer = resolveCustomerName(
+        pickValue(receiptSource, ["customer"], null)
+            || pickValue(saleSource, ["customer"], null)
+            || pickValue(receiptSource, ["customer_name"], null)
+            || pickValue(saleSource, ["customer_name"], null)
+    );
+    const receiptNo = String(
+        pickValue(receiptSource, ["receiptNo", "receipt_no", "sale_id", "id"], "")
+            || pickValue(saleSource, ["receiptNo", "receipt_no", "sale_id", "id"], "")
+    );
+    const date = String(
+        pickValue(receiptSource, ["date", "created_at", "createdAt"], "")
+            || pickValue(saleSource, ["date", "created_at", "createdAt"], "")
+    );
+
+    return {
+        storeName: String(
+            pickValue(receiptSource, ["storeName", "store_name"], "")
+                || pickValue(saleSource, ["storeName", "store_name"], "")
+                || "STERY WHOLESALERS"
+        ),
+        branch: branch || "",
+        receiptNo: receiptNo || "",
+        cashier: cashier || "",
+        customer: customer || "",
+        date: date || "",
+        items,
+        subtotal,
+        discount,
+        tax,
+        total,
+        paid,
+        change,
+        paymentMethod: inferredMethod || "",
+        footer: String(pickValue(receiptSource, ["footer"], "Thank you for shopping with us") || "Thank you for shopping with us"),
+        printLogo: Boolean(pickValue(receiptSource, ["printLogo", "print_logo"], false) || pickValue(saleSource, ["printLogo", "print_logo"], false)),
+        duplicateLabel: String(pickValue(receiptSource, ["duplicateLabel", "duplicate_label"], "") || ""),
+        note: String(pickValue(receiptSource, ["note", "notes"], "") || ""),
+    };
+}
+
+function encodeReceiptPayloadForAndroid(receipt) {
+    const json = JSON.stringify(receipt || {});
+    return btoa(unescape(encodeURIComponent(json)))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+}
+
+function printReceiptAndroid(receipt) {
+    const encoded = encodeReceiptPayloadForAndroid(receipt);
+    const url = `steryprint://print?data=${encoded}`;
+    window.location.href = url;
+}
+
+async function printReceiptPc(receipt) {
+    return sendPrintBridgeJob(receipt);
+}
+
+async function printReceiptUsingSelectedMode(receipt, { saleId = "" } = {}) {
+    const mode = getSelectedPrintMode();
+    const fallbackUrl = saleId ? getReceiptPrintUrl(saleId) : "";
     console.info("[receipt] print mode", { mode, saleId: saleId || null });
 
     if (mode === "none") {
-        toast("Receipt printing is disabled.", "info");
-        return;
-    }
-
-    if (!receipt) {
-        if (printUrl) {
-            openBrowserReceiptFallback(printUrl);
-        } else {
-            window.print();
-        }
-        return;
+        return { ok: true, skipped: true };
     }
 
     if (mode === "android") {
-        try {
-            printReceiptAndroid(receipt);
-            return;
-        } catch (err) {
-            console.warn("[receipt] android print failed", err);
-            toast(`Android print failed: ${err.message}`, "warning");
-        }
+        printReceiptAndroid(receipt);
+        return { ok: true, mode };
     }
 
     if (mode === "pc") {
         try {
             await printReceiptPc(receipt);
-            return;
+            return { ok: true, mode };
         } catch (err) {
             console.warn("[receipt] pc print failed", err);
             toast(`PC print failed: ${err.message}`, "warning");
         }
     }
 
-    if (printUrl) {
-        openBrowserReceiptFallback(printUrl);
-    } else {
-        window.print();
+    if (fallbackUrl) {
+        openBrowserReceiptFallback(fallbackUrl);
+        return { ok: true, mode: "browser" };
     }
+    window.print();
+    return { ok: true, mode: "browser" };
+}
+
+async function printReceipt() {
+    const saleId = currentReceiptSaleId || els.receiptModal?.dataset?.saleId || "";
+    const receipt = currentReceiptPayload || null;
+
+    if (!receipt) {
+        const printUrl = saleId ? getReceiptPrintUrl(saleId) : "";
+        if (printUrl) openBrowserReceiptFallback(printUrl);
+        else window.print();
+        return;
+    }
+
+    await printReceiptUsingSelectedMode(receipt, { saleId });
 }
 
 function closeReceiptModal() {
