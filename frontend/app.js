@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.09";
+const APP_BUILD = "2026-04-29.10";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -2687,6 +2687,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 mode: getSelectedPrintMode(),
                 androidActive: getSelectedPrintMode() === "android",
             });
+            if (getSelectedPrintMode() === "android" && currentReceiptPayload) {
+                console.info("[receipt] android button click handler firing", true);
+                printReceiptAndroid(currentReceiptPayload);
+                return;
+            }
             void printReceipt({ allowBrowserFallback: true, userTriggered: true });
         });
     }
@@ -2697,6 +2702,7 @@ document.addEventListener("DOMContentLoaded", () => {
             setSelectedPrintMode(els.printModeSelect.value);
             syncPrintModeControl();
             syncReceiptActionUi();
+            if (window.debugReceiptDom) window.debugReceiptDom();
         });
     }
     if (els.autoPrintToggle) {
@@ -2717,6 +2723,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 computed: getPrintMode(),
                 isMobile: isMobileLayout(),
             });
+            if (window.debugReceiptDom) window.debugReceiptDom();
         });
     }
     els.newSaleBtn.addEventListener("click", newSale);
@@ -11529,6 +11536,13 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
     }
 
     currentReceiptPayload = buildReceiptPayload({ receipt, sale: saleDetail });
+    console.info("[receipt] showReceipt runtime", {
+        appBuild: APP_BUILD,
+        storedMode: localStorage.getItem(PRINT_MODE_KEY) || "(empty)",
+        computedMode: getPrintMode(),
+        isMobile: isMobileLayout(),
+    });
+    if (window.debugReceiptDom) window.debugReceiptDom();
     const receiptItems = ensureArray(receipt.items || saleDetail?.items || saleDetail?.sale_items || saleDetail?.lines || [], "receiptItems");
     const detailItems = ensureArray(saleDetail?.items || saleDetail?.sale_items || saleDetail?.lines || [], "saleDetailItems");
     const itemsHtml = receiptItems.map((item, index) => {
@@ -11734,31 +11748,41 @@ function syncPrintModeControl() {
 }
 
 function syncReceiptActionUi() {
-    if (!els.printReceiptBtn) return;
+    const modal = els.receiptModal || document.getElementById("receipt-modal");
+    if (!modal) return;
+    const printBtn = modal.querySelector("#print-receipt-btn");
+    const autoWrap = modal.querySelector("#auto-print-toggle-wrap");
+    const autoToggle = modal.querySelector("#auto-print-toggle");
+    const forceAndroidBtn = modal.querySelector("#force-android-print-btn");
+    const debug = modal.querySelector("#receipt-print-debug");
     const mode = getPrintMode();
     const androidMode = mode === "android";
-    els.printReceiptBtn.textContent = androidMode
-        ? "📱 Print via Bluetooth"
-        : "🖨️ Reprint Receipt";
-    els.printReceiptBtn.classList.toggle("btn-primary", androidMode);
-    els.printReceiptBtn.classList.toggle("btn-secondary", !androidMode);
-    els.printReceiptBtn.dataset.mode = mode;
-    if (els.autoPrintToggleWrap) {
-        els.autoPrintToggleWrap.classList.toggle("hidden", androidMode);
+    if (printBtn) {
+        printBtn.textContent = androidMode ? "📱 Print via Bluetooth" : "🖨️ Reprint Receipt";
+        printBtn.classList.toggle("btn-primary", androidMode);
+        printBtn.classList.toggle("btn-secondary", !androidMode);
+        printBtn.dataset.mode = mode;
     }
-    if (els.autoPrintToggle) {
-        els.autoPrintToggle.disabled = androidMode;
-        if (androidMode) {
-            els.autoPrintToggle.checked = false;
-        }
+    if (autoWrap) {
+        autoWrap.classList.toggle("hidden", androidMode);
     }
-    if (els.forceAndroidPrintBtn) {
-        els.forceAndroidPrintBtn.classList.toggle("hidden", !isMobileLayout());
+    if (autoToggle) {
+        autoToggle.disabled = androidMode;
+        if (androidMode) autoToggle.checked = false;
     }
-    if (els.receiptPrintDebug) {
-        els.receiptPrintDebug.textContent = `APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+    if (forceAndroidBtn) {
+        forceAndroidBtn.classList.toggle("hidden", !isMobileLayout());
+    }
+    if (debug) {
+        debug.textContent = `RUNTIME RECEIPT JS 2026-04-29.10 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
+
+window.debugReceiptDom = function debugReceiptDom() {
+    console.log("APP_BUILD", APP_BUILD);
+    console.log("receipt modal elements", document.querySelectorAll('[id*=receipt], [class*=receipt]'));
+    console.log("print mode controls", document.querySelectorAll('[id*=print], [class*=print]'));
+};
 
 function getDefaultPrintMode() {
     return isMobileLayout() ? "android" : "pc";
