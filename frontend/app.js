@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.10";
+const APP_BUILD = "2026-04-29.11";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -252,6 +252,7 @@ let mpesaPollAttempts = 0;
 let autoPrintedSales = new Set();
 let currentReceiptSaleId = null;
 let currentReceiptPayload = null;
+let lastCompletedSale = null;
 let offlineMode = !navigator.onLine;
 let offlineSyncing = false;
 let currentOfflineDraftId = null;
@@ -897,8 +898,10 @@ const els = {
     mobileSuccessClose: document.getElementById("mobile-success-close"),
     mobileSuccessBody: document.getElementById("mobile-success-body"),
     mobileSuccessReceipt: document.getElementById("mobile-success-receipt"),
+    mobileSuccessPrint: document.getElementById("mobile-success-print"),
     mobileSuccessNewSale: document.getElementById("mobile-success-new-sale"),
     mobileSuccessProducts: document.getElementById("mobile-success-products"),
+    mobileSuccessDebug: document.getElementById("mobile-success-debug"),
     mobileDashboardPanel: document.getElementById("mobile-dashboard-panel"),
     mobileSummarySalesValue: document.getElementById("mobile-summary-sales-value"),
     mobileSummarySalesSub: document.getElementById("mobile-summary-sales-sub"),
@@ -1750,9 +1753,31 @@ document.addEventListener("DOMContentLoaded", () => {
         els.mobileSuccessReceipt.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
+            console.info("[receipt] view receipt clicked", {
+                lastMobileSaleId,
+                hasLastCompletedSale: Boolean(lastCompletedSale),
+            });
             if (!lastMobileSaleId) return;
             closeMobileSuccessModal();
-            showReceipt(lastMobileSaleId, { autoPrint: false });
+            showReceipt(lastCompletedSale || lastMobileSaleId, { autoPrint: false });
+        });
+    }
+    if (els.mobileSuccessPrint) {
+        els.mobileSuccessPrint.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const mode = getPrintMode();
+            const receipt = currentReceiptPayload || (lastCompletedSale ? buildReceiptPayload(lastCompletedSale) : null);
+            console.info("[receipt] success modal Bluetooth print clicked", {
+                mode,
+                hasReceiptPayload: Boolean(receipt),
+            });
+            if (!receipt) return;
+            if (mode === "android") {
+                printReceiptAndroid(receipt);
+                return;
+            }
+            toast("Bluetooth printing is only available in Android mode.", "info");
         });
     }
     if (els.mobileSuccessNewSale) {
@@ -2683,7 +2708,7 @@ document.addEventListener("DOMContentLoaded", () => {
         els.printReceiptBtn.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            console.info("[receipt] Print via Bluetooth click handler", {
+            console.info("[receipt] receipt modal Bluetooth print clicked", {
                 mode: getSelectedPrintMode(),
                 androidActive: getSelectedPrintMode() === "android",
             });
@@ -2717,6 +2742,7 @@ document.addEventListener("DOMContentLoaded", () => {
             event.stopPropagation();
             setSelectedPrintMode("android");
             syncPrintModeControl();
+            syncMobileSuccessActionUi();
             syncReceiptActionUi();
             console.info("[receipt] force android print mode", {
                 stored: localStorage.getItem(PRINT_MODE_KEY),
@@ -4587,17 +4613,33 @@ async function showMobileSuccess(saleId) {
     if (!saleId || !els.mobileSuccessBody) return;
     lastMobileSaleId = saleId;
     const sale = await apiFetch(`/sales/${saleId}/`);
+    lastCompletedSale = sale;
+    currentReceiptSaleId = saleId;
+    currentReceiptPayload = buildReceiptPayload(sale);
     const customerName = sale?.customer ? getCustomerName(sale.customer) : "—";
     const method = sale?.payment_mode ? formatPaymentMode(sale.payment_mode) : "Cash";
     const total = sale?.grand_total ?? "0.00";
     const saleNumber = shortOrderId(saleId);
+    const mode = getPrintMode();
     els.mobileSuccessBody.innerHTML = `
         <div><strong>Sale #${saleNumber}</strong></div>
         <div>Customer: <strong>${esc(customerName)}</strong></div>
         <div>Total: <strong>${fmtPrice(total)}</strong></div>
         <div>Payment: <strong>${esc(method)}</strong></div>
+        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-29.11</div>
+        <div class="success-debug-meta">print mode: ${esc(mode)}</div>
     `;
     openMobileSuccessModal();
+    syncPrintModeControl();
+    syncMobileSuccessActionUi();
+    syncReceiptActionUi();
+    console.info("[receipt] success modal opened", {
+        saleId,
+        mode,
+        hasReceiptPayload: Boolean(currentReceiptPayload),
+        androidButtonRendered: mode === "android",
+    });
+    if (window.debugReceiptDom) window.debugReceiptDom();
 }
 
 function mobileNewSale() {
@@ -11525,7 +11567,8 @@ async function holdSale() {
 }
 
 // ——— Receipt ———
-async function showReceipt(saleId, { autoPrint = false } = {}) {
+async function showReceipt(saleRef, { autoPrint = false } = {}) {
+    const saleId = typeof saleRef === "object" && saleRef ? (saleRef.id || saleRef.sale_id || saleRef.receiptNo || saleRef.receipt_no || "") : saleRef;
     const [receipt, saleDetail] = await Promise.all([
         apiFetch(`/sales/${saleId}/receipt/`),
         apiFetch(`/sales/${saleId}/`),
@@ -11536,6 +11579,14 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
     }
 
     currentReceiptPayload = buildReceiptPayload({ receipt, sale: saleDetail });
+    if (typeof saleRef === "object" && saleRef) {
+        lastCompletedSale = saleRef;
+    }
+    console.info("[receipt] showReceipt print mode", {
+        mode: getPrintMode(),
+        androidButtonRendered: getPrintMode() === "android",
+        autoPrintRequested: Boolean(autoPrint),
+    });
     console.info("[receipt] showReceipt runtime", {
         appBuild: APP_BUILD,
         storedMode: localStorage.getItem(PRINT_MODE_KEY) || "(empty)",
@@ -11652,12 +11703,6 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
     openOverlay(els.receiptModal);
     syncPrintModeControl();
     syncReceiptActionUi();
-    const receiptMode = getPrintMode();
-    console.info("[receipt] showReceipt print mode", {
-        mode: receiptMode,
-        androidButtonRendered: receiptMode === "android",
-        autoPrintRequested: Boolean(autoPrint),
-    });
     if (autoPrint && saleId) {
         scheduleAutoPrint(saleId);
     }
@@ -11774,7 +11819,27 @@ function syncReceiptActionUi() {
         forceAndroidBtn.classList.toggle("hidden", !isMobileLayout());
     }
     if (debug) {
-        debug.textContent = `RUNTIME RECEIPT JS 2026-04-29.10 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `RECEIPT MODAL BUILD 2026-04-29.11 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+    }
+}
+
+function syncMobileSuccessActionUi() {
+    const modal = els.mobileSuccessModal || document.getElementById("mobile-success-modal");
+    if (!modal) return;
+    const printBtn = modal.querySelector("#mobile-success-print");
+    const receiptBtn = modal.querySelector("#mobile-success-receipt");
+    const debug = modal.querySelector("#mobile-success-debug");
+    const mode = getPrintMode();
+    const androidMode = mode === "android";
+    if (printBtn) {
+        printBtn.classList.toggle("hidden", !androidMode);
+        printBtn.dataset.mode = mode;
+    }
+    if (receiptBtn) {
+        receiptBtn.textContent = androidMode ? "View Receipt" : "View Receipt";
+    }
+    if (debug) {
+        debug.textContent = `SUCCESS MODAL BUILD 2026-04-29.11 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11804,6 +11869,7 @@ function setSelectedPrintMode(mode) {
     const next = mode === "pc" || mode === "android" || mode === "none" ? mode : getDefaultPrintMode();
     localStorage.setItem(PRINT_MODE_KEY, next);
     syncPrintModeControl();
+    syncMobileSuccessActionUi();
     syncReceiptActionUi();
     if (els.receiptModal && !els.receiptModal.classList.contains("hidden")) {
         console.info("[receipt] receipt action controls rerendered", {
