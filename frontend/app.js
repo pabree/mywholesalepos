@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-25.02";
+const APP_BUILD = "2026-04-29.01";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -15,6 +15,7 @@ window.__APP_BUILD__ = APP_BUILD;
 const POS_DEBUG = new URLSearchParams(window.location.search).has("posDebug")
     || localStorage.getItem("pos_debug") === "1";
 const AUTO_PRINT_KEY = "pos_auto_print_receipt";
+const PRINT_MODE_KEY = "stery_print_mode";
 const PRINT_BRIDGE_URL = "http://127.0.0.1:9777";
 const posLog = (...args) => {
     if (POS_DEBUG) console.debug(...args);
@@ -249,6 +250,7 @@ let mpesaPollTimer = null;
 let mpesaPollAttempts = 0;
 let autoPrintedSales = new Set();
 let currentReceiptSaleId = null;
+let currentReceiptPayload = null;
 let offlineMode = !navigator.onLine;
 let offlineSyncing = false;
 let currentOfflineDraftId = null;
@@ -339,6 +341,7 @@ const els = {
     clearCartBtn:    document.getElementById("clear-cart-btn"),
     receiptModal:    document.getElementById("receipt-modal"),
     receiptContent:  document.getElementById("receipt-content"),
+    printModeSelect: document.getElementById("print-mode-select"),
     printReceiptBtn: document.getElementById("print-receipt-btn"),
     receiptCloseBtn: document.getElementById("receipt-close-btn"),
     autoPrintToggle: document.getElementById("auto-print-toggle"),
@@ -2660,7 +2663,15 @@ document.addEventListener("DOMContentLoaded", () => {
     els.checkoutBtn.addEventListener("click", checkout);
     posLog("[pos] checkout button bound", { found: Boolean(els.checkoutBtn) });
     if (els.printReceiptBtn) {
-        els.printReceiptBtn.addEventListener("click", printReceipt);
+        els.printReceiptBtn.addEventListener("click", () => {
+            void printReceipt();
+        });
+    }
+    if (els.printModeSelect) {
+        syncPrintModeControl();
+        els.printModeSelect.addEventListener("change", () => {
+            setSelectedPrintMode(els.printModeSelect.value);
+        });
     }
     if (els.autoPrintToggle) {
         els.autoPrintToggle.checked = isAutoPrintEnabled();
@@ -11475,8 +11486,10 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
         return;
     }
 
-    const detailItems = ensureArray(saleDetail?.items || [], "saleDetailItems");
-    const itemsHtml = receipt.items.map((item, index) => {
+    currentReceiptPayload = buildReceiptPayload({ receipt, sale: saleDetail });
+    const receiptItems = ensureArray(receipt.items || saleDetail?.items || saleDetail?.sale_items || saleDetail?.lines || [], "receiptItems");
+    const detailItems = ensureArray(saleDetail?.items || saleDetail?.sale_items || saleDetail?.lines || [], "saleDetailItems");
+    const itemsHtml = receiptItems.map((item, index) => {
         const detail = detailItems[index];
         let unitLabel = "";
         if (detail?.product && detail?.product_unit) {
@@ -11581,6 +11594,7 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
     `;
 
     openOverlay(els.receiptModal);
+    syncPrintModeControl();
     if (autoPrint && saleId) {
         scheduleAutoPrint(saleId);
     }
@@ -11593,7 +11607,9 @@ function scheduleAutoPrint(saleId) {
     requestAnimationFrame(() => {
         setTimeout(() => {
             try {
-                printReceipt();
+                void printReceipt().catch((err) => {
+                    console.warn("[receipt] auto-print failed", err);
+                });
             } catch (err) {
                 console.warn("[receipt] auto-print failed", err);
             }
@@ -11631,16 +11647,16 @@ async function checkPrintBridge() {
     }
 }
 
-async function sendPrintBridgeJob(printUrl, paperWidth) {
-    const payload = {
-        receiptUrl: printUrl,
-        printerName: localStorage.getItem("pos_receipt_printer_name") || "",
-        paperWidth: paperWidth || "80",
-    };
-    const res = await fetch(`${PRINT_BRIDGE_URL}/print-receipt`, {
+async function sendPrintBridgeJob(receipt) {
+    const res = await fetch(`${PRINT_BRIDGE_URL}/print/receipt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+            receipt,
+            printerName: localStorage.getItem("pos_receipt_printer_name") || "",
+            paperWidth: localStorage.getItem("pos_receipt_paper_width_mm") || "80",
+            mode: "escpos",
+        }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data?.ok) {
@@ -11649,120 +11665,53 @@ async function sendPrintBridgeJob(printUrl, paperWidth) {
     return data;
 }
 
-function printReceipt() {
+async function printReceipt() {
     const saleId = currentReceiptSaleId || els.receiptModal?.dataset?.saleId || "";
-    if (saleId) {
-        const paperWidth = localStorage.getItem("pos_receipt_paper_width_mm") || "80";
-        const width = paperWidth === "58" ? "58" : "80";
-        const printPath = `/api/sales/${saleId}/receipt/print/?paper=${encodeURIComponent(width)}`;
-        const printUrl = new URL(printPath, window.location.origin).toString();
-        const electronPrint = !!(window.electronAPI && typeof window.electronAPI.printReceipt === "function");
-        console.info("[receipt] print mode", { electron: electronPrint, url: printUrl });
-        if (electronPrint) {
-            window.electronAPI.printReceipt(printUrl).catch((err) => {
-                console.warn("[receipt] electron print failed", err);
-                checkPrintBridge().then((bridgeOnline) => {
-                    if (bridgeOnline) {
-                        console.info("[receipt] print mode", { electron: false, bridge: true, url: printUrl });
-                        return sendPrintBridgeJob(printUrl, width).catch((bridgeErr) => {
-                            console.warn("[receipt] bridge print failed", bridgeErr);
-                            toast("Receipt bridge print failed; opening browser print.", "warning");
-                            window.open(printUrl, "_blank");
-                        });
-                    }
-                    console.info("[receipt] print mode", { electron: false, bridge: false, url: printUrl });
-                    window.open(printUrl, "_blank");
-                });
-            });
-            return;
+    const receipt = currentReceiptPayload || null;
+    const printUrl = saleId ? getReceiptPrintUrl(saleId) : "";
+    const mode = getSelectedPrintMode();
+
+    console.info("[receipt] print mode", { mode, saleId: saleId || null });
+
+    if (mode === "none") {
+        toast("Receipt printing is disabled.", "info");
+        return;
+    }
+
+    if (!receipt) {
+        if (printUrl) {
+            openBrowserReceiptFallback(printUrl);
+        } else {
+            window.print();
         }
-        checkPrintBridge().then((bridgeOnline) => {
-            if (bridgeOnline) {
-                console.info("[receipt] print mode", { electron: false, bridge: true, url: printUrl });
-                sendPrintBridgeJob(printUrl, width).catch((bridgeErr) => {
-                    console.warn("[receipt] bridge print failed", bridgeErr);
-                    toast("Receipt bridge print failed; opening browser print.", "warning");
-                    const win = window.open(printUrl, "_blank", "width=420,height=760");
-                    if (!win) window.print();
-                });
-                return;
-            }
-            console.info("[receipt] print mode", { electron: false, bridge: false, url: printUrl });
-            const win = window.open(printUrl, "_blank", "width=420,height=760");
-            if (!win) {
-                window.print();
-            }
-        });
         return;
     }
-    const contentEl = document.getElementById("receipt-content");
-    if (!contentEl) {
+
+    if (mode === "android") {
+        try {
+            printReceiptAndroid(receipt);
+            return;
+        } catch (err) {
+            console.warn("[receipt] android print failed", err);
+            toast(`Android print failed: ${err.message}`, "warning");
+        }
+    }
+
+    if (mode === "pc") {
+        try {
+            await printReceiptPc(receipt);
+            return;
+        } catch (err) {
+            console.warn("[receipt] pc print failed", err);
+            toast(`PC print failed: ${err.message}`, "warning");
+        }
+    }
+
+    if (printUrl) {
+        openBrowserReceiptFallback(printUrl);
+    } else {
         window.print();
-        return;
     }
-    const content = contentEl.innerHTML;
-    const win = window.open("", "", "width=360,height=640");
-    if (!win) {
-        window.print();
-        return;
-    }
-    win.document.open();
-    win.document.write(`<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Receipt</title>
-    <style>
-      @page { margin: 6mm; }
-      html, body { padding: 0; margin: 0; }
-      body {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        font-size: 12px;
-        color: #000;
-        background: #fff;
-      }
-      .receipt { padding: 0; text-align: left; }
-      .receipt-success { display: none; }
-      .receipt-header h3 { font-size: 16px; margin: 0 0 4px; }
-      .receipt-header .receipt-id,
-      .receipt-header .receipt-date,
-      .receipt-meta,
-      .receipt-subline { font-size: 11px; color: #222; }
-      .receipt-divider { border: none; border-top: 1px dashed #999; margin: 8px 0; }
-      .receipt-items { text-align: left; }
-      .receipt-item { display: block; padding: 4px 0; font-size: 12px; }
-      .receipt-item-total { float: right; font-weight: 700; }
-      .receipt-item-meta { font-size: 11px; color: #555; clear: both; }
-      .receipt-totals { text-align: left; margin-top: 6px; }
-      .receipt-total-row { display: block; padding: 3px 0; font-size: 12px; }
-      .receipt-total-row span:last-child,
-      .receipt-total-row strong:last-child { float: right; }
-      .receipt-total-row.receipt-grand { font-size: 14px; font-weight: 700; border-top: 1px dashed #999; margin-top: 6px; padding-top: 6px; }
-      .receipt-total-row::after { content: ""; display: block; clear: both; }
-      .receipt-payments { margin-top: 8px; }
-      .receipt-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
-    </style>
-  </head>
-  <body>
-    ${content}
-  </body>
-</html>`);
-    win.document.close();
-    const closeIfAllowed = () => {
-        try { win.close(); } catch (err) { /* ignore */ }
-    };
-    win.onload = () => {
-        try { win.focus(); } catch (err) { /* ignore */ }
-        setTimeout(() => {
-            try { win.print(); } catch (err) { /* ignore */ }
-            if ("onafterprint" in win) {
-                win.onafterprint = closeIfAllowed;
-            } else {
-                setTimeout(closeIfAllowed, 1200);
-            }
-        }, 250);
-    };
 }
 
 function closeReceiptModal() {
@@ -11776,6 +11725,7 @@ function newSale() {
     currentSaleId = null;
     currentSaleType = "retail";
     currentReceiptSaleId = null;
+    currentReceiptPayload = null;
     if (els.receiptModal) {
         delete els.receiptModal.dataset.saleId;
     }

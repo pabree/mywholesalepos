@@ -5177,6 +5177,10 @@ body.offline .offline-status {
     height: 14px;
 }
 
+.receipt-print-mode {
+    min-width: 240px;
+}
+
 .btn-primary,
 .btn-secondary {
     flex: 1;

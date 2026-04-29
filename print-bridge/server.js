@@ -8,6 +8,8 @@ const crypto = require("crypto");
 const { spawn } = require("child_process");
 const cheerio = require("cheerio");
 const { printer: thermalPrinter, types: printerTypes } = require("node-thermal-printer");
+const { formatReceiptText } = require("./receiptFormatter");
+const { normalizeReceiptPayload, sanitizeText } = require("./receiptPayload");
 
 const app = express();
 const BRIDGE_INSTALL_ROOT = process.pkg ? path.dirname(process.execPath) : __dirname;
@@ -103,11 +105,6 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "stery-pos-print-bridge",
-    port: PORT,
-    mode: DEFAULT_PRINT_MODE,
-    printerName: DEFAULT_PRINTER_NAME || null,
-    paperWidth: DEFAULT_PAPER_WIDTH,
-    characterSet: DEFAULT_CHARACTER_SET,
   });
 });
 
@@ -149,14 +146,7 @@ function formatMoney(value) {
 }
 
 function sanitizeReceiptText(value) {
-  return String(value ?? "")
-    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
-    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
-    .replace(/[\u2013\u2014]/g, "-")
-    .replace(/\u00A0/g, " ")
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return sanitizeText(value).replace(/\s+/g, " ").trim();
 }
 
 function formatPlainNumber(value) {
@@ -260,6 +250,49 @@ function getReceiptMeta($) {
     paymentStatus: sanitizeReceiptText(metaEl.attr("data-payment-status") || ""),
     dueDate: sanitizeReceiptText(metaEl.attr("data-due-date") || ""),
   };
+}
+
+function isReceiptJsonLike(body) {
+  if (!body || typeof body !== "object") return false;
+  if (body.receipt && typeof body.receipt === "object") return true;
+  return Boolean(
+    body.storeName ||
+    body.receiptNo ||
+    body.cashier ||
+    body.customer ||
+    Array.isArray(body.items) ||
+    body.total !== undefined ||
+    body.paid !== undefined ||
+    body.change !== undefined ||
+    body.paymentMethod !== undefined
+  );
+}
+
+function normalizePrintBody(body) {
+  if (!body || typeof body !== "object") return null;
+  if (body.receipt && typeof body.receipt === "object") return normalizeReceiptPayload(body.receipt);
+  if (isReceiptJsonLike(body)) return normalizeReceiptPayload(body);
+  return null;
+}
+
+function printReceiptJson(receipt, printerName, mode, paperWidth) {
+  const payload = normalizeReceiptPayload(receipt);
+  const text = formatReceiptText(payload);
+  const lines = text.split("\n");
+  const width = normalizePaperWidth(paperWidth);
+  const selectedPrinter = printerName || DEFAULT_PRINTER_NAME || "default";
+  const printMode = (mode || DEFAULT_PRINT_MODE || "escpos").toLowerCase();
+  console.info("[bridge] printer selected", selectedPrinter);
+  console.info("[bridge] mode used", printMode);
+  if (printMode === "text") {
+    return printPlainText(lines.join(os.EOL), printerName || DEFAULT_PRINTER_NAME || "");
+  }
+  const bytes = buildEscposBuffer(lines, { width });
+  return sendRawBytesToPrinter(bytes, printerName || DEFAULT_PRINTER_NAME || "");
+}
+
+function parseHtmlReceiptText(html) {
+  return parseReceiptLines(html, { width: 48 }).join("\n");
 }
 
 function humanizeMode(meta, payments = []) {
@@ -414,8 +447,8 @@ function buildEscposBuffer(lines, { width = 80 } = {}) {
   if (typeof printer.alignLeft === "function") {
     printer.alignLeft();
   }
+  let beforeSaleReceipt = true;
   const centeredHeadings = new Set([
-    "STERY WHOLESALERS LTD",
     "SALE RECEIPT",
     "PAYMENTS",
     "PAYMENT DETAILS",
@@ -430,6 +463,21 @@ function buildEscposBuffer(lines, { width = 80 } = {}) {
       const text = sanitizeReceiptText(rawText);
       if (!text) {
         printer.newLine();
+        return;
+      }
+      if (beforeSaleReceipt) {
+        if (/^-{8,}$/.test(text)) {
+          printer.println(text);
+          return;
+        }
+        if (typeof printer.alignCenter === "function") printer.alignCenter();
+        printer.bold(true);
+        printer.println(text);
+        printer.bold(false);
+        if (typeof printer.alignLeft === "function") printer.alignLeft();
+        if (text.toUpperCase() === "SALE RECEIPT") {
+          beforeSaleReceipt = false;
+        }
         return;
       }
       if (centeredHeadings.has(text.toUpperCase())) {
@@ -589,6 +637,64 @@ app.post("/print-receipt", async (req, res) => {
     console.error("[bridge] print failure", err);
     return res.status(500).json({ ok: false, error: err.message || "Print failed" });
   }
+});
+
+async function handlePrintBody(req, res, requireReceiptJson = false) {
+  const body = req.body || {};
+  const printerName = body.printerName || null;
+  const mode = body.mode || DEFAULT_PRINT_MODE;
+  const paperWidth = body.paperWidth || DEFAULT_PAPER_WIDTH;
+  console.info("[bridge] received body print job", {
+    printerName,
+    paperWidth,
+    mode,
+    hasText: Boolean(body.text),
+    hasHtml: Boolean(body.html),
+    hasReceipt: isReceiptJsonLike(body),
+  });
+
+  try {
+    if (body.text !== undefined && body.text !== null) {
+      const text = sanitizeReceiptText(body.text);
+      if (!text) throw new Error("text is empty");
+      await printPlainText(text, printerName || DEFAULT_PRINTER_NAME || "");
+      return res.json({ ok: true });
+    }
+
+    if (body.html !== undefined && body.html !== null) {
+      const html = String(body.html);
+      if (!html.trim()) throw new Error("html is empty");
+      const text = parseHtmlReceiptText(html);
+      await printPlainText(text, printerName || DEFAULT_PRINTER_NAME || "");
+      return res.json({ ok: true });
+    }
+
+    if (body.receipt && typeof body.receipt === "object") {
+      await printReceiptJson(body.receipt, printerName, mode, paperWidth);
+      return res.json({ ok: true });
+    }
+
+    if (isReceiptJsonLike(body)) {
+      await printReceiptJson(body, printerName, mode, paperWidth);
+      return res.json({ ok: true });
+    }
+
+    if (requireReceiptJson) {
+      throw new Error("receipt JSON is required");
+    }
+    throw new Error("No printable data provided");
+  } catch (err) {
+    console.error("[bridge] print body failure", err);
+    return res.status(500).json({ ok: false, error: err.message || "Print failed" });
+  }
+}
+
+app.post("/print", async (req, res) => {
+  return handlePrintBody(req, res, false);
+});
+
+app.post("/print/receipt", async (req, res) => {
+  return handlePrintBody(req, res, true);
 });
 
 app.post("/test-print", async (req, res) => {

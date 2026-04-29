@@ -1,0 +1,20 @@
+{
+  "storeName": "STERY WHOLESALERS",
+  "branch": "Bukembe Branch",
+  "receiptNo": "RCP-001",
+  "cashier": "Jay",
+  "customer": "Walk-in Customer",
+  "date": "2026-04-29 14:20",
+  "items": [
+    {"name": "Sugar 2kg", "qty": 2, "unitPrice": 250, "lineTotal": 500},
+    {"name": "Milk 500ml", "qty": 1, "unitPrice": 60, "lineTotal": 60}
+  ],
+  "subtotal": 560,
+  "discount": 0,
+  "tax": 0,
+  "total": 560,
+  "paid": 1000,
+  "change": 440,
+  "paymentMethod": "Cash",
+  "footer": "Thank you for shopping with us"
+}

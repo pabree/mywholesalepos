@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Stery Bluetooth Print Bridge</string>
+    <string name="selected_printer">Selected printer</string>
+    <string name="no_printer_selected">No printer selected</string>
+    <string name="test_print">Test Print</string>
+    <string name="printer_list">Paired Bluetooth devices</string>
+    <string name="deep_link_status">Deep link status</string>
+</resources>

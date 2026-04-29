@@ -535,9 +535,17 @@
                     <input type="checkbox" id="auto-print-toggle">
                     Auto-print receipts
                 </label>
-                <button id="print-receipt-btn" class="btn-primary">🖨️ Print</button>
+                <label class="receipt-toggle">
+                    <span>Print mode</span>
+                    <select id="print-mode-select" class="summary-select receipt-print-mode">
+                        <option value="pc">PC USB Printer</option>
+                        <option value="android">Android Bluetooth Printer</option>
+                        <option value="none">No auto print</option>
+                    </select>
+                </label>
+                <button id="print-receipt-btn" class="btn-primary">🖨️ Reprint Receipt</button>
                 <button id="new-sale-btn" class="btn-secondary">+ New Sale</button>
-                <div class="print-note">Printing uses your device's print dialog. Bluetooth support depends on your phone/browser.</div>
+                <div class="print-note">Choose PC USB, Android Bluetooth, or disable printing for this device.</div>
             </div>
         </div>
     </div>
@@ -2579,6 +2587,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-15.05"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-29.01"></script>
 </body>
 </html>
