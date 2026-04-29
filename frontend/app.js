@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.03";
+const APP_BUILD = "2026-04-29.05";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -2669,11 +2669,12 @@ document.addEventListener("DOMContentLoaded", () => {
         els.printReceiptBtn.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            void printReceipt();
+            void printReceipt({ allowBrowserFallback: true, userTriggered: true });
         });
     }
     if (els.printModeSelect) {
         syncPrintModeControl();
+        syncReceiptPrintAction();
         els.printModeSelect.addEventListener("change", () => {
             setSelectedPrintMode(els.printModeSelect.value);
         });
@@ -11602,6 +11603,7 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
 
     openOverlay(els.receiptModal);
     syncPrintModeControl();
+    syncReceiptPrintAction();
     if (autoPrint && saleId) {
         scheduleAutoPrint(saleId);
     }
@@ -11687,6 +11689,13 @@ function syncPrintModeControl() {
     els.printModeSelect.value = getSelectedPrintMode();
 }
 
+function syncReceiptPrintAction() {
+    if (!els.printReceiptBtn) return;
+    els.printReceiptBtn.textContent = getSelectedPrintMode() === "android"
+        ? "📱 Print via Bluetooth"
+        : "🖨️ Reprint Receipt";
+}
+
 function getDefaultPrintMode() {
     return isMobileLayout() ? "android" : "pc";
 }
@@ -11703,6 +11712,7 @@ function setSelectedPrintMode(mode) {
     const next = mode === "pc" || mode === "android" || mode === "none" ? mode : getDefaultPrintMode();
     localStorage.setItem(PRINT_MODE_KEY, next);
     syncPrintModeControl();
+    syncReceiptPrintAction();
     return next;
 }
 
@@ -11840,6 +11850,8 @@ function encodeReceiptPayloadForAndroid(receipt) {
 
 function printReceiptAndroid(receipt) {
     const encoded = encodeReceiptPayloadForAndroid(receipt);
+    console.info("[receipt] android print user-triggered", true);
+    console.info("[receipt] android deep link length", encoded.length);
     const url = `steryprint://print?data=${encoded}`;
     window.location.href = url;
 }
@@ -11848,16 +11860,21 @@ async function printReceiptPc(receipt) {
     return sendPrintBridgeJob(receipt);
 }
 
-async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowserFallback = false } = {}) {
+async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowserFallback = false, userTriggered = false } = {}) {
     const mode = getSelectedPrintMode();
-    console.info("[receipt] print mode", { mode, saleId: saleId || null });
+    console.info("[receipt] print mode", { mode, saleId: saleId || null, userTriggered: Boolean(userTriggered) });
 
     if (mode === "none") {
         return { ok: true, skipped: true };
     }
 
     if (mode === "android") {
-        printReceiptAndroid(receipt);
+        if (userTriggered) {
+            printReceiptAndroid(receipt);
+            return { ok: true, mode };
+        }
+        console.info("[receipt] android print user-triggered", false);
+        toast("Tap 'Print via Bluetooth' to launch Android printing.", "info");
         return { ok: true, mode };
     }
 
@@ -11878,7 +11895,7 @@ async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowse
     return { ok: false, mode, skipped: true };
 }
 
-async function printReceipt({ allowBrowserFallback = true } = {}) {
+async function printReceipt({ allowBrowserFallback = true, userTriggered = false } = {}) {
     const saleId = currentReceiptSaleId || els.receiptModal?.dataset?.saleId || "";
     const receipt = currentReceiptPayload || null;
 
@@ -11889,7 +11906,7 @@ async function printReceipt({ allowBrowserFallback = true } = {}) {
         return;
     }
 
-    await printReceiptUsingSelectedMode(receipt, { saleId, allowBrowserFallback });
+    await printReceiptUsingSelectedMode(receipt, { saleId, allowBrowserFallback, userTriggered });
 }
 
 function closeReceiptModal() {
