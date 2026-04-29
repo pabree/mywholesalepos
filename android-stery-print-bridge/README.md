@@ -32,6 +32,8 @@ Use adb:
 adb shell am start -a android.intent.action.VIEW -d "steryprint://print?text=Hello%20World"
 ```
 
+Typing the scheme directly into Chrome's address bar may search instead of launching the app. For browser testing, put the link on a page and tap it, or use the adb command above.
+
 Example browser link:
 
 ```text

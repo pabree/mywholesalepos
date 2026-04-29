@@ -42,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        setIntent(intent)
 
         statusText = findViewById(R.id.statusText)
         selectedPrinterText = findViewById(R.id.selectedPrinterText)
