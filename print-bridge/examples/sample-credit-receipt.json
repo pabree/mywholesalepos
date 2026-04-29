@@ -1,0 +1,52 @@
+{
+  "storeName": "STERY WHOLESALERS",
+  "branch": "Bukembe Branch",
+  "receiptNo": "CR-0002",
+  "cashier": "Jay",
+  "customer": "Nabuyon",
+  "date": "2026-04-29 15:05",
+  "saleType": "credit",
+  "paymentStatus": "credit_due",
+  "isCredit": true,
+  "items": [
+    {
+      "name": "Flour 24*1kg",
+      "qty": 1,
+      "unitPrice": 2020,
+      "lineTotal": 2020
+    },
+    {
+      "name": "Salt 1kg",
+      "qty": 2,
+      "unitPrice": 20,
+      "lineTotal": 40
+    }
+  ],
+  "subtotal": 2060,
+  "discount": 0,
+  "tax": 0,
+  "vat": 0,
+  "netAmount": 2060,
+  "total": 2060,
+  "paid": 500,
+  "change": 0,
+  "balance": 1560,
+  "paymentMethod": "Credit",
+  "payments": [
+    {
+      "method": "Cash",
+      "amount": 500,
+      "status": "partial",
+      "reference": "",
+      "date": "2026-04-29 15:05"
+    }
+  ],
+  "footer": "Thank you for shopping with us",
+  "conditions": [
+    "Goods remain property of Stery's Wholesalers Limited until fully paid.",
+    "Goods once sold cannot be returned.",
+    "Accounts are due on demand and overdue accounts attract interest at 3% per week."
+  ],
+  "deliveryPerson": "John Driver",
+  "deliveryPersonName": "John Driver"
+}

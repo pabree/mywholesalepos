@@ -11650,6 +11650,11 @@ async function showReceipt(saleRef, { autoPrint = false } = {}) {
         customerName ? `<div class="receipt-subline">Customer: ${esc(customerName)}</div>` : "",
         servedBy ? `<div class="receipt-subline">Served by: ${esc(servedBy)}</div>` : "",
     ].filter(Boolean).join("");
+    const receiptNumber = receipt.receipt_no
+        || receipt.invoice_no
+        || saleDetail?.receipt_no
+        || saleDetail?.invoice_no
+        || String(receipt.sale_id || saleId || "").slice(-8);
 
     currentReceiptSaleId = saleId;
     if (els.receiptModal) {
@@ -11660,7 +11665,7 @@ async function showReceipt(saleRef, { autoPrint = false } = {}) {
         <div class="receipt-success">✅</div>
         <div class="receipt-header">
             <h3>Sale Receipt</h3>
-            <div class="receipt-id">Sale #${receipt.sale_id}</div>
+            <div class="receipt-id">Receipt #${esc(receiptNumber)}</div>
             <div class="receipt-date">${new Date(receipt.date).toLocaleString()}</div>
             ${receiptMeta}
         </div>
@@ -11900,12 +11905,24 @@ function pickValue(source, paths, fallback = "") {
 }
 
 function normalizeReceiptItem(item = {}) {
-    const name = pickValue(item, ["product_name", "name", "product.name", "product.product_name", "description"], "Item");
+    const name = pickValue(item, [
+        "product_name",
+        "item.product_name",
+        "product.name",
+        "item.product.name",
+        "product.product_name",
+        "item.name",
+        "name",
+        "item.description",
+        "item.product.name",
+        "item.product.product_name",
+        "description",
+    ], "");
     const qty = asNumber(pickValue(item, ["qty", "quantity"], 1), 1);
     const unitPrice = asNumber(pickValue(item, ["unit_price", "unitPrice", "price", "rate"], 0), 0);
     const lineTotal = asNumber(pickValue(item, ["line_total", "lineTotal", "total", "amount"], qty * unitPrice), qty * unitPrice);
     return {
-        name: String(name || "Item"),
+        name: String(name || pickValue(item, ["product", "item.product"], "") || "Item"),
         qty,
         unitPrice,
         lineTotal,
@@ -11926,7 +11943,8 @@ function resolveCustomerName(value) {
     if (typeof value === "object") {
         return value.name || value.full_name || value.fullName || value.customer_name || value.username || value.email || "";
     }
-    return String(value);
+    const text = String(value);
+    return /^[0-9a-f-]{16,}$/i.test(text) ? "" : text;
 }
 
 function buildReceiptPayload(sale = {}) {
@@ -11937,6 +11955,10 @@ function buildReceiptPayload(sale = {}) {
         pickValue(receiptSource, ["payments"], null) || pickValue(saleSource, ["payments"], null) || [],
         "receiptPayments"
     );
+    const conditions = ensureArray(
+        pickValue(receiptSource, ["conditions"], null) || pickValue(saleSource, ["conditions"], null) || [],
+        "receiptConditions"
+    );
     const itemsSource = ensureArray(
         pickValue(receiptSource, ["items"], null)
             || pickValue(saleSource, ["items"], null)
@@ -11946,22 +11968,24 @@ function buildReceiptPayload(sale = {}) {
         "receiptItems"
     );
     const items = itemsSource.map(normalizeReceiptItem);
-    const subtotal = asNumber(pickValue(receiptSource, ["subtotal", "sub_total"], null), null);
+    const subtotal = asNumber(pickValue(receiptSource, ["subtotal", "sub_total", "subtotal_amount"], null), null);
     const discount = asNumber(pickValue(receiptSource, ["discount"], null), null);
-    const tax = asNumber(pickValue(receiptSource, ["tax", "vat"], null), null);
+    const vat = asNumber(pickValue(receiptSource, ["vat", "tax"], null), null);
+    const netAmount = asNumber(pickValue(receiptSource, ["netAmount", "net_amount"], null), null);
     const total = asNumber(
         pickValue(receiptSource, ["total", "grand_total", "grandTotal"], null),
         items.reduce((sum, item) => sum + item.lineTotal, 0)
     );
     const paid = asNumber(pickValue(receiptSource, ["paid", "amount_paid", "amountPaid"], null), null);
     const change = asNumber(pickValue(receiptSource, ["change", "balance_change"], null), null);
+    const balance = asNumber(pickValue(receiptSource, ["balance", "balance_due", "balanceDue"], null), null);
     const paymentMethod = pickValue(receiptSource, ["paymentMethod", "payment_method", "paymentMode"], "");
     const inferredMethod = paymentMethod || (paymentList.length > 1 ? "Split Payment" : pickValue(paymentList[0] || {}, ["payment_method", "paymentMethod", "method", "type"], ""));
     const branch = resolveBranchName(
         pickValue(receiptSource, ["branch", "branch_name", "branchName", "branch_id"], null)
             || pickValue(saleSource, ["branch", "branch_name", "branchName", "branch_id"], null)
     );
-    const cashier = pickValue(receiptSource, ["cashier", "served_by", "servedBy", "user_name"], null)
+    const cashier = pickValue(receiptSource, ["cashier", "cashierName", "served_by", "servedBy", "user_name"], null)
         || pickValue(saleSource, ["cashier", "served_by", "servedBy", "user_name"], null)
         || (currentUser?.display_name || currentUser?.username || currentUser?.email || "");
     const customer = resolveCustomerName(
@@ -11971,13 +11995,33 @@ function buildReceiptPayload(sale = {}) {
             || pickValue(saleSource, ["customer_name"], null)
     );
     const receiptNo = String(
-        pickValue(receiptSource, ["receiptNo", "receipt_no", "sale_id", "id"], "")
+        pickValue(receiptSource, ["receiptNo", "receipt_no", "invoice_no", "invoiceNo"], "")
             || pickValue(saleSource, ["receiptNo", "receipt_no", "sale_id", "id"], "")
+            || (String(pickValue(saleSource, ["id"], "")).slice(-8))
     );
     const date = String(
         pickValue(receiptSource, ["date", "created_at", "createdAt"], "")
             || pickValue(saleSource, ["date", "created_at", "createdAt"], "")
     );
+    const deliveryPerson = resolveCustomerName(
+        pickValue(receiptSource, ["deliveryPerson", "delivery_person", "assigned_to", "deliveryPersonName"], null)
+            || pickValue(saleSource, ["deliveryPerson", "delivery_person", "assigned_to", "deliveryPersonName"], null)
+    );
+    const paymentStatus = pickValue(receiptSource, ["paymentStatus", "payment_status", "status"], "")
+        || pickValue(saleSource, ["paymentStatus", "payment_status", "status"], "");
+    const isCredit = Boolean(
+        pickValue(receiptSource, ["isCredit", "is_credit", "is_credit_sale"], null)
+            ?? pickValue(saleSource, ["isCredit", "is_credit", "is_credit_sale"], null)
+            ?? String(paymentStatus).toLowerCase().includes("credit")
+    );
+    const payments = paymentList.map((payment) => ({
+        method: sanitizeText(pickValue(payment, ["method", "payment_method", "paymentMethod", "type"], "")),
+        amount: asNumber(pickValue(payment, ["amount", "paid_amount", "paidAmount"], null), null),
+        status: sanitizeText(pickValue(payment, ["status", "payment_status"], "")),
+        reference: sanitizeText(pickValue(payment, ["reference", "payment_reference", "code"], "")),
+        date: sanitizeText(pickValue(payment, ["date", "created_at", "createdAt"], "")),
+        note: sanitizeText(pickValue(payment, ["note", "notes"], "")),
+    }));
 
     return {
         storeName: String(
@@ -11986,23 +12030,53 @@ function buildReceiptPayload(sale = {}) {
                 || "STERY WHOLESALERS"
         ),
         branch: branch || "",
+        branchName: branch || "",
         receiptNo: receiptNo || "",
         cashier: cashier || "",
+        cashierName: cashier || "",
         customer: customer || "",
+        customerName: customer || "",
+        deliveryPerson: deliveryPerson || "",
+        deliveryPersonName: deliveryPerson || "",
         date: date || "",
         items,
         subtotal,
         discount,
-        tax,
+        vat,
+        tax: vat,
+        netAmount,
         total,
         paid,
         change,
+        balance,
         paymentMethod: inferredMethod || "",
+        paymentStatus: String(paymentStatus || ""),
+        saleType: String(pickValue(receiptSource, ["saleType", "sale_type"], "") || pickValue(saleSource, ["saleType", "sale_type", "sale_type_name"], "") || ""),
+        isCredit: Boolean(isCredit || pickValue(saleSource, ["is_credit_sale", "isCredit", "is_credit"], false)),
         footer: String(pickValue(receiptSource, ["footer"], "Thank you for shopping with us") || "Thank you for shopping with us"),
         printLogo: Boolean(pickValue(receiptSource, ["printLogo", "print_logo"], false) || pickValue(saleSource, ["printLogo", "print_logo"], false)),
         duplicateLabel: String(pickValue(receiptSource, ["duplicateLabel", "duplicate_label"], "") || ""),
         note: String(pickValue(receiptSource, ["note", "notes"], "") || ""),
+        payments,
+        conditions: conditions.length ? conditions : defaultReceiptConditions({
+            saleType: String(pickValue(receiptSource, ["saleType", "sale_type"], "") || pickValue(saleSource, ["saleType", "sale_type", "sale_type_name"], "") || ""),
+            isCredit: Boolean(isCredit || pickValue(saleSource, ["is_credit_sale", "isCredit", "is_credit"], false)),
+        }),
     };
+}
+
+function defaultReceiptConditions({ saleType = "", isCredit = false } = {}) {
+    const base = [
+        "Goods remain property of Stery's Wholesalers Limited until fully paid.",
+        "Goods once sold cannot be returned.",
+    ];
+    if (String(saleType).toLowerCase() === "wholesale") {
+        base.push("Wholesale discounts apply only to qualifying quantities.");
+    }
+    if (isCredit) {
+        base.push("Accounts are due on demand and overdue accounts attract interest at 3% per week.");
+    }
+    return base;
 }
 
 function encodeReceiptPayloadForAndroid(receipt) {

@@ -28,8 +28,29 @@ class ReceiptFormatter(
         emit(out, EscPos.alignLeft())
         if (!payload.receiptNo.isNullOrBlank()) emitKeyValue(out, "Receipt", payload.receiptNo)
         if (!payload.date.isNullOrBlank()) emitKeyValue(out, "Date", payload.date)
-        if (!payload.cashier.isNullOrBlank()) emitKeyValue(out, "Cashier", payload.cashier)
-        if (!payload.customer.isNullOrBlank()) emitKeyValue(out, "Customer", payload.customer)
+        val cashierName = payload.cashierName ?: payload.cashier
+        val customerName = payload.customerName ?: payload.customer
+        if (!cashierName.isNullOrBlank()) emitKeyValue(out, "Cashier", cashierName)
+        if (!customerName.isNullOrBlank()) emitKeyValue(out, "Customer", customerName)
+        if (!payload.saleType.isNullOrBlank()) emitKeyValue(out, "Sale Type", payload.saleType)
+        val paymentStatus = payload.paymentStatus?.trim().orEmpty()
+        val isCredit = payload.isCredit || paymentStatus.contains("credit", ignoreCase = true)
+        if (isCredit && !payload.deliveryPersonName.isNullOrBlank()) emitKeyValue(out, "Delivery Person", payload.deliveryPersonName ?: payload.deliveryPerson)
+        if (isCredit || (!paymentStatus.isNullOrBlank() && !paymentStatus.equals("paid", ignoreCase = true))) {
+            if (!paymentStatus.equals("paid", ignoreCase = true)) emitKeyValue(out, "Status", paymentStatus)
+        }
+        if (isCredit) {
+            emitCenteredBoldLine(out, "CREDIT SALE")
+        }
+        payload.conditions.takeIf { it.isNotEmpty() }?.let {
+            emitDivider(out)
+            emitCenteredBoldLine(out, "CONDITIONS")
+            it.forEachIndexed { index, condition ->
+                wrapText(condition, width).forEachIndexed { partIndex, line ->
+                    emitLine(out, if (partIndex == 0) "${index + 1}. $line" else "   $line")
+                }
+            }
+        }
         payload.note?.takeIf { it.isNotBlank() }?.let {
             emitDivider(out)
             emitWrappedBlock(out, it)
@@ -48,11 +69,46 @@ class ReceiptFormatter(
         emitDivider(out)
         payload.subtotal?.let { emitKeyValue(out, "Subtotal", money(it)) }
         payload.discount?.let { emitKeyValue(out, "Discount", money(it)) }
-        payload.tax?.let { emitKeyValue(out, "Tax", money(it)) }
+        (payload.vat ?: payload.tax)?.let { emitKeyValue(out, "VAT", money(it)) }
+        payload.netAmount?.let { emitKeyValue(out, "Net", money(it)) }
         payload.total?.let { emitBoldKeyValue(out, "TOTAL", money(it)) }
-        payload.paid?.let { emitKeyValue(out, "Paid", money(it)) }
-        payload.change?.let { emitKeyValue(out, "Change", money(it)) }
         payload.paymentMethod?.takeIf { it.isNotBlank() }?.let { emitKeyValue(out, "Payment Method", it) }
+        if (isCredit && !payload.deliveryPersonName.isNullOrBlank()) emitKeyValue(out, "Delivery Person", payload.deliveryPersonName ?: payload.deliveryPerson)
+        if (payload.payments.isNotEmpty()) {
+            emitDivider(out)
+            emitLineCentered(out, "PAYMENTS")
+            payload.payments.forEach { payment ->
+                val method = payment.method.ifBlank { payment.status ?: "Payment" }
+                val amount = payment.amount?.let { money(it) } ?: ""
+                emitKeyValue(out, method, amount.ifBlank { payment.reference ?: payment.status ?: "" })
+                payment.reference?.takeIf { it.isNotBlank() }?.let { emitLine(out, "  Ref: $it") }
+                payment.status?.takeIf { it.isNotBlank() && !it.equals("paid", ignoreCase = true) }?.let { emitLine(out, "  Status: $it") }
+                payment.note?.takeIf { it.isNotBlank() }?.let { emitLine(out, "  Note: $it") }
+            }
+        }
+        payload.paid?.takeIf { it > 0.0 }?.let { emitKeyValue(out, "Paid", money(it)) }
+        if (!isCredit && payload.change != null && payload.change > 0.0 && paymentStatus.equals("cash", ignoreCase = true)) emitKeyValue(out, "Change", money(payload.change))
+        val balance = payload.balance ?: when {
+            isCredit -> {
+                val total = payload.total ?: 0.0
+                val paid = payload.paid ?: 0.0
+                (total - paid).coerceAtLeast(0.0)
+            }
+            else -> null
+        }
+        balance?.let {
+            val label = if (isCredit) "BALANCE DUE" else "Balance"
+            emitBoldKeyValue(out, label, money(it))
+        }
+        if (payload.conditions.isNotEmpty()) {
+            emitDivider(out)
+            emitCenteredBoldLine(out, "CONDITIONS")
+            payload.conditions.forEachIndexed { index, condition ->
+                wrapText(condition, width).forEachIndexed { partIndex, line ->
+                    emitLine(out, if (partIndex == 0) "${index + 1}. $line" else "   $line")
+                }
+            }
+        }
 
         emitDivider(out)
         payload.footer?.takeIf { it.isNotBlank() }?.let {
@@ -83,15 +139,14 @@ class ReceiptFormatter(
         val qtyText = formatQty(item.qty)
         val unitText = money(item.unitPrice)
         val totalText = money(item.lineTotal)
-        val nameWidth = ITEM_NAME_WIDTH.coerceAtMost(width - 12)
+        val nameWidth = ITEM_NAME_WIDTH.coerceAtMost(width - totalText.length - 1).coerceAtLeast(10)
         val nameLines = wrapText(name, nameWidth)
-        val firstLeft = nameLines.firstOrNull().orEmpty()
+        val firstLeft = "${nameLines.firstOrNull().orEmpty()} $qtyText x ${unitText.removePrefix("KES ")}".trim()
         val firstLine = leftRight(firstLeft, totalText)
         val result = mutableListOf(firstLine)
         if (nameLines.size > 1) {
             nameLines.drop(1).forEach { result.add("  $it") }
         }
-        result.add("  ${qtyText} x ${unitText}")
         return result
     }
 

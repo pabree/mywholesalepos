@@ -75,12 +75,22 @@ function formatReceiptText(receipt) {
   const branch = sanitizeText(payload.branch || "");
   const receiptNo = sanitizeText(payload.receiptNo || "");
   const date = sanitizeText(payload.date || "");
-  const cashier = sanitizeText(payload.cashier || "");
-  const customer = sanitizeText(payload.customer || "");
+  const cashier = sanitizeText(payload.cashierName || payload.cashier || "");
+  const customer = sanitizeText(payload.customerName || payload.customer || "");
   const note = sanitizeText(payload.note || "");
   const footer = sanitizeText(payload.footer || "Thank you for shopping with us");
   const duplicateLabel = sanitizeText(payload.duplicateLabel || "");
   const paymentMethod = sanitizeText(payload.paymentMethod || "");
+  const paymentStatus = sanitizeText(payload.paymentStatus || "");
+  const isCredit = Boolean(payload.isCredit || /credit/i.test(paymentStatus));
+  const total = payload.total ?? 0;
+  const paid = payload.paid;
+  const balance = payload.balance ?? payload.balanceDue ?? (isCredit ? Math.max(0, Number(total || 0) - Number(paid || 0)) : null);
+  const netAmount = payload.netAmount ?? null;
+  const vat = payload.vat ?? payload.tax ?? null;
+  const payments = Array.isArray(payload.payments) ? payload.payments : [];
+  const deliveryPerson = sanitizeText(payload.deliveryPersonName || payload.deliveryPerson || "");
+  const conditions = Array.isArray(payload.conditions) ? payload.conditions.map((entry) => sanitizeText(entry)).filter(Boolean) : [];
 
   if (duplicateLabel) {
     lines.push(center(duplicateLabel));
@@ -93,6 +103,16 @@ function formatReceiptText(receipt) {
   if (date) lines.push(leftRight("Date", date));
   if (cashier) lines.push(leftRight("Cashier", cashier));
   if (customer) lines.push(leftRight("Customer", customer));
+  if (deliveryPerson && isCredit) lines.push(leftRight("Delivery Person", deliveryPerson));
+  if (payload.saleType) lines.push(leftRight("Sale Type", sanitizeText(payload.saleType)));
+  if (isCredit) {
+    lines.push(center("CREDIT SALE"));
+    if (paymentStatus && !/^(paid|cash|mpesa|card|split payment)$/i.test(paymentStatus)) {
+      lines.push(leftRight("Status", paymentStatus));
+    }
+  } else if (paymentStatus && !/^(paid|cash|mpesa|card|split payment)$/i.test(paymentStatus)) {
+    lines.push(leftRight("Status", paymentStatus));
+  }
   if (note) {
     lines.push(divider());
     lines.push(...wrapText(note));
@@ -107,22 +127,44 @@ function formatReceiptText(receipt) {
   });
 
   lines.push(divider());
-  if (payload.subtotal !== null && payload.subtotal !== undefined) {
-    lines.push(leftRight("Subtotal", money(payload.subtotal)));
-  }
+  if (payload.subtotal !== null && payload.subtotal !== undefined) lines.push(leftRight("Subtotal", money(payload.subtotal)));
   if (Number(payload.discount || 0) > 0) {
     lines.push(leftRight("Discount", money(payload.discount)));
   }
-  if (Number(payload.tax || 0) > 0) {
-    lines.push(leftRight("Tax", money(payload.tax)));
-  }
-  lines.push(leftRight("TOTAL", money(payload.total ?? 0)));
+  if (Number(vat || 0) > 0) lines.push(leftRight("VAT", money(vat)));
+  if (netAmount !== null && netAmount !== undefined) lines.push(leftRight("Net", money(netAmount)));
+  lines.push(leftRight("TOTAL", money(total)));
   if (paymentMethod) lines.push(leftRight("Payment Method", paymentMethod));
-  if (payload.paid !== null && payload.paid !== undefined) {
-    lines.push(leftRight("Paid", money(payload.paid)));
+  if (payments.length) {
+    lines.push(divider());
+    lines.push(center("PAYMENTS"));
+    payments.forEach((payment) => {
+      const method = sanitizeText(payment.method || payment.paymentMethod || payment.type || "");
+      const amount = payment.amount !== null && payment.amount !== undefined ? money(payment.amount) : "";
+      const ref = sanitizeText(payment.reference || "");
+      const status = sanitizeText(payment.status || "");
+      const row = method || ref || status ? leftRight(method || status || "Payment", amount || ref || status) : "";
+      if (row) lines.push(row);
+      if (ref && method) lines.push(`  Ref: ${ref}`);
+      if (status && status.toLowerCase() !== "paid") lines.push(`  Status: ${status}`);
+    });
   }
-  if (payload.change !== null && payload.change !== undefined) {
+  if (paid !== null && paid !== undefined && Number(paid) > 0) lines.push(leftRight("Paid", money(paid)));
+  if (!isCredit && payload.change !== null && payload.change !== undefined && Number(payload.change) > 0 && /cash/i.test(paymentMethod)) {
     lines.push(leftRight("Change", money(payload.change)));
+  }
+  if (!isCredit && balance !== null && balance !== undefined && Number(balance) > 0) {
+    lines.push(leftRight("Balance", money(balance)));
+  }
+  if (conditions.length) {
+    lines.push(divider());
+    lines.push(center("CONDITIONS"));
+    conditions.forEach((condition, index) => {
+      const parts = wrapText(condition);
+      parts.forEach((part, partIndex) => {
+        lines.push(partIndex === 0 ? `${index + 1}. ${part}` : `   ${part}`);
+      });
+    });
   }
   lines.push(divider());
   lines.push(center(footer));

@@ -9,6 +9,8 @@
     "start": "node server.js",
     "check": "node -c server.js",
     "test:receipt": "node -e \"const fs=require('fs'); const {formatReceiptText}=require('./receiptFormatter'); const {normalizeReceiptPayload}=require('./receiptPayload'); const r=normalizeReceiptPayload(JSON.parse(fs.readFileSync('./examples/sample-receipt.json','utf8'))); console.log(formatReceiptText(r));\"",
+    "test:receipt:cash": "node -e \"const fs=require('fs'); const {formatReceiptText}=require('./receiptFormatter'); const {normalizeReceiptPayload}=require('./receiptPayload'); const r=normalizeReceiptPayload(JSON.parse(fs.readFileSync('./examples/sample-cash-receipt.json','utf8'))); console.log(formatReceiptText(r));\"",
+    "test:receipt:credit": "node -e \"const fs=require('fs'); const {formatReceiptText}=require('./receiptFormatter'); const {normalizeReceiptPayload}=require('./receiptPayload'); const r=normalizeReceiptPayload(JSON.parse(fs.readFileSync('./examples/sample-credit-receipt.json','utf8'))); console.log(formatReceiptText(r));\"",
     "build:win": "pkg . --targets node18-win-x64 --output dist/stery-print-bridge.exe"
   },
   "dependencies": {

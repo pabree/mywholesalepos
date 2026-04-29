@@ -44,5 +44,6 @@
   "conditions": [
     "Goods remain property of Stery's Wholesalers Limited until fully paid.",
     "Goods once sold cannot be returned."
-  ]
+  ],
+  "isCredit": false
 }

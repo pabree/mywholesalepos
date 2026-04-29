@@ -76,12 +76,30 @@ curl -X POST http://127.0.0.1:9777/print \
 ```bash
 npm run check
 npm run test:receipt
+npm run test:receipt:cash
+npm run test:receipt:credit
 ```
 
 ## Local test payload
 
 ```bash
 node -e "const fs=require('fs'); const {formatReceiptText}=require('./receiptFormatter'); const {normalizeReceiptPayload}=require('./receiptPayload'); const r=normalizeReceiptPayload(JSON.parse(fs.readFileSync('./examples/sample-receipt.json','utf8'))); console.log(formatReceiptText(r));"
+```
+
+### Cash receipt example
+
+```bash
+curl -X POST http://127.0.0.1:9777/print/receipt \
+  -H "Content-Type: application/json" \
+  -d @examples/sample-cash-receipt.json
+```
+
+### Credit receipt example
+
+```bash
+curl -X POST http://127.0.0.1:9777/print/receipt \
+  -H "Content-Type: application/json" \
+  -d @examples/sample-credit-receipt.json
 ```
 
 ## Notes
