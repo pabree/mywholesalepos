@@ -3,7 +3,16 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.12";
+const APP_BUILD = "2026-04-29.13";
+
+function sanitizeText(value) {
+    if (value === null || value === undefined) return "";
+    return String(value)
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .trim();
+}
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -4696,7 +4705,7 @@ async function showMobileSuccess(saleId) {
         <div>Customer: <strong>${esc(customerName)}</strong></div>
         <div>Total: <strong>${fmtPrice(total)}</strong></div>
         <div>Payment: <strong>${esc(method)}</strong></div>
-        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-29.12</div>
+        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-29.13</div>
         <div class="success-debug-meta">print mode: ${esc(mode)}</div>
     `;
     openMobileSuccessModal();
@@ -11908,7 +11917,7 @@ function syncReceiptActionUi() {
         forceAndroidBtn.classList.toggle("hidden", !isMobileLayout());
     }
     if (debug) {
-        debug.textContent = `RECEIPT MODAL BUILD 2026-04-29.12 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `RECEIPT MODAL BUILD 2026-04-29.13 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11928,7 +11937,7 @@ function syncMobileSuccessActionUi() {
         receiptBtn.textContent = androidMode ? "View Receipt" : "View Receipt";
     }
     if (debug) {
-        debug.textContent = `SUCCESS MODAL BUILD 2026-04-29.12 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `SUCCESS MODAL BUILD 2026-04-29.13 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
