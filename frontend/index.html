@@ -18,7 +18,7 @@
     <link rel="icon" type="image/png" sizes="192x192" href="{% static 'logo-192.png' %}">
     <link rel="icon" type="image/png" sizes="512x512" href="{% static 'logo-512.png' %}">
     <link rel="apple-touch-icon" href="{% static 'logo-192.png' %}">
-    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-15.05">
+    <link rel="stylesheet" href="{% static 'style.css' %}?v=2026-04-29.06">
 </head>
 <body>
     <!-- Top Bar -->
@@ -531,7 +531,7 @@
                 </div>
             </div>
             <div class="modal-actions">
-                <label class="receipt-toggle">
+                <label class="receipt-toggle" id="auto-print-toggle-wrap">
                     <input type="checkbox" id="auto-print-toggle">
                     Auto-print receipts
                 </label>
@@ -546,6 +546,7 @@
                 <button type="button" id="print-receipt-btn" class="btn-primary">🖨️ Reprint Receipt</button>
                 <button type="button" id="new-sale-btn" class="btn-secondary">+ New Sale</button>
                 <div class="print-note">Choose PC USB, Android Bluetooth, or disable printing for this device.</div>
+                <div id="receipt-print-debug" class="print-debug muted"></div>
             </div>
         </div>
     </div>
@@ -2587,6 +2588,6 @@
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <script src="{% static 'app.js' %}?v=2026-04-29.05"></script>
+    <script src="{% static 'app.js' %}?v=2026-04-29.06"></script>
 </body>
 </html>

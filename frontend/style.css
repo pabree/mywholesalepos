@@ -5163,6 +5163,13 @@ body.offline .offline-status {
     margin-left: auto;
 }
 
+.print-debug {
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-muted);
+    opacity: 0.9;
+}
+
 .receipt-toggle {
     display: inline-flex;
     align-items: center;
