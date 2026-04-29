@@ -344,6 +344,7 @@ const els = {
     receiptContent:  document.getElementById("receipt-content"),
     printModeSelect: document.getElementById("print-mode-select"),
     printReceiptBtn: document.getElementById("print-receipt-btn"),
+    forceAndroidPrintBtn: document.getElementById("force-android-print-btn"),
     receiptCloseBtn: document.getElementById("receipt-close-btn"),
     autoPrintToggle: document.getElementById("auto-print-toggle"),
     autoPrintToggleWrap: document.getElementById("auto-print-toggle-wrap"),
@@ -2683,12 +2684,28 @@ document.addEventListener("DOMContentLoaded", () => {
         syncReceiptActionUi();
         els.printModeSelect.addEventListener("change", () => {
             setSelectedPrintMode(els.printModeSelect.value);
+            syncPrintModeControl();
+            syncReceiptActionUi();
         });
     }
     if (els.autoPrintToggle) {
         els.autoPrintToggle.checked = isAutoPrintEnabled();
         els.autoPrintToggle.addEventListener("change", () => {
             setAutoPrintEnabled(els.autoPrintToggle.checked);
+        });
+    }
+    if (els.forceAndroidPrintBtn) {
+        els.forceAndroidPrintBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setSelectedPrintMode("android");
+            syncPrintModeControl();
+            syncReceiptActionUi();
+            console.info("[receipt] force android print mode", {
+                stored: localStorage.getItem(PRINT_MODE_KEY),
+                computed: getPrintMode(),
+                isMobile: isMobileLayout(),
+            });
         });
     }
     els.newSaleBtn.addEventListener("click", newSale);
@@ -11610,7 +11627,7 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
     openOverlay(els.receiptModal);
     syncPrintModeControl();
     syncReceiptActionUi();
-    const receiptMode = getSelectedPrintMode();
+    const receiptMode = getPrintMode();
     console.info("[receipt] showReceipt print mode", {
         mode: receiptMode,
         androidButtonRendered: receiptMode === "android",
@@ -11623,7 +11640,7 @@ async function showReceipt(saleId, { autoPrint = false } = {}) {
 
 function scheduleAutoPrint(saleId) {
     if (!isAutoPrintEnabled()) return;
-    if (getSelectedPrintMode() === "android") {
+    if (getPrintMode() === "android") {
         console.info("[receipt] auto-print skipped for android mode", { saleId });
         return;
     }
@@ -11707,7 +11724,7 @@ function syncPrintModeControl() {
 
 function syncReceiptActionUi() {
     if (!els.printReceiptBtn) return;
-    const mode = getSelectedPrintMode();
+    const mode = getPrintMode();
     const androidMode = mode === "android";
     els.printReceiptBtn.textContent = androidMode
         ? "📱 Print via Bluetooth"
@@ -11720,9 +11737,15 @@ function syncReceiptActionUi() {
     }
     if (els.autoPrintToggle) {
         els.autoPrintToggle.disabled = androidMode;
+        if (androidMode) {
+            els.autoPrintToggle.checked = false;
+        }
+    }
+    if (els.forceAndroidPrintBtn) {
+        els.forceAndroidPrintBtn.classList.toggle("hidden", !isMobileLayout());
     }
     if (els.receiptPrintDebug) {
-        els.receiptPrintDebug.textContent = `APP_BUILD ${APP_BUILD} | mode: ${mode} | android button: ${androidMode ? "active" : "inactive"}`;
+        els.receiptPrintDebug.textContent = `APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11730,7 +11753,7 @@ function getDefaultPrintMode() {
     return isMobileLayout() ? "android" : "pc";
 }
 
-function getSelectedPrintMode() {
+function getPrintMode() {
     const saved = localStorage.getItem(PRINT_MODE_KEY);
     if (saved === "pc" || saved === "android" || saved === "none") return saved;
     const fallback = getDefaultPrintMode();
@@ -11738,11 +11761,22 @@ function getSelectedPrintMode() {
     return fallback;
 }
 
+function getSelectedPrintMode() {
+    return getPrintMode();
+}
+
 function setSelectedPrintMode(mode) {
     const next = mode === "pc" || mode === "android" || mode === "none" ? mode : getDefaultPrintMode();
     localStorage.setItem(PRINT_MODE_KEY, next);
     syncPrintModeControl();
     syncReceiptActionUi();
+    if (els.receiptModal && !els.receiptModal.classList.contains("hidden")) {
+        console.info("[receipt] receipt action controls rerendered", {
+            selected: next,
+            computed: getPrintMode(),
+            androidButtonRendered: next === "android",
+        });
+    }
     return next;
 }
 
@@ -11891,7 +11925,7 @@ async function printReceiptPc(receipt) {
 }
 
 async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowserFallback = false, userTriggered = false } = {}) {
-    const mode = getSelectedPrintMode();
+    const mode = getPrintMode();
     console.info("[receipt] print mode", {
         mode,
         saleId: saleId || null,
