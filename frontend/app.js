@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.13";
+const APP_BUILD = "2026-04-29.15";
 
 function sanitizeText(value) {
     if (value === null || value === undefined) return "";
@@ -260,6 +260,7 @@ let mpesaPollTimer = null;
 let mpesaPollAttempts = 0;
 let autoPrintedSales = new Set();
 let currentReceiptSaleId = null;
+let currentReceiptSale = null;
 let currentReceiptPayload = null;
 let lastCompletedSale = null;
 let offlineMode = !navigator.onLine;
@@ -1780,14 +1781,12 @@ document.addEventListener("DOMContentLoaded", () => {
             event.preventDefault();
             event.stopPropagation();
             const mode = getPrintMode();
-            const receipt = currentReceiptPayload || (lastCompletedSale ? buildReceiptPayload(lastCompletedSale) : null);
             console.info("[receipt] success modal Bluetooth print clicked", {
                 mode,
-                hasReceiptPayload: Boolean(receipt),
+                hasCurrentSale: Boolean(lastCompletedSale),
             });
-            if (!receipt) return;
             if (mode === "android") {
-                printReceiptAndroid(receipt);
+                printAndroidReceiptFromSale(lastCompletedSale, { source: "success-modal" });
                 return;
             }
             toast("Bluetooth printing is only available in Android mode.", "info");
@@ -1821,25 +1820,18 @@ document.addEventListener("DOMContentLoaded", () => {
         els.mobileSaleDetailPrint.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            void printHistoricalReceipt(currentMobileSaleDetailId, { source: "sale-detail" });
-        });
-    }
-    if (els.mobileSaleDetailPrint) {
-        els.mobileSaleDetailPrint.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
             const mode = getPrintMode();
-            const payload = currentReceiptPayload || (lastCompletedSale ? buildReceiptPayload(lastCompletedSale) : null);
             console.info("[receipt] historical receipt print clicked", {
                 mode,
                 saleId: currentMobileSaleDetailId,
-                hasPayload: Boolean(payload),
+                hasCurrentSale: Boolean(currentReceiptSale),
             });
-            if (!payload) {
+            if (!currentReceiptSale) {
                 toast("Receipt data is unavailable.", "warning");
                 return;
             }
             if (mode === "pc") {
+                const payload = currentReceiptPayload || buildReceiptPayload(currentReceiptSale);
                 void printReceiptPc(payload).catch((err) => {
                     console.warn("[receipt] historical PC print failed", err);
                     toast(`PC print failed: ${err.message}`, "warning");
@@ -1847,7 +1839,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
             if (mode === "android") {
-                printReceiptAndroid(payload);
+                printAndroidReceiptFromSale(currentReceiptSale, { source: "sale-detail" });
                 return;
             }
             toast("Printing disabled", "info");
@@ -2776,9 +2768,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 mode: getSelectedPrintMode(),
                 androidActive: getSelectedPrintMode() === "android",
             });
-            if (getSelectedPrintMode() === "android" && currentReceiptPayload) {
+            if (getSelectedPrintMode() === "android" && currentReceiptSale) {
                 console.info("[receipt] android button click handler firing", true);
-                printReceiptAndroid(currentReceiptPayload);
+                printAndroidReceiptFromSale(currentReceiptSale, { source: "receipt-modal" });
                 return;
             }
             void printReceipt({ allowBrowserFallback: true, userTriggered: true });
@@ -4687,6 +4679,7 @@ async function showMobileSuccess(saleId) {
     try {
         if (sale) {
             lastCompletedSale = sale;
+            currentReceiptSale = sale;
             currentReceiptSaleId = saleId;
             currentReceiptPayload = buildReceiptPayload(sale);
         }
@@ -4705,7 +4698,7 @@ async function showMobileSuccess(saleId) {
         <div>Customer: <strong>${esc(customerName)}</strong></div>
         <div>Total: <strong>${fmtPrice(total)}</strong></div>
         <div>Payment: <strong>${esc(method)}</strong></div>
-        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-29.13</div>
+        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-29.15</div>
         <div class="success-debug-meta">print mode: ${esc(mode)}</div>
     `;
     openMobileSuccessModal();
@@ -11672,6 +11665,7 @@ async function showReceipt(saleRef, { autoPrint = false } = {}) {
         toast(`Receipt preview unavailable: ${err.message}`, "warning");
         currentReceiptPayload = null;
     }
+    currentReceiptSale = saleDetail || (typeof saleRef === "object" && saleRef ? saleRef : null);
     if (typeof saleRef === "object" && saleRef) {
         lastCompletedSale = saleRef;
     }
@@ -11917,7 +11911,7 @@ function syncReceiptActionUi() {
         forceAndroidBtn.classList.toggle("hidden", !isMobileLayout());
     }
     if (debug) {
-        debug.textContent = `RECEIPT MODAL BUILD 2026-04-29.13 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `RECEIPT MODAL BUILD 2026-04-29.15 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11937,7 +11931,7 @@ function syncMobileSuccessActionUi() {
         receiptBtn.textContent = androidMode ? "View Receipt" : "View Receipt";
     }
     if (debug) {
-        debug.textContent = `SUCCESS MODAL BUILD 2026-04-29.13 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `SUCCESS MODAL BUILD 2026-04-29.15 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11969,12 +11963,13 @@ async function printHistoricalReceipt(saleId, { source = "history" } = {}) {
         toast(`Receipt preview failed: ${err.message}`, "warning");
         return;
     }
-    const payload = currentReceiptPayload || (lastCompletedSale ? buildReceiptPayload(lastCompletedSale) : null);
-    if (!payload) {
+    const sale = currentReceiptSale || lastCompletedSale;
+    if (!sale) {
         toast("Receipt data is unavailable.", "warning");
         return;
     }
     if (mode === "pc") {
+        const payload = currentReceiptPayload || buildReceiptPayload(sale);
         try {
             await printReceiptPc(payload);
         } catch (err) {
@@ -11984,7 +11979,7 @@ async function printHistoricalReceipt(saleId, { source = "history" } = {}) {
         return;
     }
     if (mode === "android") {
-        printReceiptAndroid(payload);
+        printAndroidReceiptFromSale(sale, { source });
         return;
     }
     toast("Printing disabled", "info");
@@ -12114,7 +12109,10 @@ function buildReceiptPayload(sale = {}) {
     );
     const paid = asNumber(pickValue(receiptSource, ["paid", "amount_paid", "amountPaid"], null), null);
     const change = asNumber(pickValue(receiptSource, ["change", "balance_change"], null), null);
-    const balance = asNumber(pickValue(receiptSource, ["balance", "balance_due", "balanceDue"], null), null);
+    const balanceSource = asNumber(
+        pickValue(receiptSource, ["balance", "balance_due", "balanceDue", "amount_due", "amountDue", "outstanding_balance", "outstandingBalance"], null),
+        null
+    );
     const paymentMethod = pickValue(receiptSource, ["paymentMethod", "payment_method", "paymentMode"], "");
     const inferredMethod = paymentMethod || (paymentList.length > 1 ? "Split Payment" : pickValue(paymentList[0] || {}, ["payment_method", "paymentMethod", "method", "type"], ""));
     const branch = resolveBranchName(
@@ -12145,11 +12143,46 @@ function buildReceiptPayload(sale = {}) {
     );
     const paymentStatus = pickValue(receiptSource, ["paymentStatus", "payment_status", "status"], "")
         || pickValue(saleSource, ["paymentStatus", "payment_status", "status"], "");
+    const saleType = String(pickValue(receiptSource, ["saleType", "sale_type"], "") || pickValue(saleSource, ["saleType", "sale_type", "sale_type_name"], "") || "");
+    const paymentStatusLower = String(paymentStatus || "").toLowerCase();
+    const saleTypeLower = String(saleType || "").toLowerCase();
+    const saleTypeFlag = String(pickValue(saleSource, ["sale_type", "saleType"], "") || "").toLowerCase();
+    const receiptBalanceSource = asNumber(
+        pickValue(receiptSource, ["balance_due", "balanceDue", "amount_due", "amountDue", "outstanding_balance", "outstandingBalance"], null),
+        null
+    );
+    const saleBalanceSource = asNumber(
+        pickValue(saleSource, ["balance", "balance_due", "amount_due", "outstanding_balance"], null),
+        null
+    );
+    const computedBalance = (() => {
+        if (Number.isFinite(balanceSource)) return balanceSource;
+        const totalValue = Number.isFinite(total) ? Number(total) : 0;
+        const paidValue = Number.isFinite(paid) ? Number(paid) : 0;
+        return totalValue > paidValue ? totalValue - paidValue : null;
+    })();
     const isCredit = Boolean(
         pickValue(receiptSource, ["isCredit", "is_credit", "is_credit_sale"], null)
             ?? pickValue(saleSource, ["isCredit", "is_credit", "is_credit_sale"], null)
-            ?? String(paymentStatus).toLowerCase().includes("credit")
-    );
+    ) || paymentStatusLower.includes("credit")
+        || saleTypeLower === "credit"
+        || saleTypeFlag === "credit"
+        || (Number.isFinite(balanceSource) && Number(balanceSource) > 0)
+        || (Number.isFinite(receiptBalanceSource) && Number(receiptBalanceSource) > 0)
+        || (Number.isFinite(saleBalanceSource) && Number(saleBalanceSource) > 0)
+        || (Number.isFinite(computedBalance) && Number(computedBalance) > 0);
+    const normalizedBalance = isCredit
+        ? (
+            (Number.isFinite(computedBalance) && computedBalance > 0 ? computedBalance : null)
+                ?? (Number.isFinite(balanceSource) && Number(balanceSource) > 0 ? balanceSource : null)
+                ?? (Number.isFinite(receiptBalanceSource) && Number(receiptBalanceSource) > 0 ? receiptBalanceSource : null)
+                ?? (Number.isFinite(saleBalanceSource) && Number(saleBalanceSource) > 0 ? saleBalanceSource : null)
+        )
+        : balanceSource;
+    const normalizedPaymentStatus = isCredit
+        ? (Number.isFinite(normalizedBalance) && normalizedBalance > 0 ? "credit_due" : "paid")
+        : String(paymentStatus || inferredMethod || "paid");
+    const normalizedSaleType = isCredit ? "credit" : String(saleType || pickValue(saleSource, ["sale_type", "saleType", "sale_type_name"], "") || "");
     const payments = paymentList.map((payment) => ({
         method: sanitizeText(pickValue(payment, ["method", "payment_method", "paymentMethod", "type"], "")),
         amount: asNumber(pickValue(payment, ["amount", "paid_amount", "paidAmount"], null), null),
@@ -12184,18 +12217,19 @@ function buildReceiptPayload(sale = {}) {
         total,
         paid,
         change,
-        balance,
+        balance: normalizedBalance,
         paymentMethod: inferredMethod || "",
-        paymentStatus: String(paymentStatus || ""),
-        saleType: String(pickValue(receiptSource, ["saleType", "sale_type"], "") || pickValue(saleSource, ["saleType", "sale_type", "sale_type_name"], "") || ""),
+        paymentStatus: String(normalizedPaymentStatus || ""),
+        saleType: String(normalizedSaleType || ""),
         isCredit: Boolean(isCredit || pickValue(saleSource, ["is_credit_sale", "isCredit", "is_credit"], false)),
         footer: String(pickValue(receiptSource, ["footer"], "Thank you for shopping with us") || "Thank you for shopping with us"),
         printLogo: Boolean(pickValue(receiptSource, ["printLogo", "print_logo"], false) || pickValue(saleSource, ["printLogo", "print_logo"], false)),
         duplicateLabel: String(pickValue(receiptSource, ["duplicateLabel", "duplicate_label"], "") || ""),
         note: String(pickValue(receiptSource, ["note", "notes"], "") || ""),
         payments,
+        debugBuild: "frontend-2026-04-29.15",
         conditions: conditions.length ? conditions : defaultReceiptConditions({
-            saleType: String(pickValue(receiptSource, ["saleType", "sale_type"], "") || pickValue(saleSource, ["saleType", "sale_type", "sale_type_name"], "") || ""),
+            saleType: String(normalizedSaleType || ""),
             isCredit: Boolean(isCredit || pickValue(saleSource, ["is_credit_sale", "isCredit", "is_credit"], false)),
         }),
     };
@@ -12221,6 +12255,46 @@ function encodeReceiptPayloadForAndroid(receipt) {
         .replace(/\+/g, "-")
         .replace(/\//g, "_")
         .replace(/=+$/, "");
+}
+
+function printAndroidReceiptFromSale(sale, { source = "unknown" } = {}) {
+    if (!sale) {
+        toast("Receipt data is unavailable.", "warning");
+        return false;
+    }
+    try {
+        console.log("ANDROID RAW SALE", source, sale);
+        const payload = buildReceiptPayload(sale);
+        const totalValue = Number(payload.total ?? 0);
+        const paidValue = Number(payload.paid ?? 0);
+        if ((!payload.balance || Number(payload.balance) <= 0) && totalValue > paidValue) {
+            payload.balance = totalValue - paidValue;
+        }
+        if (Number(payload.balance ?? 0) > 0) {
+            payload.isCredit = true;
+            payload.saleType = payload.saleType || "credit";
+            payload.paymentStatus = payload.paymentStatus || "credit_due";
+        }
+        payload.saleType = payload.saleType || (payload.isCredit ? "credit" : "retail");
+        payload.paymentStatus = payload.paymentStatus || (payload.isCredit ? "credit_due" : "paid");
+        payload.debugBuild = "frontend-2026-04-29.15";
+        console.log("ANDROID PAYLOAD", payload);
+        console.info("[receipt] android print payload built", {
+            source,
+            saleId: sale?.id || sale?.sale_id || sale?.receiptNo || sale?.receipt_no || null,
+            paymentStatus: payload.paymentStatus || null,
+            saleType: payload.saleType || null,
+            isCredit: Boolean(payload.isCredit),
+            hasPayments: Array.isArray(payload.payments) && payload.payments.length > 0,
+            hasBalance: payload.balance !== null && payload.balance !== undefined,
+        });
+        printReceiptAndroid(payload);
+        return true;
+    } catch (err) {
+        console.warn("[receipt] android payload build failed", err);
+        toast(`Android print failed: ${err.message}`, "warning");
+        return false;
+    }
 }
 
 function printReceiptAndroid(receipt) {
@@ -12252,7 +12326,12 @@ async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowse
         console.info("[receipt] android button rendered", true);
         if (userTriggered) {
             console.info("[receipt] android button click handler firing", true);
-            printReceiptAndroid(receipt);
+            const sale = currentReceiptSale || lastCompletedSale;
+            if (!sale) {
+                toast("Receipt data is unavailable.", "warning");
+                return { ok: false, mode };
+            }
+            printAndroidReceiptFromSale(sale, { source: "selected-mode" });
             return { ok: true, mode };
         }
         console.info("[receipt] android print user-triggered", false);
