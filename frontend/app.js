@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.02";
+const APP_BUILD = "2026-04-29.03";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -16,6 +16,7 @@ const POS_DEBUG = new URLSearchParams(window.location.search).has("posDebug")
     || localStorage.getItem("pos_debug") === "1";
 const AUTO_PRINT_KEY = "pos_auto_print_receipt";
 const PRINT_MODE_KEY = "stery_print_mode";
+const PRINT_BRIDGE_URL_KEY = "stery_print_bridge_url";
 const PRINT_BRIDGE_URL = "http://127.0.0.1:9777";
 const posLog = (...args) => {
     if (POS_DEBUG) console.debug(...args);
@@ -11613,7 +11614,7 @@ function scheduleAutoPrint(saleId) {
     requestAnimationFrame(() => {
         setTimeout(() => {
             try {
-                void printReceipt().catch((err) => {
+                void printReceipt({ allowBrowserFallback: false }).catch((err) => {
                     console.warn("[receipt] auto-print failed", err);
                 });
             } catch (err) {
@@ -11653,15 +11654,25 @@ async function checkPrintBridge() {
     }
 }
 
+function getReceiptPrintUrl() {
+    const configured = localStorage.getItem(PRINT_BRIDGE_URL_KEY) || "";
+    const trimmed = configured.trim();
+    if (trimmed) {
+        try {
+            return new URL(trimmed, window.location.origin).toString();
+        } catch (err) {
+            console.warn("[receipt] invalid bridge url override", err);
+        }
+    }
+    return `${PRINT_BRIDGE_URL}/print/receipt`;
+}
+
 async function sendPrintBridgeJob(receipt) {
-    const res = await fetch(`${PRINT_BRIDGE_URL}/print/receipt`, {
+    const res = await fetch(getReceiptPrintUrl(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             receipt,
-            printerName: localStorage.getItem("pos_receipt_printer_name") || "",
-            paperWidth: localStorage.getItem("pos_receipt_paper_width_mm") || "80",
-            mode: "escpos",
         }),
     });
     const data = await res.json().catch(() => ({}));
@@ -11837,9 +11848,8 @@ async function printReceiptPc(receipt) {
     return sendPrintBridgeJob(receipt);
 }
 
-async function printReceiptUsingSelectedMode(receipt, { saleId = "" } = {}) {
+async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowserFallback = false } = {}) {
     const mode = getSelectedPrintMode();
-    const fallbackUrl = saleId ? getReceiptPrintUrl(saleId) : "";
     console.info("[receipt] print mode", { mode, saleId: saleId || null });
 
     if (mode === "none") {
@@ -11861,15 +11871,14 @@ async function printReceiptUsingSelectedMode(receipt, { saleId = "" } = {}) {
         }
     }
 
-    if (fallbackUrl) {
-        openBrowserReceiptFallback(fallbackUrl);
+    if (allowBrowserFallback && saleId) {
+        openBrowserReceiptFallback(`/api/sales/${saleId}/receipt/print/?paper=${encodeURIComponent(localStorage.getItem("pos_receipt_paper_width_mm") || "80")}`);
         return { ok: true, mode: "browser" };
     }
-    window.print();
-    return { ok: true, mode: "browser" };
+    return { ok: false, mode, skipped: true };
 }
 
-async function printReceipt() {
+async function printReceipt({ allowBrowserFallback = true } = {}) {
     const saleId = currentReceiptSaleId || els.receiptModal?.dataset?.saleId || "";
     const receipt = currentReceiptPayload || null;
 
@@ -11880,7 +11889,7 @@ async function printReceipt() {
         return;
     }
 
-    await printReceiptUsingSelectedMode(receipt, { saleId });
+    await printReceiptUsingSelectedMode(receipt, { saleId, allowBrowserFallback });
 }
 
 function closeReceiptModal() {
