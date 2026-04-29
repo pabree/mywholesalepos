@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.11";
+const APP_BUILD = "2026-04-29.12";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -980,6 +980,7 @@ const els = {
     mobileSaleDetailClose: document.getElementById("mobile-sale-detail-close"),
     mobileSaleDetailBody: document.getElementById("mobile-sale-detail-body"),
     mobileSaleDetailReceipt: document.getElementById("mobile-sale-detail-receipt"),
+    mobileSaleDetailPrint: document.getElementById("mobile-sale-detail-print"),
 };
 
 // ——— Overlay / Modal Helpers ———
@@ -1759,7 +1760,10 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             if (!lastMobileSaleId) return;
             closeMobileSuccessModal();
-            showReceipt(lastCompletedSale || lastMobileSaleId, { autoPrint: false });
+            showReceipt(lastCompletedSale || lastMobileSaleId, { autoPrint: false }).catch((err) => {
+                console.warn("[receipt] historical view receipt failed", err);
+                toast(`Receipt preview failed: ${err.message}`, "warning");
+            });
         });
     }
     if (els.mobileSuccessPrint) {
@@ -1787,6 +1791,57 @@ document.addEventListener("DOMContentLoaded", () => {
         els.mobileSuccessProducts.addEventListener("click", () => {
             closeMobileSuccessModal();
             setMobileTab("products");
+        });
+    }
+    if (els.mobileSaleDetailReceipt) {
+        els.mobileSaleDetailReceipt.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            console.info("[receipt] view receipt clicked", {
+                currentMobileSaleDetailId,
+                source: "sale-detail",
+            });
+            if (!currentMobileSaleDetailId) return;
+            showReceipt(currentMobileSaleDetailId, { autoPrint: false }).catch((err) => {
+                console.warn("[receipt] historical sale detail view receipt failed", err);
+                toast(`Receipt preview failed: ${err.message}`, "warning");
+            });
+        });
+    }
+    if (els.mobileSaleDetailPrint) {
+        els.mobileSaleDetailPrint.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void printHistoricalReceipt(currentMobileSaleDetailId, { source: "sale-detail" });
+        });
+    }
+    if (els.mobileSaleDetailPrint) {
+        els.mobileSaleDetailPrint.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const mode = getPrintMode();
+            const payload = currentReceiptPayload || (lastCompletedSale ? buildReceiptPayload(lastCompletedSale) : null);
+            console.info("[receipt] historical receipt print clicked", {
+                mode,
+                saleId: currentMobileSaleDetailId,
+                hasPayload: Boolean(payload),
+            });
+            if (!payload) {
+                toast("Receipt data is unavailable.", "warning");
+                return;
+            }
+            if (mode === "pc") {
+                void printReceiptPc(payload).catch((err) => {
+                    console.warn("[receipt] historical PC print failed", err);
+                    toast(`PC print failed: ${err.message}`, "warning");
+                });
+                return;
+            }
+            if (mode === "android") {
+                printReceiptAndroid(payload);
+                return;
+            }
+            toast("Printing disabled", "info");
         });
     }
     if (els.inventoryAdjustBranch) {
@@ -4612,21 +4667,36 @@ function closeMobileSuccessModal() {
 async function showMobileSuccess(saleId) {
     if (!saleId || !els.mobileSuccessBody) return;
     lastMobileSaleId = saleId;
-    const sale = await apiFetch(`/sales/${saleId}/`);
-    lastCompletedSale = sale;
-    currentReceiptSaleId = saleId;
-    currentReceiptPayload = buildReceiptPayload(sale);
+    let sale = null;
+    let mode = getPrintMode();
+    try {
+        sale = await apiFetch(`/sales/${saleId}/`);
+    } catch (err) {
+        console.warn("[receipt] showMobileSuccess sale fetch failed", err);
+        toast(`Could not load sale details: ${err.message}`, "warning");
+    }
+    try {
+        if (sale) {
+            lastCompletedSale = sale;
+            currentReceiptSaleId = saleId;
+            currentReceiptPayload = buildReceiptPayload(sale);
+        }
+    } catch (err) {
+        console.warn("[receipt] buildReceiptPayload error", err);
+        toast(`Receipt preview unavailable: ${err.message}`, "warning");
+        currentReceiptPayload = null;
+    }
     const customerName = sale?.customer ? getCustomerName(sale.customer) : "—";
     const method = sale?.payment_mode ? formatPaymentMode(sale.payment_mode) : "Cash";
     const total = sale?.grand_total ?? "0.00";
     const saleNumber = shortOrderId(saleId);
-    const mode = getPrintMode();
+    mode = getPrintMode();
     els.mobileSuccessBody.innerHTML = `
         <div><strong>Sale #${saleNumber}</strong></div>
         <div>Customer: <strong>${esc(customerName)}</strong></div>
         <div>Total: <strong>${fmtPrice(total)}</strong></div>
         <div>Payment: <strong>${esc(method)}</strong></div>
-        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-29.11</div>
+        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-29.12</div>
         <div class="success-debug-meta">print mode: ${esc(mode)}</div>
     `;
     openMobileSuccessModal();
@@ -11365,9 +11435,17 @@ async function checkout() {
         currentSaleMeta = null;
         currentSaleType = "retail";
         if (isMobileLayout()) {
-            showMobileSuccess(saleId);
+            console.info("[receipt] sale completed modal opening", { saleId, mode: getPrintMode() });
+            showMobileSuccess(saleId).catch((err) => {
+                console.warn("[receipt] showMobileSuccess failed", err);
+                toast(`Receipt preview failed: ${err.message}`, "warning");
+            });
         } else {
-            showReceipt(saleId, { autoPrint: true });
+            console.info("[receipt] receipt modal opening", { saleId, mode: getPrintMode(), autoPrint: true });
+            showReceipt(saleId, { autoPrint: true }).catch((err) => {
+                console.warn("[receipt] showReceipt failed", err);
+                toast(`Receipt preview failed: ${err.message}`, "warning");
+            });
         }
         loadProducts();
         loadHeldSales();
@@ -11578,7 +11656,13 @@ async function showReceipt(saleRef, { autoPrint = false } = {}) {
         return;
     }
 
-    currentReceiptPayload = buildReceiptPayload({ receipt, sale: saleDetail });
+    try {
+        currentReceiptPayload = buildReceiptPayload({ receipt, sale: saleDetail });
+    } catch (err) {
+        console.warn("[receipt] buildReceiptPayload error", err);
+        toast(`Receipt preview unavailable: ${err.message}`, "warning");
+        currentReceiptPayload = null;
+    }
     if (typeof saleRef === "object" && saleRef) {
         lastCompletedSale = saleRef;
     }
@@ -11824,7 +11908,7 @@ function syncReceiptActionUi() {
         forceAndroidBtn.classList.toggle("hidden", !isMobileLayout());
     }
     if (debug) {
-        debug.textContent = `RECEIPT MODAL BUILD 2026-04-29.11 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `RECEIPT MODAL BUILD 2026-04-29.12 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11844,7 +11928,7 @@ function syncMobileSuccessActionUi() {
         receiptBtn.textContent = androidMode ? "View Receipt" : "View Receipt";
     }
     if (debug) {
-        debug.textContent = `SUCCESS MODAL BUILD 2026-04-29.11 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `SUCCESS MODAL BUILD 2026-04-29.12 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11853,6 +11937,49 @@ window.debugReceiptDom = function debugReceiptDom() {
     console.log("receipt modal elements", document.querySelectorAll('[id*=receipt], [class*=receipt]'));
     console.log("print mode controls", document.querySelectorAll('[id*=print], [class*=print]'));
 };
+
+async function printHistoricalReceipt(saleId, { source = "history" } = {}) {
+    const mode = getPrintMode();
+    console.info("[receipt] historical receipt print clicked", {
+        mode,
+        saleId,
+        source,
+        currentReceiptSaleId,
+        hasCurrentPayload: Boolean(currentReceiptPayload),
+    });
+    if (!saleId) {
+        toast("Receipt data is unavailable.", "warning");
+        return;
+    }
+    try {
+        if (String(currentReceiptSaleId) !== String(saleId) || !currentReceiptPayload) {
+            await showReceipt(saleId, { autoPrint: false });
+        }
+    } catch (err) {
+        console.warn("[receipt] historical receipt load failed", err);
+        toast(`Receipt preview failed: ${err.message}`, "warning");
+        return;
+    }
+    const payload = currentReceiptPayload || (lastCompletedSale ? buildReceiptPayload(lastCompletedSale) : null);
+    if (!payload) {
+        toast("Receipt data is unavailable.", "warning");
+        return;
+    }
+    if (mode === "pc") {
+        try {
+            await printReceiptPc(payload);
+        } catch (err) {
+            console.warn("[receipt] historical PC print failed", err);
+            toast(`PC print failed: ${err.message}`, "warning");
+        }
+        return;
+    }
+    if (mode === "android") {
+        printReceiptAndroid(payload);
+        return;
+    }
+    toast("Printing disabled", "info");
+}
 
 function getDefaultPrintMode() {
     return isMobileLayout() ? "android" : "pc";
