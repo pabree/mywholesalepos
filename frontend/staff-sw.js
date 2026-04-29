@@ -1,5 +1,5 @@
-const CACHE_NAME = "staff-app-v94";
-const APP_BUILD = "2026-04-29.08";
+const APP_BUILD = "2026-04-29.09";
+const CACHE_NAME = `staff-app-${APP_BUILD}`;
 const APP_SHELL = [
     "/",
     `/static/style.css?v=${APP_BUILD}`,
@@ -48,6 +48,21 @@ self.addEventListener("fetch", (event) => {
                     return response;
                 })
                 .catch(() => caches.match("/"))
+        );
+        return;
+    }
+
+    if (url.pathname.endsWith("/app.js") || url.pathname.endsWith("/staff-sw.js") || url.pathname.endsWith("/style.css")) {
+        event.respondWith(
+            fetch(request, { cache: "no-store" })
+                .then((response) => {
+                    if (shouldCacheAsset(request, url, response)) {
+                        const copy = response.clone();
+                        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+                    }
+                    return response;
+                })
+                .catch(() => caches.match(request).then((cached) => cached || fetch(request, { cache: "reload" })))
         );
         return;
     }

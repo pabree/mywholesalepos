@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.08";
+const APP_BUILD = "2026-04-29.09";
 const TAX_RATE = 0.16;
 const CUSTOMER_ORDERS_DEBUG = new URLSearchParams(window.location.search).has("customerOrdersDebug")
     || localStorage.getItem("customer_orders_debug") === "1";
@@ -1515,6 +1515,17 @@ function registerStaffServiceWorker() {
     if (host === "localhost" || host === "127.0.0.1") return;
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
         // silent failure; POS still works without SW
+    });
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach((registration) => {
+            try {
+                registration.update();
+            } catch (_err) {
+                // ignore update failures; the app still works
+            }
+        });
+    }).catch(() => {
+        // ignore update check failures
     });
 }
 
