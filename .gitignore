@@ -88,3 +88,7 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+# Android local build artifacts
+android-stery-print-bridge/.gradle/
+android-stery-print-bridge/android-sdk-local/
+android-stery-print-bridge/local.properties

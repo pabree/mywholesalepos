@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_HOME="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PROPS_FILE="$APP_HOME/gradle/wrapper/gradle-wrapper.properties"
+DIST_URL="$(grep '^distributionUrl=' "$PROPS_FILE" | cut -d= -f2- | sed 's#\\:#:#g')"
+GRADLE_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}"
+CACHE_ROOT="$GRADLE_HOME/wrapper/dists/stery-pos-print-bridge"
+JDK_CACHE_ROOT="$GRADLE_HOME/jdks/stery-pos-print-bridge-jdk21"
+mkdir -p "$CACHE_ROOT"
+
+ensure_jdk() {
+  local candidate_java_home="${JAVA_HOME:-}"
+  if [ -n "$candidate_java_home" ] && [ -x "$candidate_java_home/bin/jlink" ] && [ -x "$candidate_java_home/bin/java" ]; then
+    echo "$candidate_java_home"
+    return 0
+  fi
+
+  if [ -x "$JDK_CACHE_ROOT/bin/jlink" ] && [ -x "$JDK_CACHE_ROOT/bin/java" ]; then
+    echo "$JDK_CACHE_ROOT"
+    return 0
+  fi
+
+  mkdir -p "$JDK_CACHE_ROOT"
+  local jdk_tarball="$GRADLE_HOME/jdks/corretto21-linux-x64.tar.gz"
+  local jdk_extract_tmp="$GRADLE_HOME/jdks/temurin21-extract"
+  rm -rf "$jdk_extract_tmp"
+  mkdir -p "$jdk_extract_tmp"
+
+  python3 - "$jdk_tarball" "$jdk_extract_tmp" <<'PY'
+import os
+import sys
+import tarfile
+import tempfile
+import urllib.request
+
+target_tarball = sys.argv[1]
+extract_root = sys.argv[2]
+url = "https://corretto.aws/downloads/latest/amazon-corretto-21-x64-linux-jdk.tar.gz"
+
+os.makedirs(os.path.dirname(target_tarball), exist_ok=True)
+if not os.path.exists(target_tarball):
+    urllib.request.urlretrieve(url, target_tarball)
+
+with tarfile.open(target_tarball, "r:gz") as archive:
+    archive.extractall(extract_root)
+
+entries = [name for name in os.listdir(extract_root) if not name.startswith(".")]
+if not entries:
+    raise SystemExit("Downloaded JDK archive did not contain any files")
+entries.sort()
+source_root = os.path.join(extract_root, entries[0])
+
+for name in os.listdir(source_root):
+    src = os.path.join(source_root, name)
+    dst = os.path.join(os.path.dirname(extract_root), "stery-pos-print-bridge-jdk21", name)
+    if os.path.exists(dst):
+        continue
+    if os.path.isdir(src):
+        os.rename(src, dst)
+    else:
+        import shutil
+        shutil.copy2(src, dst)
+PY
+
+  rm -rf "$jdk_extract_tmp"
+  echo "$JDK_CACHE_ROOT"
+}
+
+JAVA_HOME="$(ensure_jdk)"
+export JAVA_HOME
+
+if [ -n "${JAVA_HOME:-}" ]; then
+  JAVACMD="$JAVA_HOME/bin/java"
+else
+  JAVACMD=java
+fi
+
+if ! command -v "$JAVACMD" >/dev/null 2>&1; then
+  echo "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH." >&2
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 is required to bootstrap the Gradle distribution." >&2
+  exit 1
+fi
+
+GRADLE_BIN="$(python3 - "$DIST_URL" "$CACHE_ROOT" <<'PY'
+import os, sys, urllib.request, zipfile, shutil
+dist_url = sys.argv[1]
+cache_root = sys.argv[2]
+archive_name = dist_url.split('/')[-1].replace('.zip', '')
+if archive_name.endswith('-bin'):
+    version = archive_name[:-4]
+elif archive_name.endswith('-all'):
+    version = archive_name[:-4]
+else:
+    version = archive_name
+install_dir = os.path.join(cache_root, archive_name)
+marker = os.path.join(install_dir, ".ready")
+if os.path.exists(marker):
+    print(os.path.join(install_dir, "extract", version, "bin", "gradle"))
+    raise SystemExit(0)
+os.makedirs(install_dir, exist_ok=True)
+zip_path = os.path.join(cache_root, f"{archive_name}.zip")
+if not os.path.exists(zip_path):
+    urllib.request.urlretrieve(dist_url, zip_path)
+extract_dir = os.path.join(install_dir, "extract")
+if os.path.exists(extract_dir):
+    shutil.rmtree(extract_dir)
+os.makedirs(extract_dir, exist_ok=True)
+with zipfile.ZipFile(zip_path) as zf:
+    zf.extractall(extract_dir)
+gradle_bin = os.path.join(extract_dir, version, "bin", "gradle")
+try:
+    os.chmod(gradle_bin, 0o755)
+except Exception:
+    pass
+with open(marker, "w", encoding="utf-8") as fh:
+    fh.write(dist_url)
+print(gradle_bin)
+PY
+)"
+
+exec "$GRADLE_BIN" "$@"

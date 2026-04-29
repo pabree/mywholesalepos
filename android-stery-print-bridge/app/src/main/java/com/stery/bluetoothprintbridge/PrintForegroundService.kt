@@ -95,9 +95,9 @@ class PrintForegroundService : Service() {
                         items = listOf(
                             ReceiptItem(
                                 name = "TEST RECEIPT PAPER",
-                                qty = 1,
-                                unitPrice = 1,
-                                lineTotal = 1
+                                qty = 1.0,
+                                unitPrice = 1.0,
+                                lineTotal = 1.0
                             )
                         ),
                         subtotal = 1.0,
