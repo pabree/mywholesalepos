@@ -4671,7 +4671,7 @@ async function showMobileSuccess(saleId) {
     let sale = null;
     let mode = getPrintMode();
     try {
-        sale = await apiFetch(`/sales/${saleId}/`);
+        sale = await hydrateSaleForReceipt(saleId);
     } catch (err) {
         console.warn("[receipt] showMobileSuccess sale fetch failed", err);
         toast(`Could not load sale details: ${err.message}`, "warning");
@@ -11651,7 +11651,7 @@ async function showReceipt(saleRef, { autoPrint = false } = {}) {
     const saleId = typeof saleRef === "object" && saleRef ? (saleRef.id || saleRef.sale_id || saleRef.receiptNo || saleRef.receipt_no || "") : saleRef;
     const [receipt, saleDetail] = await Promise.all([
         apiFetch(`/sales/${saleId}/receipt/`),
-        apiFetch(`/sales/${saleId}/`),
+        hydrateSaleForReceipt(saleRef || saleId),
     ]);
     if (!receipt) {
         toast("Could not load receipt", "error");
@@ -11963,7 +11963,7 @@ async function printHistoricalReceipt(saleId, { source = "history" } = {}) {
         toast(`Receipt preview failed: ${err.message}`, "warning");
         return;
     }
-    const sale = currentReceiptSale || lastCompletedSale;
+    const sale = await hydrateSaleForReceipt(currentReceiptSale || lastCompletedSale || saleId);
     if (!sale) {
         toast("Receipt data is unavailable.", "warning");
         return;
@@ -12081,6 +12081,78 @@ function normalizeReceiptItem(item = {}) {
     };
 }
 
+function looksUuidLike(value) {
+    const text = String(value || "").trim();
+    return text.length > 20 && text.includes("-");
+}
+
+function getSaleReceiptItems(sale = {}) {
+    return ensureArray(
+        sale?.items || sale?.sale_items || sale?.lines || [],
+        "saleReceiptItems"
+    );
+}
+
+function hasUsefulItemName(item = {}) {
+    const candidate = (
+        item?.product_name ||
+        item?.productName ||
+        item?.name ||
+        item?.product?.name ||
+        item?.product?.product_name ||
+        item?.product?.title ||
+        item?.description ||
+        item?.sku ||
+        ""
+    );
+    return Boolean(candidate) && !looksUuidLike(candidate);
+}
+
+function saleNeedsHydration(sale = {}) {
+    const items = getSaleReceiptItems(sale);
+    if (!items.length) return true;
+    if (items.some((item) => !hasUsefulItemName(item))) return true;
+    const total = Number(sale?.total ?? sale?.grand_total ?? sale?.grandTotal ?? 0);
+    const paid = Number(sale?.paid ?? sale?.amount_paid ?? sale?.amountPaid ?? 0);
+    const balance = Number(sale?.balance ?? sale?.balance_due ?? sale?.balanceDue ?? sale?.amount_due ?? sale?.outstanding_balance ?? 0);
+    return !Number.isFinite(total) || !Number.isFinite(paid) || !Number.isFinite(balance);
+}
+
+async function hydrateSaleForReceipt(saleOrId) {
+    const saleId = typeof saleOrId === "object" && saleOrId
+        ? (saleOrId.id || saleOrId.sale_id || saleOrId.receiptNo || saleOrId.receipt_no || "")
+        : saleOrId;
+    if (!saleId) return typeof saleOrId === "object" ? saleOrId : null;
+
+    const sourceSale = typeof saleOrId === "object" && saleOrId ? saleOrId : null;
+    if (sourceSale && !saleNeedsHydration(sourceSale)) {
+        console.info("[receipt] hydrateSaleForReceipt skipped", { saleId, hydrated: false });
+        return sourceSale;
+    }
+
+    console.info("[receipt] hydrateSaleForReceipt fetching", {
+        saleId,
+        endpoint: `/sales/${saleId}/`,
+        needsHydration: sourceSale ? saleNeedsHydration(sourceSale) : true,
+    });
+    const fullSale = await apiFetch(`/sales/${saleId}/`);
+    if (!fullSale) {
+        return sourceSale;
+    }
+    const hydrated = {
+        ...(sourceSale || {}),
+        ...(fullSale || {}),
+    };
+    if (Array.isArray(fullSale.items) && fullSale.items.length) hydrated.items = fullSale.items;
+    if (Array.isArray(fullSale.sale_items) && fullSale.sale_items.length) hydrated.sale_items = fullSale.sale_items;
+    if (Array.isArray(fullSale.lines) && fullSale.lines.length) hydrated.lines = fullSale.lines;
+    console.info("[receipt] hydrateSaleForReceipt hydrated", {
+        saleId,
+        items: getSaleReceiptItems(hydrated).length,
+    });
+    return hydrated;
+}
+
 function resolveBranchName(value) {
     if (!value) return "";
     if (typeof value === "object") {
@@ -12121,6 +12193,7 @@ function buildReceiptPayload(sale = {}) {
         "receiptItems"
     );
     const items = itemsSource.map(normalizeReceiptItem);
+    console.log("FINAL ITEM NAMES", items.map((item) => item.name));
     const subtotal = asNumber(pickValue(receiptSource, ["subtotal", "sub_total", "subtotal_amount"], null), null);
     const discount = asNumber(pickValue(receiptSource, ["discount"], null), null);
     const vat = asNumber(pickValue(receiptSource, ["vat", "tax"], null), null);
@@ -12131,7 +12204,16 @@ function buildReceiptPayload(sale = {}) {
             items.reduce((sum, item) => sum + item.lineTotal, 0)
         ) || 0
     );
-    const paid = Number(asNumber(pickValue(receiptSource, ["paid", "amount_paid", "amountPaid"], null), 0) || 0);
+    const paymentsPaid = paymentList.reduce((sum, payment) => {
+        const amount = asNumber(pickValue(payment, ["amount", "paid_amount", "paidAmount"], null), 0);
+        return sum + Number(amount || 0);
+    }, 0);
+    const paid = Number(
+        asNumber(
+            pickValue(receiptSource, ["paid", "amount_paid", "amountPaid", "total_paid"], null),
+            paymentsPaid
+        ) || paymentsPaid || 0
+    );
     const change = asNumber(pickValue(receiptSource, ["change", "balance_change"], null), null);
     let balance = asNumber(
         pickValue(receiptSource, ["balance", "balance_due", "balanceDue", "amount_due", "amountDue", "outstanding_balance", "outstandingBalance"], null),
@@ -12172,27 +12254,27 @@ function buildReceiptPayload(sale = {}) {
     const saleTypeLower = String(saleType || "").toLowerCase();
     const saleTypeFlag = String(pickValue(saleSource, ["sale_type", "saleType"], "") || "").toLowerCase();
     const receiptBalanceSource = asNumber(
-        pickValue(receiptSource, ["balance_due", "balanceDue", "amount_due", "amountDue", "outstanding_balance", "outstandingBalance"], null),
+        pickValue(receiptSource, ["balance", "balance_due", "balanceDue", "amount_due", "amountDue", "outstanding_balance", "outstandingBalance"], null),
         null
     );
     const saleBalanceSource = asNumber(
         pickValue(saleSource, ["balance", "balance_due", "amount_due", "outstanding_balance"], null),
         null
     );
-    if (!balance && total > paid) {
-        balance = total - paid;
-    }
-    const isCredit = Boolean(
+    let balanceValue = receiptBalanceSource;
+    if (!(balanceValue > 0)) balanceValue = saleBalanceSource;
+    if (!(balanceValue > 0) && total > paid) balanceValue = total - paid;
+    const explicitCreditHint = Boolean(
         pickValue(receiptSource, ["isCredit", "is_credit", "is_credit_sale"], null)
             ?? pickValue(saleSource, ["isCredit", "is_credit", "is_credit_sale"], null)
     ) || paymentStatusLower.includes("credit")
         || saleTypeLower === "credit"
-        || saleTypeFlag === "credit"
-        || balance > 0;
-    const normalizedBalance = balance > 0 ? balance : null;
+        || saleTypeFlag === "credit";
+    const isCredit = Boolean(balanceValue > 0 || explicitCreditHint);
+    const normalizedBalance = balanceValue > 0 ? balanceValue : null;
     const normalizedPaymentStatus = isCredit
-        ? (normalizedBalance > 0 ? "credit_due" : "paid")
-        : String(paymentStatus || inferredMethod || "paid");
+        ? "credit_due"
+        : "paid";
     const normalizedSaleType = isCredit ? "credit" : String(saleType || pickValue(saleSource, ["sale_type", "saleType", "sale_type_name"], "") || "retail");
     const payments = paymentList.map((payment) => ({
         method: sanitizeText(pickValue(payment, ["method", "payment_method", "paymentMethod", "type"], "")),
@@ -12203,7 +12285,7 @@ function buildReceiptPayload(sale = {}) {
         note: sanitizeText(pickValue(payment, ["note", "notes"], "")),
     }));
 
-    return {
+    const payload = {
         storeName: String(
             pickValue(receiptSource, ["storeName", "store_name"], "")
                 || pickValue(saleSource, ["storeName", "store_name"], "")
@@ -12245,6 +12327,8 @@ function buildReceiptPayload(sale = {}) {
         }),
     };
     console.log("FINAL CREDIT STATE", { total, paid, balance: normalizedBalance, isCredit });
+    console.log("FINAL RECEIPT PAYLOAD", payload);
+    return payload;
 }
 
 function defaultReceiptConditions({ saleType = "", isCredit = false } = {}) {
@@ -12276,6 +12360,7 @@ function printAndroidReceiptFromSale(sale, { source = "unknown" } = {}) {
     }
     try {
         console.log("ANDROID RAW SALE", source, sale);
+        console.log("ANDROID SALE ITEMS FOR PRINT", source, sale?.items || sale?.sale_items || sale?.lines);
         const payload = buildReceiptPayload(sale);
         const totalValue = Number(payload.total ?? 0);
         const paidValue = Number(payload.paid ?? 0);
@@ -12290,6 +12375,7 @@ function printAndroidReceiptFromSale(sale, { source = "unknown" } = {}) {
         payload.saleType = payload.saleType || (payload.isCredit ? "credit" : "retail");
         payload.paymentStatus = payload.paymentStatus || (payload.isCredit ? "credit_due" : "paid");
         payload.debugBuild = "frontend-2026-04-29.15";
+        console.log("FINAL RECEIPT PAYLOAD", payload);
         console.log("ANDROID PAYLOAD", payload);
         console.info("[receipt] android print payload built", {
             source,
@@ -12338,7 +12424,7 @@ async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowse
         console.info("[receipt] android button rendered", true);
         if (userTriggered) {
             console.info("[receipt] android button click handler firing", true);
-            const sale = currentReceiptSale || lastCompletedSale;
+            const sale = await hydrateSaleForReceipt(currentReceiptSale || lastCompletedSale || saleId);
             if (!sale) {
                 toast("Receipt data is unavailable.", "warning");
                 return { ok: false, mode };
