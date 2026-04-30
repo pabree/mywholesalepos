@@ -12035,25 +12035,46 @@ function pickValue(source, paths, fallback = "") {
     return fallback;
 }
 
+function isUuidLikeText(value) {
+    const text = String(value || "").trim();
+    return text.length > 20 && text.includes("-");
+}
+
 function normalizeReceiptItem(item = {}) {
-    const name = pickValue(item, [
+    const nameCandidates = [
         "product_name",
-        "item.product_name",
-        "product.name",
-        "item.product.name",
-        "product.product_name",
-        "item.name",
+        "productName",
         "name",
-        "item.description",
-        "item.product.name",
-        "item.product.product_name",
+        "product.name",
+        "product.product_name",
+        "product.title",
         "description",
+        "sku",
+        "product_id",
+    ];
+    const rawName = pickValue(item, nameCandidates, "");
+    const fallbackName = pickValue(item, [
+        "product_name",
+        "productName",
+        "name",
+        "product.name",
+        "product.product_name",
+        "product.title",
+        "description",
+        "sku",
     ], "");
+    const productObjectName = pickValue(item, ["product", "item.product"], "");
+    const resolvedName = !isUuidLikeText(rawName)
+        ? rawName
+        : !isUuidLikeText(fallbackName)
+            ? fallbackName
+            : productObjectName;
     const qty = asNumber(pickValue(item, ["qty", "quantity"], 1), 1);
     const unitPrice = asNumber(pickValue(item, ["unit_price", "unitPrice", "price", "rate"], 0), 0);
     const lineTotal = asNumber(pickValue(item, ["line_total", "lineTotal", "total", "amount"], qty * unitPrice), qty * unitPrice);
+    console.log("ITEM NAME RESOLVED", item, resolvedName || "Item");
     return {
-        name: String(name || pickValue(item, ["product", "item.product"], "") || "Item"),
+        name: String(resolvedName || "Item"),
         qty,
         unitPrice,
         lineTotal,
@@ -12082,6 +12103,7 @@ function buildReceiptPayload(sale = {}) {
     const source = sale && typeof sale === "object" ? sale : {};
     const receiptSource = source.receipt && typeof source.receipt === "object" ? source.receipt : source;
     const saleSource = source.sale && typeof source.sale === "object" ? source.sale : source;
+    console.log("SALE ITEMS", sale?.items);
     const paymentList = ensureArray(
         pickValue(receiptSource, ["payments"], null) || pickValue(saleSource, ["payments"], null) || [],
         "receiptPayments"
@@ -12103,13 +12125,15 @@ function buildReceiptPayload(sale = {}) {
     const discount = asNumber(pickValue(receiptSource, ["discount"], null), null);
     const vat = asNumber(pickValue(receiptSource, ["vat", "tax"], null), null);
     const netAmount = asNumber(pickValue(receiptSource, ["netAmount", "net_amount"], null), null);
-    const total = asNumber(
-        pickValue(receiptSource, ["total", "grand_total", "grandTotal"], null),
-        items.reduce((sum, item) => sum + item.lineTotal, 0)
+    const total = Number(
+        asNumber(
+            pickValue(receiptSource, ["total", "grand_total", "grandTotal"], null),
+            items.reduce((sum, item) => sum + item.lineTotal, 0)
+        ) || 0
     );
-    const paid = asNumber(pickValue(receiptSource, ["paid", "amount_paid", "amountPaid"], null), null);
+    const paid = Number(asNumber(pickValue(receiptSource, ["paid", "amount_paid", "amountPaid"], null), 0) || 0);
     const change = asNumber(pickValue(receiptSource, ["change", "balance_change"], null), null);
-    const balanceSource = asNumber(
+    let balance = asNumber(
         pickValue(receiptSource, ["balance", "balance_due", "balanceDue", "amount_due", "amountDue", "outstanding_balance", "outstandingBalance"], null),
         null
     );
@@ -12155,34 +12179,21 @@ function buildReceiptPayload(sale = {}) {
         pickValue(saleSource, ["balance", "balance_due", "amount_due", "outstanding_balance"], null),
         null
     );
-    const computedBalance = (() => {
-        if (Number.isFinite(balanceSource)) return balanceSource;
-        const totalValue = Number.isFinite(total) ? Number(total) : 0;
-        const paidValue = Number.isFinite(paid) ? Number(paid) : 0;
-        return totalValue > paidValue ? totalValue - paidValue : null;
-    })();
+    if (!balance && total > paid) {
+        balance = total - paid;
+    }
     const isCredit = Boolean(
         pickValue(receiptSource, ["isCredit", "is_credit", "is_credit_sale"], null)
             ?? pickValue(saleSource, ["isCredit", "is_credit", "is_credit_sale"], null)
     ) || paymentStatusLower.includes("credit")
         || saleTypeLower === "credit"
         || saleTypeFlag === "credit"
-        || (Number.isFinite(balanceSource) && Number(balanceSource) > 0)
-        || (Number.isFinite(receiptBalanceSource) && Number(receiptBalanceSource) > 0)
-        || (Number.isFinite(saleBalanceSource) && Number(saleBalanceSource) > 0)
-        || (Number.isFinite(computedBalance) && Number(computedBalance) > 0);
-    const normalizedBalance = isCredit
-        ? (
-            (Number.isFinite(computedBalance) && computedBalance > 0 ? computedBalance : null)
-                ?? (Number.isFinite(balanceSource) && Number(balanceSource) > 0 ? balanceSource : null)
-                ?? (Number.isFinite(receiptBalanceSource) && Number(receiptBalanceSource) > 0 ? receiptBalanceSource : null)
-                ?? (Number.isFinite(saleBalanceSource) && Number(saleBalanceSource) > 0 ? saleBalanceSource : null)
-        )
-        : balanceSource;
+        || balance > 0;
+    const normalizedBalance = balance > 0 ? balance : null;
     const normalizedPaymentStatus = isCredit
-        ? (Number.isFinite(normalizedBalance) && normalizedBalance > 0 ? "credit_due" : "paid")
+        ? (normalizedBalance > 0 ? "credit_due" : "paid")
         : String(paymentStatus || inferredMethod || "paid");
-    const normalizedSaleType = isCredit ? "credit" : String(saleType || pickValue(saleSource, ["sale_type", "saleType", "sale_type_name"], "") || "");
+    const normalizedSaleType = isCredit ? "credit" : String(saleType || pickValue(saleSource, ["sale_type", "saleType", "sale_type_name"], "") || "retail");
     const payments = paymentList.map((payment) => ({
         method: sanitizeText(pickValue(payment, ["method", "payment_method", "paymentMethod", "type"], "")),
         amount: asNumber(pickValue(payment, ["amount", "paid_amount", "paidAmount"], null), null),
@@ -12233,6 +12244,7 @@ function buildReceiptPayload(sale = {}) {
             isCredit: Boolean(isCredit || pickValue(saleSource, ["is_credit_sale", "isCredit", "is_credit"], false)),
         }),
     };
+    console.log("FINAL CREDIT STATE", { total, paid, balance: normalizedBalance, isCredit });
 }
 
 function defaultReceiptConditions({ saleType = "", isCredit = false } = {}) {
