@@ -1,6 +1,7 @@
 package com.stery.bluetoothprintbridge
 
 import android.util.Base64
+import android.util.Log
 import org.json.JSONObject
 
 data class PrintJob(
@@ -33,7 +34,10 @@ object PrintJobParser {
             }
             val raw = Base64.decode(normalized + padding, Base64.DEFAULT)
             val json = JSONObject(String(raw, Charsets.UTF_8))
-            return ReceiptPayload.fromJson(json)
+            Log.d("PRINT", "decoded receipt json=$json")
+            val payload = ReceiptPayload.fromJson(json)
+            Log.d("PRINT", "decoded receipt payload=$payload")
+            return payload
         } catch (e: Exception) {
             throw IllegalStateException("Invalid receipt data")
         }

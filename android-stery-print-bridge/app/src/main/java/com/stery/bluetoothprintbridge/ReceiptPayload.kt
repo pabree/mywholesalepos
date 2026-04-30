@@ -27,6 +27,8 @@ data class ReceiptPayload(
     val cashierName: String? = null,
     val customer: String? = null,
     val customerName: String? = null,
+    val deliveryPerson: String? = null,
+    val deliveryPersonName: String? = null,
     val date: String? = null,
     val items: List<ReceiptItem> = emptyList(),
     val subtotal: Double? = null,
@@ -107,6 +109,24 @@ data class ReceiptPayload(
                 cashierName = json.optString("cashierName").takeIf { it.isNotBlank() } ?: json.optString("cashier").takeIf { it.isNotBlank() },
                 customer = json.optString("customer").takeIf { it.isNotBlank() } ?: json.optString("customerName").takeIf { it.isNotBlank() },
                 customerName = json.optString("customerName").takeIf { it.isNotBlank() } ?: json.optString("customer").takeIf { it.isNotBlank() },
+                deliveryPerson = json.optString("deliveryPerson").takeIf { it.isNotBlank() }
+                    ?: json.optString("delivery_person").takeIf { it.isNotBlank() }
+                    ?: json.optString("assigned_to").takeIf { it.isNotBlank() }
+                    ?: json.optJSONObject("assigned_to")?.let { obj ->
+                        obj.optString("name").takeIf { it.isNotBlank() }
+                            ?: obj.optString("full_name").takeIf { it.isNotBlank() }
+                            ?: obj.optString("username").takeIf { it.isNotBlank() }
+                    },
+                deliveryPersonName = json.optString("deliveryPersonName").takeIf { it.isNotBlank() }
+                    ?: json.optString("delivery_person_name").takeIf { it.isNotBlank() }
+                    ?: json.optString("deliveryPerson").takeIf { it.isNotBlank() }
+                    ?: json.optString("delivery_person").takeIf { it.isNotBlank() }
+                    ?: json.optString("assigned_to").takeIf { it.isNotBlank() }
+                    ?: json.optJSONObject("assigned_to")?.let { obj ->
+                        obj.optString("name").takeIf { it.isNotBlank() }
+                            ?: obj.optString("full_name").takeIf { it.isNotBlank() }
+                            ?: obj.optString("username").takeIf { it.isNotBlank() }
+                    },
                 date = json.optString("date").takeIf { it.isNotBlank() },
                 items = items,
                 subtotal = json.optDoubleOrNull("subtotal"),

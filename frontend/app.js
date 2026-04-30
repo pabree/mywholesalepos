@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-29.15";
+const APP_BUILD = "2026-04-30.01";
 
 function sanitizeText(value) {
     if (value === null || value === undefined) return "";
@@ -4698,7 +4698,7 @@ async function showMobileSuccess(saleId) {
         <div>Customer: <strong>${esc(customerName)}</strong></div>
         <div>Total: <strong>${fmtPrice(total)}</strong></div>
         <div>Payment: <strong>${esc(method)}</strong></div>
-        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-29.15</div>
+        <div class="success-debug-marker">SUCCESS MODAL BUILD 2026-04-30.01</div>
         <div class="success-debug-meta">print mode: ${esc(mode)}</div>
     `;
     openMobileSuccessModal();
@@ -11911,7 +11911,7 @@ function syncReceiptActionUi() {
         forceAndroidBtn.classList.toggle("hidden", !isMobileLayout());
     }
     if (debug) {
-        debug.textContent = `RECEIPT MODAL BUILD 2026-04-29.15 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `RECEIPT MODAL BUILD 2026-04-30.01 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11931,7 +11931,7 @@ function syncMobileSuccessActionUi() {
         receiptBtn.textContent = androidMode ? "View Receipt" : "View Receipt";
     }
     if (debug) {
-        debug.textContent = `SUCCESS MODAL BUILD 2026-04-29.15 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `SUCCESS MODAL BUILD 2026-04-30.01 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -12320,7 +12320,7 @@ function buildReceiptPayload(sale = {}) {
         duplicateLabel: String(pickValue(receiptSource, ["duplicateLabel", "duplicate_label"], "") || ""),
         note: String(pickValue(receiptSource, ["note", "notes"], "") || ""),
         payments,
-        debugBuild: "frontend-2026-04-29.15",
+        debugBuild: "frontend-2026-04-30.01",
         conditions: conditions.length ? conditions : defaultReceiptConditions({
             saleType: String(normalizedSaleType || ""),
             isCredit: Boolean(isCredit || pickValue(saleSource, ["is_credit_sale", "isCredit", "is_credit"], false)),
@@ -12374,7 +12374,7 @@ function printAndroidReceiptFromSale(sale, { source = "unknown" } = {}) {
         }
         payload.saleType = payload.saleType || (payload.isCredit ? "credit" : "retail");
         payload.paymentStatus = payload.paymentStatus || (payload.isCredit ? "credit_due" : "paid");
-        payload.debugBuild = "frontend-2026-04-29.15";
+        payload.debugBuild = "frontend-2026-04-30.01";
         console.log("FINAL RECEIPT PAYLOAD", payload);
         console.log("ANDROID PAYLOAD", payload);
         console.info("[receipt] android print payload built", {
@@ -12396,6 +12396,12 @@ function printAndroidReceiptFromSale(sale, { source = "unknown" } = {}) {
 }
 
 function printReceiptAndroid(receipt) {
+    console.log("FINAL ANDROID DEEPLINK PAYLOAD", receipt);
+    if (!receipt || !receipt.debugBuild) {
+        toast("Old receipt payload blocked", "warning");
+        return;
+    }
+    toast(`Printing build: ${receipt.debugBuild} | credit: ${Boolean(receipt.isCredit)} | balance: ${receipt.balance ?? 0}`, "info");
     const encoded = encodeReceiptPayloadForAndroid(receipt);
     console.info("[receipt] android print user-triggered", true);
     console.info("[receipt] android deep link length", encoded.length);

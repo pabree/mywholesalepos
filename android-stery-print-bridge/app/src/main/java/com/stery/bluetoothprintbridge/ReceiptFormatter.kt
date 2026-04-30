@@ -2,6 +2,7 @@ package com.stery.bluetoothprintbridge
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.util.Locale
 
@@ -11,6 +12,21 @@ class ReceiptFormatter(
 ) {
 
     fun format(payload: ReceiptPayload): ByteArray {
+        val paymentStatus = payload.paymentStatus?.trim().orEmpty()
+        val isCredit = payload.isCredit || paymentStatus.contains("credit", ignoreCase = true)
+        val balanceAmount = payload.balance ?: when {
+            isCredit -> {
+                val total = payload.total ?: 0.0
+                val paid = payload.paid ?: 0.0
+                (total - paid).coerceAtLeast(0.0)
+            }
+            else -> null
+        }
+        Log.d(
+            "PRINT",
+            "formatter isCredit=$isCredit paymentStatus=$paymentStatus paid=${payload.paid} balance=$balanceAmount"
+        )
+
         val out = ByteArrayOutputStream()
         emit(out, EscPos.init())
         emit(out, EscPos.alignCenter())
@@ -30,26 +46,16 @@ class ReceiptFormatter(
         if (!payload.date.isNullOrBlank()) emitKeyValue(out, "Date", payload.date)
         val cashierName = payload.cashierName ?: payload.cashier
         val customerName = payload.customerName ?: payload.customer
+        val deliveryPerson = payload.deliveryPersonName ?: payload.deliveryPerson
         if (!cashierName.isNullOrBlank()) emitKeyValue(out, "Cashier", cashierName)
         if (!customerName.isNullOrBlank()) emitKeyValue(out, "Customer", customerName)
         if (!payload.saleType.isNullOrBlank()) emitKeyValue(out, "Sale Type", payload.saleType)
-        val paymentStatus = payload.paymentStatus?.trim().orEmpty()
-        val isCredit = payload.isCredit || paymentStatus.contains("credit", ignoreCase = true)
-        if (isCredit && !payload.deliveryPersonName.isNullOrBlank()) emitKeyValue(out, "Delivery Person", payload.deliveryPersonName ?: payload.deliveryPerson)
+        if (isCredit && !deliveryPerson.isNullOrBlank()) emitKeyValue(out, "Delivery Person", deliveryPerson)
         if (isCredit || (!paymentStatus.isNullOrBlank() && !paymentStatus.equals("paid", ignoreCase = true))) {
             if (!paymentStatus.equals("paid", ignoreCase = true)) emitKeyValue(out, "Status", paymentStatus)
         }
         if (isCredit) {
             emitCenteredBoldLine(out, "CREDIT SALE")
-        }
-        payload.conditions.takeIf { it.isNotEmpty() }?.let {
-            emitDivider(out)
-            emitCenteredBoldLine(out, "CONDITIONS")
-            it.forEachIndexed { index, condition ->
-                wrapText(condition, width).forEachIndexed { partIndex, line ->
-                    emitLine(out, if (partIndex == 0) "${index + 1}. $line" else "   $line")
-                }
-            }
         }
         payload.note?.takeIf { it.isNotBlank() }?.let {
             emitDivider(out)
@@ -73,7 +79,7 @@ class ReceiptFormatter(
         payload.netAmount?.let { emitKeyValue(out, "Net", money(it)) }
         payload.total?.let { emitBoldKeyValue(out, "TOTAL", money(it)) }
         payload.paymentMethod?.takeIf { it.isNotBlank() }?.let { emitKeyValue(out, "Payment Method", it) }
-        if (isCredit && !payload.deliveryPersonName.isNullOrBlank()) emitKeyValue(out, "Delivery Person", payload.deliveryPersonName ?: payload.deliveryPerson)
+        if (isCredit && !deliveryPerson.isNullOrBlank()) emitKeyValue(out, "Delivery Person", deliveryPerson)
         if (payload.payments.isNotEmpty()) {
             emitDivider(out)
             emitLineCentered(out, "PAYMENTS")
@@ -88,15 +94,7 @@ class ReceiptFormatter(
         }
         payload.paid?.takeIf { it > 0.0 }?.let { emitKeyValue(out, "Paid", money(it)) }
         if (!isCredit && payload.change != null && payload.change > 0.0 && paymentStatus.equals("cash", ignoreCase = true)) emitKeyValue(out, "Change", money(payload.change))
-        val balance = payload.balance ?: when {
-            isCredit -> {
-                val total = payload.total ?: 0.0
-                val paid = payload.paid ?: 0.0
-                (total - paid).coerceAtLeast(0.0)
-            }
-            else -> null
-        }
-        balance?.let {
+        balanceAmount?.let {
             val label = if (isCredit) "BALANCE DUE" else "Balance"
             emitBoldKeyValue(out, label, money(it))
         }

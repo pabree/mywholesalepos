@@ -1,4 +1,4 @@
-const APP_BUILD = "2026-04-29.15";
+const APP_BUILD = "2026-04-30.01";
 const CACHE_NAME = `staff-app-${APP_BUILD}`;
 const APP_SHELL = [
     "/",
