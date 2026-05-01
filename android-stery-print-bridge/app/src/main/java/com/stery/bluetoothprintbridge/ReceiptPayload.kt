@@ -1,5 +1,6 @@
 package com.stery.bluetoothprintbridge
 
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -18,6 +19,35 @@ data class ReceiptPayment(
     val date: String? = null,
     val note: String? = null,
 )
+
+private fun isUuidLikeText(value: String?): Boolean {
+    val text = value.orEmpty().trim()
+    return text.length > 20 && text.contains("-")
+}
+
+private fun JSONObject.firstNonBlank(vararg keys: String): String? {
+    for (key in keys) {
+        if (!has(key) || isNull(key)) continue
+        val value = optString(key)
+        if (value.isNotBlank()) return value
+    }
+    return null
+}
+
+private fun JSONObject.resolveProductName(): String? {
+    val product = optJSONObject("product")
+    val candidates = listOfNotNull(
+        firstNonBlank("name"),
+        firstNonBlank("product_name", "productName"),
+        product?.firstNonBlank("name", "product_name", "productName", "title"),
+        firstNonBlank("description"),
+        firstNonBlank("sku"),
+    )
+    for (candidate in candidates) {
+        if (!isUuidLikeText(candidate)) return candidate
+    }
+    return null
+}
 
 data class ReceiptPayload(
     val storeName: String,
@@ -44,6 +74,7 @@ data class ReceiptPayload(
     val paymentStatus: String? = null,
     val saleType: String? = null,
     val isCredit: Boolean = false,
+    val debugBuild: String? = null,
     val footer: String? = null,
     val printLogo: Boolean = false,
     val duplicateLabel: String? = null,
@@ -58,15 +89,14 @@ data class ReceiptPayload(
             val items = buildList {
                 for (i in 0 until itemsArray.length()) {
                     val item = itemsArray.optJSONObject(i) ?: continue
+                    Log.d("PRINT", "ANDROID ITEM RAW=$item")
+                    val resolvedName = item.resolveProductName()
+                        ?: item.optString("product_id").takeIf { it.isNotBlank() && !isUuidLikeText(it) }
+                        ?: "Item ${i + 1}"
+                    Log.d("PRINT", "ANDROID ITEM NAME raw=$item resolved=$resolvedName")
                     add(
                         ReceiptItem(
-                            name = item.optString("name")
-                                .takeIf { it.isNotBlank() }
-                                ?: item.optString("product_name")
-                                .takeIf { it.isNotBlank() }
-                                ?: item.optJSONObject("product")?.optString("name")?.takeIf { it.isNotBlank() }
-                                ?: item.optJSONObject("product")?.optString("product_name")?.takeIf { it.isNotBlank() }
-                                ?: item.optString("description", "Item"),
+                            name = resolvedName,
                             qty = item.optDouble("qty", 1.0),
                             unitPrice = item.optDouble("unitPrice", 0.0),
                             lineTotal = item.optDouble("lineTotal", item.optDouble("total", 0.0)),
@@ -142,6 +172,7 @@ data class ReceiptPayload(
                 paymentStatus = json.optString("paymentStatus").takeIf { it.isNotBlank() } ?: json.optString("payment_status").takeIf { it.isNotBlank() },
                 saleType = json.optString("saleType").takeIf { it.isNotBlank() } ?: json.optString("sale_type").takeIf { it.isNotBlank() } ?: json.optString("saleTypeName").takeIf { it.isNotBlank() },
                 isCredit = json.optBoolean("isCredit", false) || json.optBoolean("is_credit", false) || json.optBoolean("is_credit_sale", false),
+                debugBuild = json.optString("debugBuild").takeIf { it.isNotBlank() } ?: json.optString("debug_build").takeIf { it.isNotBlank() },
                 footer = json.optString("footer").takeIf { it.isNotBlank() },
                 printLogo = json.optBoolean("printLogo", false),
                 duplicateLabel = json.optString("duplicateLabel").takeIf { it.isNotBlank() },
