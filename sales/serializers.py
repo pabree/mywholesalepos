@@ -8,10 +8,15 @@ from .services import money, compute_totals
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_sku = serializers.CharField(source="product.sku", read_only=True)
+    product = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = SaleItem
         fields = [
+            "product_name",
+            "product_sku",
             "product",
             "product_unit",
             "quantity",
@@ -36,6 +41,16 @@ class SaleItemSerializer(serializers.ModelSerializer):
             "price_type_used",
             "pricing_reason",
         ]
+
+    def get_product(self, obj):
+        product = getattr(obj, "product", None)
+        if not product:
+            return None
+        return {
+            "id": str(product.id),
+            "name": product.name,
+            "sku": product.sku,
+        }
 
 
 class SaleSerializer(serializers.ModelSerializer):

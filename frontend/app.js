@@ -3,7 +3,7 @@
    ========================================= */
 
 const API_BASE = "/api";
-const APP_BUILD = "2026-04-30.01";
+const APP_BUILD = "2026-04-30.02";
 
 function sanitizeText(value) {
     if (value === null || value === undefined) return "";
@@ -1786,7 +1786,21 @@ document.addEventListener("DOMContentLoaded", () => {
                 hasCurrentSale: Boolean(lastCompletedSale),
             });
             if (mode === "android") {
-                printAndroidReceiptFromSale(lastCompletedSale, { source: "success-modal" });
+                void (async () => {
+                    const hydratedSale = await hydrateSaleForReceipt(lastMobileSaleId || lastCompletedSale || "");
+                    if (!hydratedSale) {
+                        toast("Receipt data is unavailable.", "warning");
+                        return;
+                    }
+                    console.log("USING HYDRATED SALE FOR RECEIPT", {
+                        source: "success-modal",
+                        saleId: hydratedSale?.id || hydratedSale?.sale_id || hydratedSale?.receiptNo || hydratedSale?.receipt_no || null,
+                    });
+                    printAndroidReceiptFromSale(hydratedSale, { source: "success-modal" });
+                })().catch((err) => {
+                    console.warn("[receipt] success modal android print failed", err);
+                    toast(`Android print failed: ${err.message}`, "warning");
+                });
                 return;
             }
             toast("Bluetooth printing is only available in Android mode.", "info");
@@ -1826,20 +1840,45 @@ document.addEventListener("DOMContentLoaded", () => {
                 saleId: currentMobileSaleDetailId,
                 hasCurrentSale: Boolean(currentReceiptSale),
             });
-            if (!currentReceiptSale) {
+            if (!currentMobileSaleDetailId) {
                 toast("Receipt data is unavailable.", "warning");
                 return;
             }
             if (mode === "pc") {
-                const payload = currentReceiptPayload || buildReceiptPayload(currentReceiptSale);
-                void printReceiptPc(payload).catch((err) => {
+                void (async () => {
+                    const hydratedSale = await hydrateSaleForReceipt(currentMobileSaleDetailId);
+                    if (!hydratedSale) {
+                        toast("Receipt data is unavailable.", "warning");
+                        return;
+                    }
+                    console.log("USING HYDRATED SALE FOR RECEIPT", {
+                        source: "sale-detail",
+                        saleId: hydratedSale?.id || hydratedSale?.sale_id || hydratedSale?.receiptNo || hydratedSale?.receipt_no || null,
+                    });
+                    const payload = buildReceiptPayload(hydratedSale);
+                    await printReceiptPc(payload);
+                })().catch((err) => {
                     console.warn("[receipt] historical PC print failed", err);
                     toast(`PC print failed: ${err.message}`, "warning");
                 });
                 return;
             }
             if (mode === "android") {
-                printAndroidReceiptFromSale(currentReceiptSale, { source: "sale-detail" });
+                void (async () => {
+                    const hydratedSale = await hydrateSaleForReceipt(currentMobileSaleDetailId);
+                    if (!hydratedSale) {
+                        toast("Receipt data is unavailable.", "warning");
+                        return;
+                    }
+                    console.log("USING HYDRATED SALE FOR RECEIPT", {
+                        source: "sale-detail",
+                        saleId: hydratedSale?.id || hydratedSale?.sale_id || hydratedSale?.receiptNo || hydratedSale?.receipt_no || null,
+                    });
+                    printAndroidReceiptFromSale(hydratedSale, { source: "sale-detail" });
+                })().catch((err) => {
+                    console.warn("[receipt] historical android print failed", err);
+                    toast(`Android print failed: ${err.message}`, "warning");
+                });
                 return;
             }
             toast("Printing disabled", "info");
@@ -2768,11 +2807,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 mode: getSelectedPrintMode(),
                 androidActive: getSelectedPrintMode() === "android",
             });
-            if (getSelectedPrintMode() === "android" && currentReceiptSale) {
-                console.info("[receipt] android button click handler firing", true);
-                printAndroidReceiptFromSale(currentReceiptSale, { source: "receipt-modal" });
-                return;
-            }
             void printReceipt({ allowBrowserFallback: true, userTriggered: true });
         });
     }
@@ -11657,6 +11691,10 @@ async function showReceipt(saleRef, { autoPrint = false } = {}) {
         toast("Could not load receipt", "error");
         return;
     }
+    console.log("USING HYDRATED SALE FOR RECEIPT", {
+        source: "showReceipt",
+        saleId: saleDetail?.id || saleDetail?.sale_id || saleDetail?.receiptNo || saleDetail?.receipt_no || saleId || null,
+    });
 
     try {
         currentReceiptPayload = buildReceiptPayload({ receipt, sale: saleDetail });
@@ -11911,7 +11949,7 @@ function syncReceiptActionUi() {
         forceAndroidBtn.classList.toggle("hidden", !isMobileLayout());
     }
     if (debug) {
-        debug.textContent = `RECEIPT MODAL BUILD 2026-04-30.01 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `RECEIPT MODAL BUILD 2026-04-30.02 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11931,7 +11969,7 @@ function syncMobileSuccessActionUi() {
         receiptBtn.textContent = androidMode ? "View Receipt" : "View Receipt";
     }
     if (debug) {
-        debug.textContent = `SUCCESS MODAL BUILD 2026-04-30.01 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
+        debug.textContent = `SUCCESS MODAL BUILD 2026-04-30.02 | APP_BUILD ${APP_BUILD} | stored: ${localStorage.getItem(PRINT_MODE_KEY) || "(empty)"} | computed: ${mode} | isMobile: ${isMobileLayout()}`;
     }
 }
 
@@ -11963,13 +12001,17 @@ async function printHistoricalReceipt(saleId, { source = "history" } = {}) {
         toast(`Receipt preview failed: ${err.message}`, "warning");
         return;
     }
-    const sale = await hydrateSaleForReceipt(currentReceiptSale || lastCompletedSale || saleId);
-    if (!sale) {
+    const hydratedSale = await hydrateSaleForReceipt(saleId);
+    if (!hydratedSale) {
         toast("Receipt data is unavailable.", "warning");
         return;
     }
+    console.log("USING HYDRATED SALE FOR RECEIPT", {
+        source,
+        saleId: hydratedSale?.id || hydratedSale?.sale_id || hydratedSale?.receiptNo || hydratedSale?.receipt_no || null,
+    });
     if (mode === "pc") {
-        const payload = currentReceiptPayload || buildReceiptPayload(sale);
+        const payload = buildReceiptPayload(hydratedSale);
         try {
             await printReceiptPc(payload);
         } catch (err) {
@@ -11979,7 +12021,7 @@ async function printHistoricalReceipt(saleId, { source = "history" } = {}) {
         return;
     }
     if (mode === "android") {
-        printAndroidReceiptFromSale(sale, { source });
+        printAndroidReceiptFromSale(hydratedSale, { source });
         return;
     }
     toast("Printing disabled", "info");
@@ -12041,34 +12083,30 @@ function isUuidLikeText(value) {
 }
 
 function normalizeReceiptItem(item = {}) {
-    const nameCandidates = [
-        "product_name",
-        "productName",
-        "name",
-        "product.name",
-        "product.product_name",
-        "product.title",
-        "description",
-        "sku",
-        "product_id",
-    ];
-    const rawName = pickValue(item, nameCandidates, "");
-    const fallbackName = pickValue(item, [
-        "product_name",
-        "productName",
-        "name",
-        "product.name",
-        "product.product_name",
-        "product.title",
-        "description",
-        "sku",
-    ], "");
-    const productObjectName = pickValue(item, ["product", "item.product"], "");
-    const resolvedName = !isUuidLikeText(rawName)
-        ? rawName
-        : !isUuidLikeText(fallbackName)
-            ? fallbackName
-            : productObjectName;
+    function resolveItemName(itemValue) {
+        const candidates = [
+            itemValue?.product_name,
+            itemValue?.productName,
+            itemValue?.product?.name,
+            itemValue?.product?.product_name,
+            itemValue?.product?.display_name,
+            itemValue?.product_detail?.name,
+            itemValue?.product_snapshot?.name,
+            itemValue?.description,
+            itemValue?.sku,
+            itemValue?.name,
+        ];
+        for (const candidate of candidates) {
+            if (!candidate) continue;
+            const str = String(candidate).trim();
+            if (!str) continue;
+            if (str.length > 20 && str.includes("-")) continue;
+            if (str.toLowerCase() === "item") continue;
+            return str;
+        }
+        return itemValue?.sku || "Item";
+    }
+    const resolvedName = resolveItemName(item);
     const qty = asNumber(pickValue(item, ["qty", "quantity"], 1), 1);
     const unitPrice = asNumber(pickValue(item, ["unit_price", "unitPrice", "price", "rate"], 0), 0);
     const lineTotal = asNumber(pickValue(item, ["line_total", "lineTotal", "total", "amount"], qty * unitPrice), qty * unitPrice);
@@ -12146,6 +12184,8 @@ async function hydrateSaleForReceipt(saleOrId) {
     if (Array.isArray(fullSale.items) && fullSale.items.length) hydrated.items = fullSale.items;
     if (Array.isArray(fullSale.sale_items) && fullSale.sale_items.length) hydrated.sale_items = fullSale.sale_items;
     if (Array.isArray(fullSale.lines) && fullSale.lines.length) hydrated.lines = fullSale.lines;
+    console.log("HYDRATED SALE FOR RECEIPT", hydrated);
+    console.log("HYDRATED SALE ITEMS", hydrated.items || hydrated.sale_items || hydrated.lines);
     console.info("[receipt] hydrateSaleForReceipt hydrated", {
         saleId,
         items: getSaleReceiptItems(hydrated).length,
@@ -12171,11 +12211,23 @@ function resolveCustomerName(value) {
     return /^[0-9a-f-]{16,}$/i.test(text) ? "" : text;
 }
 
+function getSaleItemsForReceipt(sale) {
+    return (
+        sale?.items ||
+        sale?.sale_items ||
+        sale?.saleItems ||
+        sale?.lines ||
+        sale?.sale_lines ||
+        sale?.order_items ||
+        sale?.products ||
+        []
+    );
+}
+
 function buildReceiptPayload(sale = {}) {
     const source = sale && typeof sale === "object" ? sale : {};
     const receiptSource = source.receipt && typeof source.receipt === "object" ? source.receipt : source;
     const saleSource = source.sale && typeof source.sale === "object" ? source.sale : source;
-    console.log("SALE ITEMS", sale?.items);
     const paymentList = ensureArray(
         pickValue(receiptSource, ["payments"], null) || pickValue(saleSource, ["payments"], null) || [],
         "receiptPayments"
@@ -12184,15 +12236,17 @@ function buildReceiptPayload(sale = {}) {
         pickValue(receiptSource, ["conditions"], null) || pickValue(saleSource, ["conditions"], null) || [],
         "receiptConditions"
     );
-    const itemsSource = ensureArray(
-        pickValue(receiptSource, ["items"], null)
-            || pickValue(saleSource, ["items"], null)
-            || pickValue(saleSource, ["sale_items"], null)
-            || pickValue(saleSource, ["lines"], null)
-            || [],
-        "receiptItems"
-    );
-    const items = itemsSource.map(normalizeReceiptItem);
+    console.log("HYDRATED SALE FULL", sale);
+    console.log("HYDRATED SALE KEYS", Object.keys(sale || {}));
+    const rawItems = getSaleItemsForReceipt(sale);
+    console.log("SALE ITEMS FOR RECEIPT", rawItems);
+    if (!rawItems || !rawItems.length) {
+        console.error("NO RECEIPT ITEMS FOUND", sale);
+    }
+    const items = ensureArray(rawItems, "receiptItems").map((item) => {
+        console.log("ITEM RAW SOURCE", item);
+        return normalizeReceiptItem(item);
+    });
     console.log("FINAL ITEM NAMES", items.map((item) => item.name));
     const subtotal = asNumber(pickValue(receiptSource, ["subtotal", "sub_total", "subtotal_amount"], null), null);
     const discount = asNumber(pickValue(receiptSource, ["discount"], null), null);
@@ -12430,12 +12484,16 @@ async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowse
         console.info("[receipt] android button rendered", true);
         if (userTriggered) {
             console.info("[receipt] android button click handler firing", true);
-            const sale = await hydrateSaleForReceipt(currentReceiptSale || lastCompletedSale || saleId);
-            if (!sale) {
+            const hydratedSale = await hydrateSaleForReceipt(saleId);
+            if (!hydratedSale) {
                 toast("Receipt data is unavailable.", "warning");
                 return { ok: false, mode };
             }
-            printAndroidReceiptFromSale(sale, { source: "selected-mode" });
+            console.log("USING HYDRATED SALE FOR RECEIPT", {
+                source: "selected-mode",
+                saleId: hydratedSale?.id || hydratedSale?.sale_id || hydratedSale?.receiptNo || hydratedSale?.receipt_no || null,
+            });
+            printAndroidReceiptFromSale(hydratedSale, { source: "selected-mode" });
             return { ok: true, mode };
         }
         console.info("[receipt] android print user-triggered", false);
@@ -12445,7 +12503,17 @@ async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowse
 
     if (mode === "pc") {
         try {
-            await printReceiptPc(receipt);
+            const hydratedSale = await hydrateSaleForReceipt(saleId);
+            if (!hydratedSale) {
+                toast("Receipt data is unavailable.", "warning");
+                return { ok: false, mode };
+            }
+            console.log("USING HYDRATED SALE FOR RECEIPT", {
+                source: "selected-mode-pc",
+                saleId: hydratedSale?.id || hydratedSale?.sale_id || hydratedSale?.receiptNo || hydratedSale?.receipt_no || null,
+            });
+            const payload = buildReceiptPayload(hydratedSale);
+            await printReceiptPc(payload);
             return { ok: true, mode };
         } catch (err) {
             console.warn("[receipt] pc print failed", err);
@@ -12462,16 +12530,23 @@ async function printReceiptUsingSelectedMode(receipt, { saleId = "", allowBrowse
 
 async function printReceipt({ allowBrowserFallback = true, userTriggered = false } = {}) {
     const saleId = currentReceiptSaleId || els.receiptModal?.dataset?.saleId || "";
-    const receipt = currentReceiptPayload || null;
-
-    if (!receipt) {
+    if (!saleId) {
         const printUrl = saleId ? getReceiptPrintUrl(saleId) : "";
         if (printUrl) openBrowserReceiptFallback(printUrl);
         else window.print();
         return;
     }
-
-    await printReceiptUsingSelectedMode(receipt, { saleId, allowBrowserFallback, userTriggered });
+    const hydratedSale = await hydrateSaleForReceipt(saleId);
+    if (!hydratedSale) {
+        toast("Receipt data is unavailable.", "warning");
+        return;
+    }
+    console.log("USING HYDRATED SALE FOR RECEIPT", {
+        source: "printReceipt",
+        saleId: hydratedSale?.id || hydratedSale?.sale_id || hydratedSale?.receiptNo || hydratedSale?.receipt_no || null,
+    });
+    const payload = buildReceiptPayload(hydratedSale);
+    await printReceiptUsingSelectedMode(payload, { saleId, allowBrowserFallback, userTriggered });
 }
 
 function closeReceiptModal() {
