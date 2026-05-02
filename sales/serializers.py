@@ -2,22 +2,25 @@ from decimal import Decimal
 from django.db import transaction, IntegrityError
 from django.db.models import Sum
 from rest_framework import serializers
+from inventory.models import Product
 from .models import Sale, SaleItem, SalePayment, SaleReturn, SaleReturnItem
 from .pricing import get_unit_price
 from .services import money, compute_totals
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
     product_name = serializers.CharField(source="product.name", read_only=True)
     product_sku = serializers.CharField(source="product.sku", read_only=True)
-    product = serializers.SerializerMethodField(read_only=True)
+    product_detail = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = SaleItem
         fields = [
+            "product",
             "product_name",
             "product_sku",
-            "product",
+            "product_detail",
             "product_unit",
             "quantity",
             "unit_price",
@@ -42,7 +45,7 @@ class SaleItemSerializer(serializers.ModelSerializer):
             "pricing_reason",
         ]
 
-    def get_product(self, obj):
+    def get_product_detail(self, obj):
         product = getattr(obj, "product", None)
         if not product:
             return None
